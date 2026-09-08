@@ -1,0 +1,37 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "拾题",
+  "version": "0.1.6",
+  "identifier": "cn.shiti.desktop",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "拾题",
+        "width": 1500,
+        "height": 940,
+        "minWidth": 1080,
+        "minHeight": 680,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["icons/icon.ico"],
+    "resources": ["jre", "app.jar"],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
+    },
+    "createUpdaterArtifacts": false
+  }
+}

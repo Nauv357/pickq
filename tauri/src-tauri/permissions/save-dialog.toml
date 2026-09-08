@@ -1,0 +1,6 @@
+# 应用自定义命令权限：save_dialog_file（「另存为」系统对话框并写入文件）
+# 远程页面（本地后端 http://127.0.0.1）导出文件时经 IPC 调用
+[[permission]]
+identifier = "allow-save-dialog-file"
+description = "允许调用 save_dialog_file：弹出系统另存为对话框并把文件写入用户选择的位置"
+commands = { allow = ["save_dialog_file"] }

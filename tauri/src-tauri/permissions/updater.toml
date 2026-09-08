@@ -1,0 +1,4 @@
+# 自动更新命令（检查/下载/安装；app_version 供关于面板展示）
+[[permission]]
+identifier = "allow-updater"
+commands = { allow = ["app_version", "check_update", "download_update", "install_update"] }

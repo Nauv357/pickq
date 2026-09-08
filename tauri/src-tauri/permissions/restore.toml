@@ -1,0 +1,4 @@
+# 一键恢复（壳：杀掉后端后带 --tiku.restore-stage 重启执行恢复）
+[[permission]]
+identifier = "allow-restore"
+commands = { allow = ["restart_with_restore"] }

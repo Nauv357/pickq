@@ -1,0 +1,73 @@
+HELP.md
+target/
+.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### VS Code ###
+.vscode/
+
+### Frontend ###
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+### 打包分发物（旧 scripts/package.ps1 产物） ###
+dist/
+
+### Tauri（桌面壳）本地资源/构建产物 ###
+tauri/src-tauri/target/
+tauri/src-tauri/jre/
+tauri/src-tauri/app.jar
+tauri/src-tauri/gen/
+tauri/icon-source.png
+
+### 测试产物（MinerU 实验输出、临时工具输出，不入库） ###
+mineru-test-output/
+doc/ai-import-audit/
+
+### 本机数据与个人样例（真题等版权材料、测试用 AI 样例，不入库） ###
+sample-ai-files/
+
+### 官网源码与部署资产（不开源；仅本地保留） ###
+web/
+deploy/
+scripts/deploy/
+
+### 官网相关文档（私有） ###
+doc/center-spec.md
+doc/homepage-copy.md
+doc/launch-checklist.md
+
+### 内部设计与过程文档（创作记录、路线图等，不入库） ###
+doc/
+
+### 本机环境文件 ###
+*.local
+.env
+application-local.yml

@@ -1,0 +1,22 @@
+[package]
+name = "tiku-desktop"
+version = "0.1.6"
+description = "拾题 · 自建题库刷题应用（桌面壳：托管本地 Spring Boot 后端）"
+authors = ["tiku"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+base64 = "0.22"
+rfd = "0.15"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+# 不设 panic=abort：任一辅助线程 panic 只终止该线程，不带走整个应用（便于容错与诊断）

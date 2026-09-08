@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>拾题</title>
+<style>
+  body { margin: 0; height: 100vh; display: flex; align-items: center; justify-content: center;
+         background: #efece2; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; }
+  .box { background: #fdfcf7; border: 1px solid #d8d5cd; border-radius: 12px;
+         padding: 28px 34px; max-width: 620px; margin: 20px; }
+  h1 { font-size: 18px; margin: 0 0 12px; color: #1a1a18; display: flex; align-items: center; gap: 8px; }
+  .seal { display: inline-flex; align-items: center; justify-content: center;
+          width: 26px; height: 26px; border-radius: 7px; background: #c3272b;
+          color: #fff; font-size: 15px; font-weight: 700; }
+  p { font-size: 13px; line-height: 1.9; color: #6b675e; margin: 0 0 8px; }
+  .detail { background: #f4f0e4; border-radius: 8px; padding: 10px 14px;
+            font-size: 12px; color: #1a1a18; word-break: break-all; margin: 10px 0 16px; }
+  .hint { font-size: 12px; color: #a09a8d; }
+  button { margin-top: 6px; background: #1a1a18; color: #fff; border: none; border-radius: 8px;
+           padding: 8px 18px; font-size: 13px; cursor: pointer; font-family: inherit; }
+  button:hover { background: #43413a; }
+</style>
+</head>
+<body>
+  <div class="box">
+    <h1><span class="seal">拾</span>拾题启动失败</h1>
+    <div class="detail" id="msg">后端未能启动，具体原因见本窗口标题与日志文件。</div>
+    <p>常见原因：另一个拾题实例（浏览器版或桌面版）正在运行——请先关闭它再启动。</p>
+    <p class="hint">详细日志：%APPDATA%\cn.shiti.desktop\desktop.log</p>
+    <button onclick="window.close()">关闭</button>
+  </div>
+</body>
+</html>

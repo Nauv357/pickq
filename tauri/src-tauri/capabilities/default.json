@@ -1,0 +1,9 @@
+{
+  "identifier": "default",
+  "description": "主窗口权限；远程页面（本地后端 http://127.0.0.1:随机端口）可访问 IPC 以便调用「另存为」等桌面能力",
+  "windows": ["main"],
+  "remote": {
+    "urls": ["http://127.0.0.1:*"]
+  },
+  "permissions": ["core:default", "allow-save-dialog-file", "allow-updater", "allow-open-url", "allow-restore"]
+}

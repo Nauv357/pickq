@@ -1,0 +1,4 @@
+# 系统浏览器打开外链（WebView2 无新窗口；桌面版外链统一走 open_url）
+[[permission]]
+identifier = "allow-open-url"
+commands = { allow = ["open_url"] }

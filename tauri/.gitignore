@@ -1,0 +1,6 @@
+# 构建产物（不入库：由 build-desktop.ps1 生成）
+src-tauri/target/
+src-tauri/jre/
+src-tauri/app.jar
+src-tauri/gen/
+icon-source.png

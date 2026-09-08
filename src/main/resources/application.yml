@@ -1,0 +1,19 @@
+# 本地数据目录（数据库文件、导入的内容包、刷题记录都放这里）
+# 可用环境变量 TIKU_DATA_DIR 覆盖；默认用户主目录下 .tiku
+tiku:
+  data-dir: ${TIKU_DATA_DIR:${user.home}/.tiku}
+
+spring:
+  application:
+    name: Tiku
+  servlet:
+    multipart:
+      # 上传大小限制（AI 导入整卷 PDF/扫描件可达几十 MB；默认 1MB 会直接 500）
+      max-file-size: 200MB
+      max-request-size: 200MB
+  datasource:
+    # H2 文件模式，MODE=MySQL 兼容模式（保留 AUTO_INCREMENT / ON UPDATE 等行为）
+    url: jdbc:h2:file:${tiku.data-dir}/tiku;MODE=MySQL
+    username: sa
+    password: ""
+    driver-class-name: org.h2.Driver

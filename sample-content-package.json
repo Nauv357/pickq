@@ -1,0 +1,189 @@
+{
+  "schemaVersion": 1,
+  "packageKey": "d4f8b3c2-9a1e-4f6d-8c5b-2e7a1b3c5d9f",
+  "title": "计算机基础测试",
+  "description": "用于测试导入功能的示例内容包：涵盖计算机基础单选、多选与判断题",
+  "version": "1.0.0",
+  "authorId": null,
+  "authorName": "测试作者",
+  "source": "测试数据，用于验证导入导出功能",
+  "parentKey": null,
+  "sources": [],
+  "createdAt": "2026-08-25T12:00:00",
+  "questions": [
+    {
+      "questionKey": "CS-SINGLE-001",
+      "volume": 1,
+      "type": "SINGLE",
+      "content": "二进制数 1010 转换为十进制是多少？",
+      "options": [
+        { "key": "A", "text": "8" },
+        { "key": "B", "text": "10" },
+        { "key": "C", "text": "12" },
+        { "key": "D", "text": "14" }
+      ],
+      "answerKeys": ["B"],
+      "answerText": "10",
+      "analysis": "1010 = 1×2³ + 0×2² + 1×2¹ + 0×2⁰ = 8 + 2 = 10",
+      "topic": "进制转换",
+      "category": "计算机基础",
+      "score": 1
+    },
+    {
+      "questionKey": "CS-SINGLE-002",
+      "volume": 1,
+      "type": "SINGLE",
+      "content": "下列哪个是操作系统？",
+      "options": [
+        { "key": "A", "text": "Chrome" },
+        { "key": "B", "text": "Windows" },
+        { "key": "C", "text": "Photoshop" },
+        { "key": "D", "text": "MySQL" }
+      ],
+      "answerKeys": ["B"],
+      "answerText": "Windows",
+      "analysis": "Windows 是微软的操作系统；Chrome 是浏览器，Photoshop 是图像处理软件，MySQL 是数据库。",
+      "topic": "操作系统",
+      "category": "计算机基础",
+      "score": 1
+    },
+    {
+      "questionKey": "CS-SINGLE-003",
+      "volume": 1,
+      "type": "SINGLE",
+      "content": "CPU 的中文全称是？",
+      "options": [
+        { "key": "A", "text": "中央处理器" },
+        { "key": "B", "text": "显卡" },
+        { "key": "C", "text": "内存" },
+        { "key": "D", "text": "主板" }
+      ],
+      "answerKeys": ["A"],
+      "answerText": "中央处理器",
+      "analysis": "CPU（Central Processing Unit）即中央处理器，是计算机的运算与控制核心。",
+      "topic": "硬件",
+      "category": "计算机基础",
+      "score": 1
+    },
+    {
+      "questionKey": "CS-SINGLE-004",
+      "volume": 1,
+      "type": "SINGLE",
+      "content": "1 字节（Byte）等于多少位（bit）？",
+      "options": [
+        { "key": "A", "text": "4" },
+        { "key": "B", "text": "8" },
+        { "key": "C", "text": "16" },
+        { "key": "D", "text": "32" }
+      ],
+      "answerKeys": ["B"],
+      "answerText": "8",
+      "analysis": "1 字节 = 8 位，这是计算机存储的基本换算关系。",
+      "topic": "存储单位",
+      "category": "计算机基础",
+      "score": 1
+    },
+    {
+      "questionKey": "CS-MULTI-001",
+      "volume": 1,
+      "type": "MULTIPLE",
+      "content": "下列哪些属于编程语言？",
+      "options": [
+        { "key": "A", "text": "Python" },
+        { "key": "B", "text": "Java" },
+        { "key": "C", "text": "C++" },
+        { "key": "D", "text": "HTML" }
+      ],
+      "answerKeys": ["A", "B", "C"],
+      "answerText": "Python、Java、C++",
+      "analysis": "Python、Java、C++ 都是编程语言；HTML 是超文本标记语言，不属于编程语言。",
+      "topic": "编程语言",
+      "category": "计算机基础",
+      "score": 2
+    },
+    {
+      "questionKey": "CS-MULTI-002",
+      "volume": 1,
+      "type": "MULTIPLE",
+      "content": "下列哪些属于计算机的输出设备？",
+      "options": [
+        { "key": "A", "text": "显示器" },
+        { "key": "B", "text": "键盘" },
+        { "key": "C", "text": "打印机" },
+        { "key": "D", "text": "音箱" }
+      ],
+      "answerKeys": ["A", "C", "D"],
+      "answerText": "显示器、打印机、音箱",
+      "analysis": "输出设备用于输出计算机处理结果：显示器、打印机、音箱；键盘是输入设备。",
+      "topic": "硬件",
+      "category": "计算机基础",
+      "score": 2
+    },
+    {
+      "questionKey": "CS-MULTI-003",
+      "volume": 1,
+      "type": "MULTIPLE",
+      "content": "下列哪些是关系型数据库软件？",
+      "options": [
+        { "key": "A", "text": "MySQL" },
+        { "key": "B", "text": "Oracle" },
+        { "key": "C", "text": "Excel" },
+        { "key": "D", "text": "Word" }
+      ],
+      "answerKeys": ["A", "B"],
+      "answerText": "MySQL、Oracle",
+      "analysis": "MySQL 和 Oracle 是关系型数据库；Excel 是电子表格，Word 是文字处理软件。",
+      "topic": "数据库",
+      "category": "计算机基础",
+      "score": 2
+    },
+    {
+      "questionKey": "CS-JUDGE-001",
+      "volume": 1,
+      "type": "JUDGE",
+      "content": "TCP 是一种无连接的传输协议。",
+      "options": [
+        { "key": "A", "text": "正确" },
+        { "key": "B", "text": "错误" }
+      ],
+      "answerKeys": ["B"],
+      "answerText": "错误",
+      "analysis": "TCP 是面向连接的传输协议；无连接的是 UDP。",
+      "topic": "网络",
+      "category": "计算机基础",
+      "score": 1
+    },
+    {
+      "questionKey": "CS-JUDGE-002",
+      "volume": 1,
+      "type": "JUDGE",
+      "content": "内存（RAM）中的数据在断电后会丢失。",
+      "options": [
+        { "key": "A", "text": "正确" },
+        { "key": "B", "text": "错误" }
+      ],
+      "answerKeys": ["A"],
+      "answerText": "正确",
+      "analysis": "RAM 是易失性存储器，断电后数据丢失；硬盘等外存是非易失的。",
+      "topic": "硬件",
+      "category": "计算机基础",
+      "score": 1
+    },
+    {
+      "questionKey": "CS-JUDGE-003",
+      "volume": 1,
+      "type": "JUDGE",
+      "content": "世界上第一台通用电子计算机是 ENIAC。",
+      "options": [
+        { "key": "A", "text": "正确" },
+        { "key": "B", "text": "错误" }
+      ],
+      "answerKeys": ["A"],
+      "answerText": "正确",
+      "analysis": "ENIAC（1946 年）被公认为第一台通用电子数字计算机。",
+      "topic": "计算机历史",
+      "category": "计算机基础",
+      "score": 1
+    }
+  ]
+}
