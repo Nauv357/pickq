@@ -459,9 +459,13 @@ const testResult = ref(null)
 /* 常用服务商预设（OpenAI 兼容端点）：选择后自动回填 baseUrl/model/visionModel，仅需填 Key */
 const presetAgents = [
   { name: 'deepseek', label: 'DeepSeek（推荐）', desc: '文本+识图', baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat', visionModel: 'deepseek-v4-flash-vision-exp' },
+  { name: 'openai', label: 'OpenAI', desc: 'GPT 系列', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini', visionModel: 'gpt-4o' },
+  { name: 'anthropic', label: 'Anthropic Claude', desc: 'Claude 系列·识图强', baseUrl: 'https://api.anthropic.com/v1', model: 'claude-3-5-sonnet-20241022', visionModel: 'claude-3-5-sonnet-20241022' },
+  { name: 'gemini', label: 'Google Gemini', desc: '多模态', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/', model: 'gemini-2.5-flash', visionModel: 'gemini-2.5-flash' },
   { name: 'qwen', label: '通义千问（阿里云百炼）', desc: '识图较强', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-max', visionModel: 'qwen-vl-max' },
   { name: 'kimi', label: 'Kimi（月之暗面）', desc: '长文本', baseUrl: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k', visionModel: 'moonshot-v1-8k-vision-preview' },
-  { name: 'openai', label: 'OpenAI', desc: 'GPT 系列', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini', visionModel: 'gpt-4o' },
+  { name: 'groq', label: 'Groq', desc: 'Llama 极速推理', baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile', visionModel: 'llama-3.2-90b-vision-preview' },
+  { name: 'mistral', label: 'Mistral AI', desc: '欧洲开源模型', baseUrl: 'https://api.mistral.ai/v1', model: 'mistral-large-latest', visionModel: 'pixtral-large-latest' },
   { name: 'zhipu', label: '智谱清言', desc: 'GLM 系列', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash', visionModel: 'glm-4v-flash' },
   { name: 'ollama', label: '本地 Ollama', desc: '离线本地模型', baseUrl: 'http://localhost:11434/v1', model: 'qwen2.5', visionModel: 'qwen2.5-vl' }
 ]
@@ -508,6 +512,46 @@ const PROVIDER_GUIDES = {
       '进入「API keys」→ Create new secret key',
       '复制生成的密钥（sk- 开头）并妥善保存（只显示一次）',
       '回到本页填入「API Key」并保存配置；新账号需先充值'
+    ]
+  },
+  anthropic: {
+    label: 'Anthropic Claude',
+    url: 'https://console.anthropic.com/settings/keys',
+    steps: [
+      '注册 / 登录 Anthropic Console（console.anthropic.com）',
+      '进入「API Keys」→ Create Key',
+      '复制生成的密钥（sk-ant- 开头）并妥善保存（只显示一次）',
+      '回到本页填入「API Key」并保存配置；新账号需先充值'
+    ]
+  },
+  gemini: {
+    label: 'Google Gemini',
+    url: 'https://aistudio.google.com/apikey',
+    steps: [
+      '用 Google 账号登录 AI Studio（aistudio.google.com）',
+      '左侧「Get API key」→ Create API key（新账号有免费额度）',
+      '复制生成的密钥（AIza 开头）并保存',
+      '回到本页填入「API Key」并保存配置'
+    ]
+  },
+  groq: {
+    label: 'Groq',
+    url: 'https://console.groq.com/keys',
+    steps: [
+      '注册 / 登录 Groq Console（console.groq.com，可用 Google 账号）',
+      '进入「API Keys」→ Create API Key',
+      '复制生成的密钥（gsk_ 开头）并保存（只显示一次）',
+      '回到本页填入「API Key」并保存配置；Groq 目前有免费额度'
+    ]
+  },
+  mistral: {
+    label: 'Mistral AI',
+    url: 'https://console.mistral.ai/api-keys/',
+    steps: [
+      '注册 / 登录 Mistral Console（console.mistral.ai）',
+      '进入「API Keys」→ Create new key',
+      '复制生成的密钥并保存（只显示一次）',
+      '回到本页填入「API Key」并保存配置'
     ]
   },
   zhipu: {
