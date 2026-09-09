@@ -169,6 +169,7 @@ fn spawn_backend(
     for a in extra {
         cmd_args.push(a.clone());
     }
+    cmd_args.push("--server.address=127.0.0.1".to_string());
     cmd_args.push("--server.port=0".to_string());
     logln(&format!(
         "spawn: {java_path} -jar {jar_path} {}",
