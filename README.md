@@ -13,8 +13,7 @@
   <em>
     PickQ turns your PDFs, lecture notes &amp; screenshots into your own practice question bank —<br/>
     AI drafts the questions (using your own API key), spaced repetition schedules reviews,<br/>
-    and everything stays on your device, fully offline. Windows desktop app, free &amp; local-first.<br/>
-    Made with exam-prep learners in mind (civil-service &amp; postgraduate entrance exams in China); everyone is welcome.
+    and everything stays on your device, fully offline. Windows desktop app, free &amp; local-first.
   </em>
 </p>
 
