@@ -6,7 +6,7 @@
           <span class="seal-char">拾</span>
           <span class="seal-char">题</span>
         </span>
-        <span class="brand-sub">自建题库</span>
+        <span class="brand-sub">{{ t('brandSub') }}</span>
       </div>
 
       <nav class="nav">
@@ -14,46 +14,46 @@
           to="/"
           class="nav-item"
           :class="{ active: isBankActive }"
-          :title="sidebarCollapsed ? '题库' : undefined"
+          :title="sidebarCollapsed ? t('nav.banks') : undefined"
         >
           <TikuIcon name="book" :size="16" />
-          <span>题库</span>
+          <span>{{ t('nav.banks') }}</span>
         </RouterLink>
         <RouterLink
           to="/stats"
           class="nav-item"
           :class="{ active: route.name === 'stats' }"
-          :title="sidebarCollapsed ? '学习统计' : undefined"
+          :title="sidebarCollapsed ? t('nav.stats') : undefined"
         >
           <TikuIcon name="chart" :size="16" />
-          <span>统计</span>
+          <span>{{ t('nav.stats') }}</span>
         </RouterLink>
         <RouterLink
           to="/discover"
           class="nav-item"
           :class="{ active: route.name === 'discover' }"
-          :title="sidebarCollapsed ? '发现题库' : undefined"
+          :title="sidebarCollapsed ? t('nav.discover') : undefined"
         >
           <TikuIcon name="search" :size="16" />
-          <span>发现题库</span>
+          <span>{{ t('nav.discover') }}</span>
         </RouterLink>
         <RouterLink
           to="/settings"
           class="nav-item"
           :class="{ active: route.name === 'settings' }"
-          :title="sidebarCollapsed ? '设置' : undefined"
+          :title="sidebarCollapsed ? t('nav.settings') : undefined"
         >
           <TikuIcon name="settings" :size="16" />
-          <span>设置</span>
+          <span>{{ t('nav.settings') }}</span>
         </RouterLink>
         <RouterLink
           to="/ai-import/jobs"
           class="nav-item"
           :class="{ active: route.name === 'ai-import-jobs' }"
-          :title="sidebarCollapsed ? 'AI 任务' : undefined"
+          :title="sidebarCollapsed ? t('nav.aiJobs') : undefined"
         >
           <TikuIcon name="list" :size="16" />
-          <span>AI 任务</span>
+          <span>{{ t('nav.aiJobs') }}</span>
         </RouterLink>
       </nav>
 
@@ -95,20 +95,20 @@
       </button>
 
       <div class="sidebar-foot">
-        <span v-if="!sidebarCollapsed" class="text-muted">离线优先 · 数据在本机</span>
+        <span v-if="!sidebarCollapsed" class="text-muted">{{ t('offlineNote') }}</span>
         <button
           v-if="!sidebarCollapsed"
           class="theme-toggle"
-          :title="'点击切换主题(当前: ' + (isDark ? '黑夜' : '白天') + ')'"
+          :title="t('themeToggleTitle', { v: isDark ? t('theme.dark') : t('theme.light') })"
           @click="toggleTheme"
         >
           <span class="theme-dot" :class="{ on: isDark }"></span>
-          主题:{{ isDark ? '黑夜' : '白天' }}
+          {{ t('theme.label') }}:{{ isDark ? t('theme.dark') : t('theme.light') }}
         </button>
         <button
           v-if="sidebarCollapsed"
           class="sidebar-toggle"
-          title="展开侧边栏"
+          :title="t('expandSidebar')"
           @click="sidebarCollapsed = false"
         >
           <TikuIcon name="chevron-right" :size="15" />
@@ -128,10 +128,33 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { getAiImportJob, getRecentAiJobs, listActiveAiJobs, deleteAiJob } from '../api/aiImport'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import TikuIcon from '../components/TikuIcon.vue'
 import { currentTheme, setTheme } from '../utils/theme'
+
+/* 导航/页脚静态文案（中英；组件内局部字典，随语言切换即时生效） */
+const { t } = useI18n({
+  messages: {
+    'zh-CN': {
+      brandSub: '自建题库',
+      nav: { banks: '题库', stats: '统计', discover: '发现题库', settings: '设置', aiJobs: 'AI 任务' },
+      offlineNote: '离线优先 · 数据在本机',
+      theme: { label: '主题', light: '白天', dark: '黑夜' },
+      themeToggleTitle: '点击切换主题(当前: {v})',
+      expandSidebar: '展开侧边栏'
+    },
+    'en-US': {
+      brandSub: 'Your Question Banks',
+      nav: { banks: 'Banks', stats: 'Stats', discover: 'Discover', settings: 'Settings', aiJobs: 'AI Jobs' },
+      offlineNote: 'Offline-first · data stays on this device',
+      theme: { label: 'Theme', light: 'Light', dark: 'Dark' },
+      themeToggleTitle: 'Toggle theme (current: {v})',
+      expandSidebar: 'Expand sidebar'
+    }
+  }
+})
 
 const route = useRoute()
 const router = useRouter()

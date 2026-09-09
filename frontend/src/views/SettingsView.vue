@@ -29,9 +29,9 @@
         </span>
       </div>
     </section>
-    <!-- 外观:双主题(Soft UI 白天 / 护眼暖黑夜,跟随系统) -->
+    <!-- 外观:双主题(Soft UI 白天 / 护眼暖黑夜,跟随系统) + 界面语言 -->
     <section class="panel">
-      <h2 class="panel-title">外观</h2>
+      <h2 class="panel-title">外观与语言</h2>
       <p class="panel-desc text-secondary">
         主题选择即时生效并保存在本机。黑夜为低蓝光护眼底色，适合长时间刷题。
         当前生效：<span class="theme-state">{{ effectiveLabel }}</span><template v-if="themePref === 'system'">（跟随系统，系统切换时自动跟随）</template>
@@ -40,6 +40,14 @@
         <el-radio-button value="system">跟随系统</el-radio-button>
         <el-radio-button value="light">白天</el-radio-button>
         <el-radio-button value="dark">黑夜</el-radio-button>
+      </el-radio-group>
+      <p class="panel-desc text-secondary lang-desc">
+        界面语言：<template v-if="langPref === 'system'">跟随系统（当前：{{ currentLang === 'en-US' ? 'English' : '中文' }}）</template>
+      </p>
+      <el-radio-group :model-value="langPref" @change="onLangChange">
+        <el-radio-button value="system">跟随系统</el-radio-button>
+        <el-radio-button value="zh-CN">中文</el-radio-button>
+        <el-radio-button value="en-US">English</el-radio-button>
       </el-radio-group>
     </section>
 
@@ -253,6 +261,7 @@ import { pickFile, readTextFile, saveBlob, saveJsonFile } from '../utils/files'
 import { invoke } from '@tauri-apps/api/core'
 import TikuIcon from '../components/TikuIcon.vue'
 import { getTheme, setTheme, currentTheme } from '../utils/theme'
+import { setLang, getLangPref, currentLang } from '../i18n/lang'
 import { isDesktop, getAppVersion, checkForUpdate, downloadUpdate, installUpdate } from '../utils/updater'
 import { openExternal } from '../utils/external'
 
@@ -417,6 +426,15 @@ const effectiveLabel = ref(currentTheme() === 'dark' ? '黑夜' : '白天')
 function onThemeChange(v) {
   setTheme(v)
   effectiveLabel.value = currentTheme() === 'dark' ? '黑夜' : '白天'
+}
+
+/* ---------- 界面语言（跟随系统 / 中文 / English） ---------- */
+const langPref = ref(getLangPref())
+
+function onLangChange(v) {
+  setLang(v)
+  langPref.value = getLangPref()
+  ElMessage.success(v === 'en-US' ? 'Language switched to English' : v === 'system' ? '已跟随系统语言' : '已切换为中文')
 }
 
 /* ---------- 作者信息（默认作者名，本地记忆；导出弹窗默认带入） ---------- */
@@ -727,6 +745,9 @@ async function doImport() {
 .theme-state {
   color: var(--accent-text);
   font-weight: 600;
+}
+.lang-desc {
+  margin-top: 16px;
 }
 
 .panel {

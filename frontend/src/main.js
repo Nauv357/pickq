@@ -9,14 +9,18 @@ import '@fontsource/noto-serif-sc/chinese-simplified-600.css'
 
 import App from './App.vue'
 import router from './router'
+import i18n from './i18n'
+import { initLang } from './i18n/lang'
 import { initTheme } from './utils/theme'
 import './styles/main.css'
 
 // 双主题初始化(存储偏好 > 系统偏好);dark class 由 utils/theme.js 控制,
 // Element Plus 暗色变量随 html.dark 自动生效(设计系统见 styles/main.css)
 initTheme()
+initLang()
 
 const app = createApp(App)
 app.use(ElementPlus, { locale: zhCn })
+app.use(i18n)
 app.use(router)
 app.mount('#app')

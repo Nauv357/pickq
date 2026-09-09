@@ -1,30 +1,33 @@
 <template>
-  <router-view />
+  <!-- el-config-provider：Element Plus 组件文案随语言切换（弹窗/分页等） -->
+  <el-config-provider :locale="elLocale">
+    <router-view />
 
-  <!-- 全局图片灯箱：点击富文本中的图片查看大图（托底行为；默认展示已尽量完整） -->
-  <Teleport to="body">
-    <div v-if="lightboxUrl" class="lightbox-mask" @click.self="closeLightbox">
-      <div class="lightbox-toolbar">
-        <span class="lightbox-name">{{ lightboxName }}</span>
-        <div class="lightbox-actions">
-          <button class="lb-btn" @click="toggleMode">{{ mode === 'fit' ? '原始大小' : '适应屏幕' }}</button>
-          <button class="lb-btn" @click="zoom(-0.25)">−</button>
-          <span class="lb-scale mono">{{ Math.round(scale * 100) }}%</span>
-          <button class="lb-btn" @click="zoom(0.25)">+</button>
-          <button class="lb-btn lb-close" @click="closeLightbox">关闭</button>
+    <!-- 全局图片灯箱：点击富文本中的图片查看大图（托底行为；默认展示已尽量完整） -->
+    <Teleport to="body">
+      <div v-if="lightboxUrl" class="lightbox-mask" @click.self="closeLightbox">
+        <div class="lightbox-toolbar">
+          <span class="lightbox-name">{{ lightboxName }}</span>
+          <div class="lightbox-actions">
+            <button class="lb-btn" @click="toggleMode">{{ mode === 'fit' ? '原始大小' : '适应屏幕' }}</button>
+            <button class="lb-btn" @click="zoom(-0.25)">−</button>
+            <span class="lb-scale mono">{{ Math.round(scale * 100) }}%</span>
+            <button class="lb-btn" @click="zoom(0.25)">+</button>
+            <button class="lb-btn lb-close" @click="closeLightbox">关闭</button>
+          </div>
         </div>
+        <div
+          class="lightbox-viewport"
+          :class="{ original: mode === 'original' }"
+          @click.self="closeLightbox"
+          @wheel.prevent="onWheel"
+        >
+          <img :src="lightboxUrl" :style="imgStyle" alt="放大查看" />
+        </div>
+        <p class="lightbox-hint">原始大小模式下可滚动 / 滚轮缩放查看细节 · 点击空白处关闭</p>
       </div>
-      <div
-        class="lightbox-viewport"
-        :class="{ original: mode === 'original' }"
-        @click.self="closeLightbox"
-        @wheel.prevent="onWheel"
-      >
-        <img :src="lightboxUrl" :style="imgStyle" alt="放大查看" />
-      </div>
-      <p class="lightbox-hint">原始大小模式下可滚动 / 滚轮缩放查看细节 · 点击空白处关闭</p>
-    </div>
-  </Teleport>
+    </Teleport>
+  </el-config-provider>
 </template>
 
 <script setup>
@@ -34,6 +37,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import TikuIcon from './components/TikuIcon.vue'
 import { isDesktop, checkForUpdate, getAppVersion } from './utils/updater'
 import { openExternal } from './utils/external'
+import { elLocale } from './i18n/lang'
 
 const router = useRouter()
 
