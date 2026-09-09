@@ -9,11 +9,11 @@
         <div class="lightbox-toolbar">
           <span class="lightbox-name">{{ lightboxName }}</span>
           <div class="lightbox-actions">
-            <button class="lb-btn" @click="toggleMode">{{ mode === 'fit' ? '原始大小' : '适应屏幕' }}</button>
+            <button class="lb-btn" @click="toggleMode">{{ mode === 'fit' ? t('lbOriginal') : t('lbFit') }}</button>
             <button class="lb-btn" @click="zoom(-0.25)">−</button>
             <span class="lb-scale mono">{{ Math.round(scale * 100) }}%</span>
             <button class="lb-btn" @click="zoom(0.25)">+</button>
-            <button class="lb-btn lb-close" @click="closeLightbox">关闭</button>
+            <button class="lb-btn lb-close" @click="closeLightbox">{{ t('lbClose') }}</button>
           </div>
         </div>
         <div
@@ -22,9 +22,9 @@
           @click.self="closeLightbox"
           @wheel.prevent="onWheel"
         >
-          <img :src="lightboxUrl" :style="imgStyle" alt="放大查看" />
+          <img :src="lightboxUrl" :style="imgStyle" :alt="t('lbAlt')" />
         </div>
-        <p class="lightbox-hint">原始大小模式下可滚动 / 滚轮缩放查看细节 · 点击空白处关闭</p>
+        <p class="lightbox-hint">{{ t('lbHint') }}</p>
       </div>
     </Teleport>
   </el-config-provider>
@@ -32,12 +32,21 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { elLocale } from './i18n/lang'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n({
+  messages: {
+    'zh-CN': { lbFit: '适应屏幕', lbOriginal: '原始大小', lbClose: '关闭', lbAlt: '放大查看', lbHint: '原始大小模式下可滚动 / 滚轮缩放查看细节 · 点击空白处关闭' },
+    'en-US': { lbFit: 'Fit to screen', lbOriginal: 'Original size', lbClose: 'Close', lbAlt: 'Zoom in', lbHint: 'In original size you can scroll / zoom with the wheel · click outside to close' }
+  }
+})
+
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import TikuIcon from './components/TikuIcon.vue'
 import { isDesktop, checkForUpdate, getAppVersion } from './utils/updater'
 import { openExternal } from './utils/external'
-import { elLocale } from './i18n/lang'
 
 const router = useRouter()
 

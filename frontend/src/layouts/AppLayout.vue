@@ -58,39 +58,39 @@
       </nav>
 
       <!-- AI 任务全局监控：进行中徽标（点击进入预览） -->
-      <button v-if="activeAiJobs.length && !sidebarCollapsed" class="ai-badge" title="点击查看 AI 导入任务" @click="goActiveJob">
+      <button v-if="activeAiJobs.length && !sidebarCollapsed" class="ai-badge" :title="t('viewAiTip')" @click="goActiveJob">
         <span class="ai-spin"><TikuIcon name="refresh" :size="12" /></span>
-        AI 整理中（{{ activeAiJobs.length }}）
+        {{ t('aiWorkingN', { n: activeAiJobs.length }) }}
       </button>
 
       <!-- 最近 AI 导入（未确认任务常驻入口：通知被错过 / 预览页返回后仍可回到任务） -->
       <div v-if="recentJobs.length && !sidebarCollapsed" class="ai-recent">
         <div class="ai-recent-head">
-          <span class="ai-recent-title">最近 AI 导入</span>
-          <button class="ai-recent-all" title="查看全部 AI 任务" @click="router.push('/ai-import/jobs')">全部任务</button>
+          <span class="ai-recent-title">{{ t('recentAi') }}</span>
+          <button class="ai-recent-all" :title="t('viewAllAi')" @click="router.push('/ai-import/jobs')">{{ t('allTasks') }}</button>
         </div>
         <div v-for="job in recentJobs" :key="job.id" class="ai-recent-item">
           <button
             class="ai-badge"
             :class="{ failed: job.status === 'FAILED' }"
-            :title="'回到任务 #' + job.id"
+            :title="t('backToTask') + ' #' + job.id"
             @click="router.push(`/ai-import/${job.id}`)"
           >
             <TikuIcon :name="job.status === 'SUCCESS' ? 'file' : job.status === 'FAILED' ? 'x' : 'refresh'" :size="12" />
             <span class="last-job-text">
-              <template v-if="job.status === 'SUCCESS'">AI 导入待确认：{{ job.fileName }}（{{ job.questions?.length || 0 }} 题）</template>
-              <template v-else-if="job.status === 'FAILED'">AI 导入失败：{{ job.fileName }}</template>
-              <template v-else>AI 整理中：{{ job.fileName }}</template>
+              <template v-if="job.status === 'SUCCESS'">{{ t('aiPending') }}：{{ job.fileName }}（{{ job.questions?.length || 0 }} {{ t('qUnit') }}）</template>
+              <template v-else-if="job.status === 'FAILED'">{{ t('aiFailed') }}：{{ job.fileName }}</template>
+              <template v-else>{{ t('aiWorking') }}：{{ job.fileName }}</template>
             </span>
           </button>
-          <button class="ai-delete" title="删除任务" @click="removeRecentJob(job)">
+          <button class="ai-delete" :title="t('deleteTask')" @click="removeRecentJob(job)">
             <TikuIcon name="x" :size="11" />
           </button>
         </div>
       </div>
 
       <!-- 折叠时：AI 进行中指示（图标级） -->
-      <button v-if="activeAiJobs.length && sidebarCollapsed" class="ai-badge ai-badge-mini" title="AI 整理中，点击查看" @click="goActiveJob">
+      <button v-if="activeAiJobs.length && sidebarCollapsed" class="ai-badge ai-badge-mini" :title="t('aiWorkingView')" @click="goActiveJob">
         <span class="ai-spin"><TikuIcon name="refresh" :size="14" /></span>
       </button>
 
@@ -139,6 +139,7 @@ const { t } = useI18n({
   messages: {
     'zh-CN': {
       brandSub: '自建题库',
+      viewAiTip: '点击查看 AI 导入任务', aiWorkingN: 'AI 整理中（{n}）', recentAi: '最近 AI 导入', viewAllAi: '查看全部 AI 任务', allTasks: '全部任务', backToTask: '回到任务', aiPending: 'AI 导入待确认', aiFailed: 'AI 导入失败', aiWorking: 'AI 整理中', deleteTask: '删除任务', qUnit: '题', aiWorkingView: 'AI 整理中，点击查看',
       nav: { banks: '题库', stats: '统计', discover: '发现题库', settings: '设置', aiJobs: 'AI 任务' },
       offlineNote: '离线优先 · 数据在本机',
       theme: { label: '主题', light: '白天', dark: '黑夜' },
@@ -147,6 +148,7 @@ const { t } = useI18n({
     },
     'en-US': {
       brandSub: 'Your Question Banks',
+      viewAiTip: 'View AI import tasks', aiWorkingN: 'AI working ({n})', recentAi: 'Recent AI imports', viewAllAi: 'View all AI tasks', allTasks: 'All tasks', backToTask: 'Back to task', aiPending: 'AI import pending', aiFailed: 'AI import failed', aiWorking: 'AI working', deleteTask: 'Delete task', qUnit: 'q', aiWorkingView: 'AI working — click to view',
       nav: { banks: 'Banks', stats: 'Stats', discover: 'Discover', settings: 'Settings', aiJobs: 'AI Jobs' },
       offlineNote: 'Offline-first · data stays on this device',
       theme: { label: 'Theme', light: 'Light', dark: 'Dark' },
