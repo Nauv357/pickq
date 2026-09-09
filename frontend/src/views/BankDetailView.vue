@@ -4,8 +4,8 @@
     <div v-if="bankError" class="error-state">
       <TikuIcon name="file" :size="40" />
       <h3>{{ bankError }}</h3>
-      <p class="text-secondary">题库可能已被删除，或地址有误</p>
-      <button class="btn btn-secondary" @click="$router.push('/')">返回题库列表</button>
+      <p class="text-secondary">{{ t('notFoundDesc') }}</p>
+      <button class="btn btn-secondary" @click="$router.push('/')">{{ t('backToBanks') }}</button>
     </div>
 
     <template v-else>
@@ -13,44 +13,44 @@
       <header class="page-header">
         <div class="header-main">
           <div class="title-line">
-            <h1 class="page-title">{{ bank?.name || '加载中…' }}</h1>
+            <h1 class="page-title">{{ bank?.name || t('loading') }}</h1>
             <span v-if="bank?.version" class="version-tag">v{{ bank.version }}</span>
           </div>
           <p v-if="bank?.description" class="page-desc">{{ bank.description }}</p>
           <div class="page-meta text-muted">
-            <span v-if="bank?.authorName">作者：{{ bank.authorName }}</span>
+            <span v-if="bank?.authorName">{{ t('authorBy', { v: bank.authorName }) }}</span>
             <span v-if="bank?.authorName" class="dot"></span>
-            <span v-if="bank?.source" class="source-text" :title="bank.source">来源：{{ bank.source }}</span>
+            <span v-if="bank?.source" class="source-text" :title="bank.source">{{ t('sourceFrom', { v: bank.source }) }}</span>
             <span v-if="bank?.source" class="dot"></span>
-            <span>创建于 {{ formatDate(bank?.createdAt) }}</span>
+            <span>{{ t('createdOn', { d: formatDate(bank?.createdAt) }) }}</span>
             <span class="dot"></span>
-            <span>共 {{ qTotal }} 题</span>
+            <span>{{ t('questionsN', { n: qTotal }) }}</span>
           </div>
         </div>
         <div class="header-actions">
           <button class="btn btn-secondary" :disabled="!bank" @click="$router.push(`/banks/${id}/sessions`)">
             <TikuIcon name="clock" :size="14" />
-            练习历史
+            {{ t('history') }}
           </button>
           <button class="btn btn-secondary" :disabled="!bank" @click="openEditBank">
             <TikuIcon name="edit" :size="14" />
-            编辑
+            {{ t('edit') }}
           </button>
           <button class="btn btn-secondary" :disabled="!bank" @click="openExport">
             <TikuIcon name="download" :size="14" />
-            导出题库文件
+            {{ t('exportBank') }}
           </button>
           <button class="btn btn-secondary" :disabled="!bank" @click="$router.push(`/banks/${id}/print`)">
             <TikuIcon name="file" :size="14" />
-            打印试卷
+            {{ t('printPaper') }}
           </button>
           <button class="btn btn-danger" :disabled="!bank" @click="confirmDeleteBank">
             <TikuIcon name="trash" :size="14" />
-            删除
+            {{ t('delete') }}
           </button>
           <button class="btn btn-primary" :disabled="!bank" @click="openSession">
             <TikuIcon name="play" :size="14" />
-            开始做题
+            {{ t('startPractice') }}
           </button>
         </div>
       </header>
@@ -60,29 +60,29 @@
         <div class="progress-stats">
           <div class="stat">
             <span class="stat-num mono">{{ progress.answeredQuestions }}</span>
-            <span class="stat-label">已做 / 共 {{ progress.totalQuestions }} 题</span>
+            <span class="stat-label">{{ t('answeredOf', { n: progress.totalQuestions }) }}</span>
           </div>
           <div class="stat">
             <span class="stat-num mono">{{ Math.round(progress.accuracy * 100) }}%</span>
-            <span class="stat-label">正确率（作答 {{ progress.recordsCount }} 次）</span>
+            <span class="stat-label">{{ t('accuracyOf', { n: progress.recordsCount }) }}</span>
           </div>
           <div class="stat">
             <span class="stat-num mono">{{ progress.progressPercent }}%</span>
-            <span class="stat-label">完成度</span>
+            <span class="stat-label">{{ t('progressPct') }}</span>
           </div>
         </div>
         <div class="progress-track">
           <div class="progress-fill" :style="{ width: progress.progressPercent + '%' }"></div>
         </div>
         <p v-if="progress.recordsCount === 0" class="progress-hint text-muted">
-          还没有做题记录，点击「开始做题」刷第一轮
+          {{ t('noRecordsYet') }}，点击「{{ t('startPractice') }}」{{ t('firstRoundHint') }}
         </p>
       </section>
 
       <!-- 复习 / 错题工具条 -->
       <section class="toolbar">
         <div class="tool-item">
-          <span class="tool-label">复习计划</span>
+          <span class="tool-label">{{ t('reviewPlan') }}</span>
           <button
             class="toggle"
             :class="{ on: reviewEnabled }"
@@ -98,16 +98,16 @@
             @click="openDue"
           >
             <TikuIcon name="bell" :size="13" />
-            今日待复习 {{ dueTotal }} 题
+            {{ t('dueTodayN', { n: dueTotal }) }}
           </button>
           <span v-else class="text-muted tool-tip">
-            关闭时进度照记、错题照收，只是不提醒到期复习；重新开启后到期题会回到队列
+            {{ t('reviewOffTip') }}
           </span>
         </div>
         <div class="tool-item">
           <button class="btn btn-secondary btn-sm" @click="openWrong">
             <TikuIcon name="list" :size="13" />
-            错题{{ wrongTotal > 0 ? `（${wrongTotal}）` : '' }}
+            {{ t('wrongTab0') }}{{ wrongTotal > 0 ? `（${wrongTotal}）` : '' }}
           </button>
         </div>
         <div class="tool-item">
@@ -118,12 +118,12 @@
             @click="startFavoriteSession"
           >
             <TikuIcon name="star" :size="13" :filled="favoriteCount > 0" />
-            收藏{{ favoriteCount > 0 ? `（${favoriteCount}）` : '' }}
+            {{ t('favTab0') }}{{ favoriteCount > 0 ? `（${favoriteCount}）` : '' }}
           </button>
         </div>
       </section>
 
-      <!-- 录题面板（编辑打开时页面右侧悬浮"题号盘"，不占主内容宽度） -->
+      <!-- 录题面板（{{ t('edit') }}打开时页面右侧悬浮"题号盘"，不占主内容宽度） -->
       <div ref="panelEl">
             <QuestionFormPanel
               v-if="panelOpen"
@@ -145,21 +145,21 @@
       <section class="questions-section">
         <div class="section-head">
           <div class="section-title">
-            <h2>题目</h2>
+            <h2>{{ t('questions') }}</h2>
             <span class="count-badge">{{ qTotal }}</span>
           </div>
           <div class="section-actions">
             <button class="btn btn-secondary btn-sm" @click="openMaterials">
               <TikuIcon name="file" :size="13" />
-              材料
+              {{ t('materials') }}
             </button>
             <button class="btn btn-secondary btn-sm" @click="aiDialog?.open()">
               <TikuIcon name="sparkle" :size="13" />
-              AI 追加
+              {{ t('aiAppend') }}
             </button>
             <button class="btn btn-secondary btn-sm" @click="openBatch">
               <TikuIcon name="upload" :size="13" />
-              批量导入
+              {{ t('batchImport') }}
             </button>
             <button
               class="btn btn-secondary btn-sm"
@@ -167,7 +167,7 @@
               @click="openAiFill"
             >
               <TikuIcon name="sparkle" :size="13" />
-              AI 补答案
+              {{ t('aiFillAnswers') }}
             </button>
             <button
               class="btn btn-secondary btn-sm"
@@ -176,11 +176,11 @@
               @click="toggleSelectionMode"
             >
               <TikuIcon name="check" :size="13" />
-              {{ selectionMode ? '取消选题' : '选题另存' }}
+              {{ selectionMode ? t('cancelSelect') : t('selectSave') }}
             </button>
             <button class="btn btn-primary btn-sm" @click="openCreatePanel">
               <TikuIcon name="plus" :size="13" />
-              添加题目
+              {{ t('addQuestion') }}
             </button>
           </div>
         </div>
@@ -189,7 +189,7 @@
         <div class="q-filter-bar">
           <el-input
             v-model="qKeyword"
-            placeholder="搜索题干 / 选项关键词"
+            :placeholder="t('searchPh')"
             clearable
             style="width: 230px"
             @keyup.enter="applyFilter"
@@ -197,19 +197,19 @@
           >
             <template #prefix><TikuIcon name="search" :size="13" /></template>
           </el-input>
-          <el-select v-model="qType" placeholder="题型" clearable style="width: 110px" @change="applyFilter">
+          <el-select v-model="qType" :placeholder="t('qType')" clearable style="width: 110px" @change="applyFilter">
             <el-option v-for="t in typeFilterOptions" :key="t.value" :label="t.label" :value="t.value" />
           </el-select>
-          <el-select v-model="qScope" placeholder="范围" clearable style="width: 110px" @change="applyFilter">
-            <el-option label="全部" value="all" />
-            <el-option label="收藏" value="favorite" />
-            <el-option label="错题" value="wrong" />
-            <el-option label="未做" value="undone" />
+          <el-select v-model="qScope" :placeholder="t('qScope')" clearable style="width: 110px" @change="applyFilter">
+            <el-option :label="t('all')" value="all" />
+            <el-option :label="t('favTab0')" value="favorite" />
+            <el-option :label="t('wrongTab0')" value="wrong" />
+            <el-option :label="t('undone')" value="undone" />
           </el-select>
-          <el-select v-model="qCategory" placeholder="分类" clearable filterable style="width: 140px" @change="applyFilter">
+          <el-select v-model="qCategory" :placeholder="t('qCategory')" clearable filterable style="width: 140px" @change="applyFilter">
             <el-option v-for="c in categoryOptions" :key="c" :label="c" :value="c" />
           </el-select>
-          <span v-if="filterActive" class="q-filter-hint text-muted">筛选结果 {{ qTotal }} 题</span>
+          <span v-if="filterActive" class="q-filter-hint text-muted">{{ t('filterResultN', { n: qTotal }) }}</span>
         </div>
 
         <!-- 加载中 -->
@@ -224,8 +224,8 @@
         <!-- 空 -->
         <div v-else-if="questions.length === 0" class="q-empty">
           <TikuIcon name="file" :size="34" />
-          <p class="text-secondary">{{ filterActive ? '没有匹配的题目，试试调整筛选条件' : '题库还没有题目' }}</p>
-          <button v-if="!filterActive" class="btn btn-secondary btn-sm" @click="openCreatePanel">录入第一题</button>
+          <p class="text-secondary">{{ filterActive ? t('noMatch') : t('noQuestions') }}</p>
+          <button v-if="!filterActive" class="btn btn-secondary btn-sm" @click="openCreatePanel">{{ t('addFirstQuestion') }}</button>
         </div>
 
         <!-- 题目行 -->
@@ -237,7 +237,7 @@
               :data-qid="q.questionId"
               :title="selectionMode
                 ? (selectedQids.has(q.questionId) ? '点击取消选择' : '点击选择该题')
-                : '点击编辑该题（右侧按钮可做题 / AI 解析 / 删除）'"
+                : t('clickEditHint')"
               @click="selectionMode ? toggleSelect(q.questionId) : openEditPanel(q.questionId, i)"
             >
               <!-- 选择模式：行首勾选框 -->
@@ -255,7 +255,7 @@
               <span
                 v-if="duplicateNums.has(q.questionNumber)"
                 class="q-number mono dup-number"
-                title="该题号在当前列表中重复，可能是重复导入的题目，请删除或修改题号"
+                title="该题号在当前列表中重复，可能是重复导入的题目，请{{ t('delete') }}或修改题号"
               >重复题号 {{ q.questionNumber }}</span>
               <span v-else-if="q.questionNumber != null" class="q-number mono">#{{ q.questionNumber }}</span>
               <span v-else class="q-number mono unnumbered" title="后端未能回填题号，导入/录入后自动按顺序补号">未编号</span>
@@ -263,7 +263,7 @@
               <span
                 v-if="q.questionType !== 'SUBJECTIVE' && !answerKeysText(q)"
                 class="q-no-answer"
-                title="未配置答案：做题时无法判对错，点击编辑补配"
+                title="未配置答案：做题时无法判对错，点击{{ t('edit') }}补配"
               >无答案</span>
               <span class="q-content" :title="q.content">{{ summarizeContent(q.content) }}</span>
               <span v-if="q.topic" class="q-topic">{{ q.topic }}</span>
@@ -287,10 +287,10 @@
                 >
                   <TikuIcon name="sparkle" :size="14" />
                 </button>
-                <button class="icon-btn" title="编辑" @click="openEditPanel(q.questionId, i)">
+                <button class="icon-btn" title="{{ t('edit') }}" @click="openEditPanel(q.questionId, i)">
                   <TikuIcon name="edit" :size="14" />
                 </button>
-                <button class="icon-btn danger" title="删除" @click="confirmDeleteQuestion(q)">
+                <button class="icon-btn danger" title="{{ t('delete') }}" @click="confirmDeleteQuestion(q)">
                   <TikuIcon name="trash" :size="14" />
                 </button>
               </div>
@@ -298,7 +298,7 @@
             <!-- 行内 AI 解析面板（展开后自动生成；含正式解析展示） -->
             <div v-show="!!aiOpen[q.questionId]" class="q-ai-panel" @click.stop>
               <div v-if="q.materialContent" class="an-block">
-                <span class="an-label">材料</span>
+                <span class="an-label">{{ t('materials') }}</span>
                 <div class="an-content" v-html="richHtml(q.materialContent)"></div>
               </div>
               <div v-if="answerKeysText(q) || q.answerText" class="ai-panel-row">
@@ -367,7 +367,7 @@
             <el-input v-model="saveAsForm.description" type="textarea" :rows="2" maxlength="500" show-word-limit />
           </el-form-item>
           <p class="form-tip text-muted">
-            将复制当前勾选的 {{ selectedQids.size }} 道题（含图片与关联材料）到新题库；原题库保持不变。新题库从零记录做题进度。
+            将复制当前勾选的 {{ selectedQids.size }} 道题（含图片与关联{{ t('materials') }}）到新题库；原题库保持不变。新题库从零记录做题进度。
           </p>
         </el-form>
         <template #footer>
@@ -387,7 +387,7 @@
             </el-select>
           </el-form-item>
           <p class="form-tip text-muted">
-            将复制当前勾选的 {{ selectedQids.size }} 道题到所选题库（含图片与关联材料）；本题库保持不变。
+            将复制当前勾选的 {{ selectedQids.size }} 道题到所选题库（含图片与关联{{ t('materials') }}）；本题库保持不变。
           </p>
         </el-form>
         <template #footer>
@@ -398,7 +398,7 @@
         </template>
       </el-dialog>
 
-      <!-- 右侧悬浮题号盘（编辑模式）：宽视口常显；窄视口（右侧放不下）收成"题号"小按钮，点击展开 -->
+      <!-- 右侧悬浮题号盘（{{ t('edit') }}模式）：宽视口常显；窄视口（右侧放不下）收成"题号"小按钮，点击展开 -->
       <template v-if="dockOpen">
         <QuestionNavDock
           v-if="!dockNarrow || dockFabOpen"
@@ -425,8 +425,8 @@
         </button>
       </template>
 
-      <!-- 编辑题库弹窗 -->
-      <el-dialog v-model="editBankVisible" title="编辑题库" width="min(92vw, 500px)" align-center>
+      <!-- {{ t('edit') }}题库弹窗 -->
+      <el-dialog v-model="editBankVisible" title="{{ t('edit') }}题库" width="min(92vw, 500px)" align-center>
         <el-form label-position="top" @submit.prevent>
           <el-form-item label="题库名称" required>
             <el-input v-model="editBankForm.name" maxlength="100" show-word-limit />
@@ -438,7 +438,7 @@
             <el-input v-model="editBankForm.source" maxlength="255" placeholder="如：整理自公开教材与历年真题" />
           </el-form-item>
           <el-form-item label="作者名（可选）">
-            <el-input v-model="editBankForm.authorName" maxlength="100" placeholder="导出题库文件时写入文件的展示名" />
+            <el-input v-model="editBankForm.authorName" maxlength="100" placeholder="{{ t('exportBank') }}时写入文件的展示名" />
           </el-form-item>
         </el-form>
         <template #footer>
@@ -450,7 +450,7 @@
       </el-dialog>
 
       <!-- 导出弹窗 -->
-      <el-dialog v-model="exportVisible" title="导出题库文件" width="min(92vw, 500px)" align-center>
+      <el-dialog v-model="exportVisible" title="{{ t('exportBank') }}" width="min(92vw, 500px)" align-center>
         <el-form label-position="top" @submit.prevent>
           <el-form-item label="版本号">
             <el-input v-model="exportForm.version" placeholder="如 1.0.0" maxlength="20" />
@@ -510,8 +510,8 @@
         </template>
       </el-dialog>
 
-      <!-- 开始做题弹窗（会话模式） -->
-      <el-dialog v-model="sessionVisible" title="开始做题" width="min(92vw, 540px)" align-center>
+      <!-- {{ t('startPractice') }}弹窗（会话模式） -->
+      <el-dialog v-model="sessionVisible" title="{{ t('startPractice') }}" width="min(92vw, 540px)" align-center>
         <el-form label-position="top" @submit.prevent>
           <el-form-item label="练习模式">
             <div class="mode-options">
@@ -568,8 +568,8 @@
         </template>
       </el-dialog>
 
-      <!-- 批量导入弹窗 -->
-      <el-dialog v-model="batchVisible" title="批量导入题目" width="min(92vw, 560px)" align-center>
+      <!-- {{ t('batchImport') }}弹窗 -->
+      <el-dialog v-model="batchVisible" title="{{ t('batchImport') }}题目" width="min(92vw, 560px)" align-center>
         <div class="batch-head">
           <p class="text-secondary batch-desc">
             粘贴 AI 整理或结构化的题目 JSON（数组，或 <code>{ "questions": [...] }</code>），也可以选择 .json 文件
@@ -648,7 +648,7 @@
             <span class="wrong-meta text-muted">
               错 {{ w.wrongCount }} 次 · {{ formatDate(w.lastAnsweredAt) }}
             </span>
-            <button class="icon-btn" title="编辑该题" @click="editFromDialog(w)">
+            <button class="icon-btn" title="{{ t('edit') }}该题" @click="editFromDialog(w)">
               <TikuIcon name="edit" :size="13" />
             </button>
           </div>
@@ -689,7 +689,7 @@
               <span v-else-if="w.dueAt" class="due-today">今日到期</span>
               · Lv.{{ w.level }} · {{ formatDate(w.dueAt) }}
             </span>
-            <button class="icon-btn" title="编辑该题" @click="editFromDialog(w)">
+            <button class="icon-btn" title="{{ t('edit') }}该题" @click="editFromDialog(w)">
               <TikuIcon name="edit" :size="13" />
             </button>
           </div>
@@ -725,49 +725,49 @@
         </template>
       </el-dialog>
 
-      <!-- AI 追加弹窗（目标锁定当前题库） -->
+      <!-- {{ t('aiAppend') }}弹窗（目标锁定当前题库） -->
       <AiImportDialog ref="aiDialog" :bank-id="id" :bank-name="bank?.name" @done="onAiDone" />
 
-      <!-- 材料管理弹窗 -->
-      <el-dialog v-model="materialsVisible" title="共享材料（资料分析大题干）" width="min(92vw, 620px)" align-center>
+      <!-- {{ t('materials') }}管理弹窗 -->
+      <el-dialog v-model="materialsVisible" title="共享{{ t('materials') }}（资料分析大题干）" width="min(92vw, 620px)" align-center>
         <div class="material-list">
           <div v-for="m in materials" :key="m.id" class="material-item">
             <div class="material-content" v-html="richHtml(m.content)"></div>
             <div class="material-actions">
               <button class="btn btn-secondary btn-sm" @click="editMaterial(m)">
                 <TikuIcon name="edit" :size="12" />
-                编辑
+                {{ t('edit') }}
               </button>
               <button class="btn btn-danger btn-sm" @click="removeMaterial(m)">
                 <TikuIcon name="trash" :size="12" />
-                删除
+                {{ t('delete') }}
               </button>
             </div>
           </div>
           <div v-if="materials.length === 0" class="material-empty text-muted">
-            还没有材料。材料用于资料分析题（组内题共用的文字/图片大题干），创建后可在录题时关联。
+            {{ t('noMaterialsTip') }}
           </div>
         </div>
 
-        <!-- 新建/编辑 -->
+        <!-- 新建/{{ t('edit') }} -->
         <div class="material-edit">
           <div class="field-head">
-            <label class="field-label">{{ editingMaterialId ? '编辑材料' : '新建材料' }}</label>
+            <label class="field-label">{{ editingMaterialId ? t('editMaterial') : t('createMaterial') }}</label>
             <button class="img-btn" :disabled="materialSaving" @click="insertMaterialImage">
               <TikuIcon name="file" :size="12" />
-              插图
+              {{ t('insertImage') }}
             </button>
           </div>
           <el-input
             v-model="materialContent"
             type="textarea"
             :rows="3"
-            placeholder="材料内容（文字 + [图片:文件名] 标记）"
+            placeholder="{{ t('materials') }}内容（文字 + [图片:文件名] 标记）"
           />
           <div class="material-edit-actions">
             <button class="btn btn-ghost btn-sm" @click="resetMaterialForm">清空</button>
             <button class="btn btn-primary btn-sm" :disabled="materialSaving" @click="saveMaterial">
-              {{ materialSaving ? '保存中…' : editingMaterialId ? '保存修改' : '创建材料' }}
+              {{ materialSaving ? t('saving') : editingMaterialId ? t('saveEdit') : t('createMaterial') }}
             </button>
           </div>
         </div>
@@ -781,6 +781,44 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, reactive, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n({
+  messages: {
+    'zh-CN': {
+      notFoundDesc: '题库可能已被删除，或地址有误', backToBanks: '返回题库列表', loading: '加载中…',
+      authorBy: '作者：{v}', sourceFrom: '来源：{v}', createdOn: '创建于 {d}', questionsN: '共 {n} 题',
+      history: '练习历史', edit: '编辑', exportBank: '导出题库文件', printPaper: '打印试卷', delete: '删除', startPractice: '开始做题',
+      answeredOf: '已做 / 共 {n} 题', accuracyOf: '正确率（作答 {n} 次）', progressPct: '完成度',
+      noRecordsYet: '还没有做题记录', firstRoundHint: '刷第一轮',
+      reviewPlan: '复习计划', dueTodayN: '今日待复习 {n} 题', reviewOffTip: '关闭时进度照记、错题照收，只是不提醒到期复习；重新开启后到期题会回到队列',
+      wrongTab0: '错题', favTab0: '收藏',
+      questions: '题目', materials: '材料', aiAppend: 'AI 追加', batchImport: '批量导入', aiFillAnswers: 'AI 补答案',
+      cancelSelect: '取消选题', selectSave: '选题另存', addQuestion: '添加题目',
+      searchPh: '搜索题干 / 选项关键词', qType: '题型', qScope: '范围', all: '全部', undone: '未做', qCategory: '分类',
+      filterResultN: '筛选结果 {n} 题', noMatch: '没有匹配的题目，试试调整筛选条件', noQuestions: '题库还没有题目', addFirstQuestion: '录入第一题',
+      clickEditHint: '点击编辑该题（右侧按钮可做题 / AI 解析 / 删除）',
+      noMaterialsTip: '还没有材料。材料用于资料分析题（组内题共用的文字/图片大题干），创建后可在录题时关联。',
+      editMaterial: '编辑材料', createMaterial: '创建材料', saving: '保存中…', saveEdit: '保存修改', insertImage: '插图',
+    },
+    'en-US': {
+      notFoundDesc: 'This bank may have been deleted, or the link is wrong', backToBanks: 'Back to banks', loading: 'Loading…',
+      authorBy: 'Author: {v}', sourceFrom: 'Source: {v}', createdOn: 'Created {d}', questionsN: '{n} questions',
+      history: 'History', edit: 'Edit', exportBank: 'Export bank file', printPaper: 'Print paper', delete: 'Delete', startPractice: 'Start practice',
+      answeredOf: '{n} answered / total', accuracyOf: 'Accuracy ({n} attempts)', progressPct: 'Progress',
+      noRecordsYet: 'No practice records yet', firstRoundHint: 'for your first round',
+      reviewPlan: 'Review plan', dueTodayN: '{n} due today', reviewOffTip: 'Progress and mistakes are still recorded while off — only due reminders stop; due questions return when re-enabled',
+      wrongTab0: 'Mistakes', favTab0: 'Favorites',
+      questions: 'Questions', materials: 'Materials', aiAppend: 'AI Append', batchImport: 'Batch import', aiFillAnswers: 'AI Fill answers',
+      cancelSelect: 'Cancel select', selectSave: 'Select & save as', addQuestion: 'Add question',
+      searchPh: 'Search stem / options', qType: 'Type', qScope: 'Scope', all: 'All', undone: 'Undone', qCategory: 'Category',
+      filterResultN: '{n} results', noMatch: 'No matching questions — try adjusting filters', noQuestions: 'No questions in this bank yet', addFirstQuestion: 'Add your first question',
+      clickEditHint: 'Click to edit (right-side buttons: practice / AI analyze / delete)',
+      noMaterialsTip: 'No materials yet. Materials are shared texts/images used by analysis questions; create one and link it when adding questions.',
+      editMaterial: 'Edit material', createMaterial: 'Create material', saving: 'Saving…', saveEdit: 'Save changes', insertImage: 'Image',
+    }
+  }
+})
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { batchCreateQuestions, aiFillAnswers, copyQuestionSelection, deleteBank, exportBank, exportTikuBank, getBank, getBankQuestionNav, getBankQuestions, getBanks, setReviewEnabled, updateBank } from '../api/banks'
@@ -841,7 +879,7 @@ const typeFilterOptions = [
   { value: 'JUDGE', label: '判断' },
   { value: 'SUBJECTIVE', label: '主观' }
 ]
-// AI 补答案只处理客观题
+// {{ t('aiFillAnswers') }}只处理客观题
 const objectiveTypeOptions = typeFilterOptions.filter((t) => t.value !== 'SUBJECTIVE')
 const filterActive = computed(() => !!(qKeyword.value || qType.value || qScope.value || qCategory.value))
 
@@ -883,7 +921,7 @@ async function loadQuestions() {
   loadQuestionNav()
 }
 
-/* ---------- 题号盘（编辑模式右侧：全部题目圆形题号，任意跳转） ---------- */
+/* ---------- 题号盘（{{ t('edit') }}模式右侧：全部题目圆形题号，任意跳转） ---------- */
 const qNav = ref([])
 const dockOpen = computed(() => panelOpen.value && panelMode.value === 'edit')
 const jumpRequest = ref({ seq: 0, questionId: null })
@@ -900,7 +938,7 @@ dockNarrow.value = dockMq.matches
 dockMq.addEventListener('change', syncDockNarrow)
 onBeforeUnmount(() => dockMq.removeEventListener('change', syncDockNarrow))
 
-//全量题号（不带筛选：编辑校对时可在全部题中跳转）
+//全量题号（不带筛选：{{ t('edit') }}校对时可在全部题中跳转）
 async function loadQuestionNav() {
   try {
     qNav.value = (await getBankQuestionNav(id)) || []
@@ -909,12 +947,12 @@ async function loadQuestionNav() {
   }
 }
 
-/* 题号盘点击：通知编辑面板（面板先确认未保存修改，通过后 emit jump-to） */
+/* 题号盘点击：通知{{ t('edit') }}面板（面板先确认未保存修改，通过后 emit jump-to） */
 function onDockSelect(questionId) {
   jumpRequest.value = { seq: jumpRequest.value.seq + 1, questionId }
 }
 
-/* 面板确认后的真正跳转：无筛选时把列表翻到目标题所在页，再打开该题编辑 */
+/* 面板确认后的真正跳转：无筛选时把列表翻到目标题所在页，再打开该题{{ t('edit') }} */
 async function onPanelJumpTo(questionId) {
   await jumpToQuestion(questionId)
 }
@@ -1249,7 +1287,7 @@ async function startWrongSession() {
   await startSessionWith({ mode: 'WRONG' }, wrongTotal.value)
 }
 
-/* ---------- 会话（开始做题 / 复习 / 错题重做） ---------- */
+/* ---------- 会话（{{ t('startPractice') }} / 复习 / 错题重做） ---------- */
 const sessionVisible = ref(false)
 const sessionCreating = ref(false)
 
@@ -1358,7 +1396,7 @@ async function startFavoriteSession() {
   await startSessionWith({ mode: 'FAVORITE' }, null)
 }
 
-/* ---------- 材料管理（资料分析共享大题干） ---------- */
+/* ---------- {{ t('materials') }}管理（资料分析共享大题干） ---------- */
 const materialsVisible = ref(false)
 const materials = ref([])
 const materialContent = ref('')
@@ -1454,7 +1492,7 @@ async function insertMaterialImage() {
   }
 }
 
-/* ---------- AI 追加（目标锁定当前题库） ---------- */
+/* ---------- {{ t('aiAppend') }}（目标锁定当前题库） ---------- */
 const aiDialog = ref(null)
 
 function onAiDone(jobId) {
@@ -1463,7 +1501,7 @@ function onAiDone(jobId) {
 
 /* ---------- 点击题目行：创建顺序会话并从该题往后做（可交卷/进历史） ---------- */
 async function startPracticeAt(questionId) {
-  if (sessionCreating.value) return // 防双击重复建会话（孤儿会话污染练习历史）
+  if (sessionCreating.value) return // 防双击重复建会话（孤儿会话污染{{ t('history') }}）
   sessionCreating.value = true
   try {
     // 后端 SEQUENCE + startQuestionId：从该题按题号顺序抽 20 题
@@ -1501,7 +1539,7 @@ const editingListIndex = ref(-1)
 const editingQuestionId = ref(null)
 const navSwitching = ref(false)
 
-/* 打开面板后把页面滚动到面板（列表深处的"编辑"点击后面板在页面顶部，不滚动用户看不到） */
+/* 打开面板后把页面滚动到面板（列表深处的"{{ t('edit') }}"点击后面板在页面顶部，不滚动用户看不到） */
 function scrollToPanel() {
   nextTick(() => {
     panelEl.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -1533,7 +1571,7 @@ async function openEditPanel(questionId, index = -1) {
   }
 }
 
-/* 编辑面板导航状态：上一题 / 下一题沿"当前筛选结果"的列表顺序走，跨页自动翻页 */
+/* {{ t('edit') }}面板导航状态：上一题 / 下一题沿"当前筛选结果"的列表顺序走，跨页自动翻页 */
 const navState = computed(() => {
   if (panelMode.value !== 'edit' || !panelOpen.value) return null
   let idx = editingListIndex.value
@@ -1555,7 +1593,7 @@ async function handleNavigate(dir) {
   navSwitching.value = true
   try {
     let idx = editingListIndex.value
-    // 当前编辑题可能在保存刷新后移动过位置，以列表中的实际位置为准
+    // 当前{{ t('edit') }}题可能在保存刷新后移动过位置，以列表中的实际位置为准
     const found = questions.value.findIndex((q) => q.questionId === editingQuestionId.value)
     if (found >= 0) idx = found
     const target = idx + dir
@@ -1590,7 +1628,7 @@ async function onPanelSaved() {
   // 刷新列表，题号建议值（total + 1）随之更新；进度随之变化
   await loadQuestions()
   loadProgress()
-  // 编辑保存后面板停留：题号修改可能让当前题在列表中移动，重定位行下标供导航使用
+  // {{ t('edit') }}保存后面板停留：题号修改可能让当前题在列表中移动，重定位行下标供导航使用
   if (panelMode.value === 'edit' && editingQuestionId.value) {
     const found = questions.value.findIndex((q) => q.questionId === editingQuestionId.value)
     if (found >= 0) {
@@ -1607,7 +1645,7 @@ if (route.query.new === '1') {
   router.replace({ path: `/banks/${id}` })
 }
 
-/* ---------- 编辑题库 ---------- */
+/* ---------- {{ t('edit') }}题库 ---------- */
 const editBankVisible = ref(false)
 const editBankSubmitting = ref(false)
 const editBankForm = reactive({ name: '', description: '', source: '', authorName: '' })
@@ -1656,7 +1694,7 @@ async function submitEditBank() {
   }
 }
 
-/* ---------- 导出题库文件 ---------- */
+/* ---------- {{ t('exportBank') }} ---------- */
 const exportVisible = ref(false)
 const exporting = ref(false)
 const exportForm = reactive({ version: '', authorName: '', mode: 'AUTO', format: 'tiku' })
@@ -1724,7 +1762,7 @@ async function submitExport() {
   }
 }
 
-/* ---------- 批量导入题目 ---------- */
+/* ---------- {{ t('batchImport') }}题目 ---------- */
 const batchVisible = ref(false)
 const batchText = ref('')
 const batchSubmitting = ref(false)
@@ -1763,7 +1801,7 @@ async function submitBatch() {
   batchSubmitting.value = true
   try {
     const inserted = await batchCreateQuestions(id, questions)
-    ElMessage.success(`批量导入成功，新增 ${inserted} 道题目`)
+    ElMessage.success(`{{ t('batchImport') }}成功，新增 ${inserted} 道题目`)
     batchVisible.value = false
     loadQuestions()
     loadProgress()
@@ -1819,7 +1857,7 @@ async function submitAiFill() {
   }
 }
 
-/* ---------- 删除题库 ---------- */
+/* ---------- {{ t('delete') }}题库 ---------- */
 async function confirmDeleteBank() {
   try {
     await ElMessageBox.confirm(
@@ -1857,11 +1895,11 @@ async function toggleRowFavorite(q) {
   }
 }
 
-/* ---------- 删除题目 ---------- */
+/* ---------- {{ t('delete') }}题目 ---------- */
 async function confirmDeleteQuestion(q) {
   try {
     await ElMessageBox.confirm(
-      `确定删除第 ${q.questionNumber ?? '—'} 题吗？此操作不可恢复。`,
+      `确定{{ t('delete') }}第 ${q.questionNumber ?? '—'} 题吗？此操作不可恢复。`,
       '删除题目',
       {
         type: 'warning',
@@ -2092,7 +2130,7 @@ loadTopicOptions() // 分类筛选选项（与 TOPIC 会话共用，幂等）
   padding: 1px 9px;
 }
 
-/* 右侧悬浮题号盘（编辑模式）：fixed 于内容右缘与视口右边界之间，主内容始终全宽不受挤压 */
+/* 右侧悬浮题号盘（{{ t('edit') }}模式）：fixed 于内容右缘与视口右边界之间，主内容始终全宽不受挤压 */
 .edit-dock-side {
   position: fixed;
   top: 84px;
@@ -2454,7 +2492,7 @@ loadTopicOptions() // 分类筛选选项（与 TOPIC 会话共用，幂等）
   color: var(--text-secondary);
 }
 
-/* 批量导入 */
+/* {{ t('batchImport') }} */
 .batch-head {
   display: flex;
   align-items: flex-start;
@@ -2572,7 +2610,7 @@ loadTopicOptions() // 分类筛选选项（与 TOPIC 会话共用，幂等）
   flex: 1;
 }
 
-/* 材料管理弹窗 */
+/* {{ t('materials') }}管理弹窗 */
 .material-list {
   display: flex;
   flex-direction: column;
