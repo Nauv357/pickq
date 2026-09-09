@@ -4,42 +4,42 @@
     <template v-if="mode === 'list'">
       <header class="page-header">
         <div>
-          <h1 class="page-title">发现题库</h1>
-          <p class="page-desc">浏览拾题题库广场的免费题库；点开作品可看详情与评论，托管作品可直接导入</p>
+          <h1 class="page-title">{{ t('pageTitle') }}</h1>
+          <p class="page-desc">{{ t('pageDesc') }}</p>
         </div>
         <div class="header-actions">
           <button class="btn btn-secondary" @click="openPlaza">
             <TikuIcon name="link" :size="15" />
-            在官网浏览
+            {{ t('browseWeb') }}
           </button>
         </div>
       </header>
 
       <div class="toolbar">
         <div class="tabs">
-          <button class="tab" :class="{ active: sort === 'new' }" @click="changeSort('new')">最新</button>
-          <button class="tab" :class="{ active: sort === 'hot' }" @click="changeSort('hot')">热门</button>
+          <button class="tab" :class="{ active: sort === 'new' }" @click="changeSort('new')">{{ t('tabNew') }}</button>
+          <button class="tab" :class="{ active: sort === 'hot' }" @click="changeSort('hot')">{{ t('tabHot') }}</button>
         </div>
         <form class="search" @submit.prevent="doSearch">
-          <input v-model="qInput" class="search-input" type="search" placeholder="搜标题、描述或作者" />
-          <button class="btn btn-ghost btn-sm" type="submit">搜索</button>
+          <input v-model="qInput" class="search-input" type="search" :placeholder="t('searchPh')" />
+          <button class="btn btn-ghost btn-sm" type="submit">{{ t('search') }}</button>
         </form>
       </div>
 
       <div v-if="offline" class="discover-state">
         <TikuIcon name="info" :size="40" />
-        <h3>网络不可用</h3>
-        <p class="text-secondary">题库广场需要联网访问；本地题库的录题、刷题不受影响。</p>
-        <button class="btn btn-secondary" @click="load(true)">重试</button>
+        <h3>{{ t('offlineTitle') }}</h3>
+        <p class="text-secondary">{{ t('offlineDesc') }}</p>
+        <button class="btn btn-secondary" @click="load(true)">{{ t('retry') }}</button>
       </div>
       <div v-else-if="loading && !records.length" class="discover-state">
         <div v-for="n in 4" :key="n" class="sk-card tiku-skeleton"></div>
       </div>
       <div v-else-if="!records.length" class="discover-state">
         <TikuIcon name="search" :size="40" />
-        <h3>{{ errorMsg || '广场暂时没有作品' }}</h3>
-        <p class="text-secondary">{{ errorMsg ? '网络异常，请稍后重试。' : '稍后再来看看，或到官网发布你的第一个题库。' }}</p>
-        <button class="btn btn-secondary" @click="load(true)">重试</button>
+        <h3>{{ errorMsg || t('plazaEmpty') }}</h3>
+        <p class="text-secondary">{{ errorMsg ? t('netErr') : t('plazaEmptyTip') }}</p>
+        <button class="btn btn-secondary" @click="load(true)">{{ t('retry') }}</button>
       </div>
 
       <div v-else class="discover-list">
@@ -47,14 +47,14 @@
           <div class="d-main" @click="openDetail(w)">
             <p class="d-title">
               {{ w.title }}
-              <span v-if="w.storageKind === 'HOSTED'" class="d-tag hosted">中心托管</span>
-              <span v-else-if="w.downloadUrl" class="d-tag ext">作者外链</span>
+              <span v-if="w.storageKind === 'HOSTED'" class="d-tag hosted">{{ t('tagHosted') }}</span>
+              <span v-else-if="w.downloadUrl" class="d-tag ext">{{ t('tagExternal') }}</span>
             </p>
-            <p class="d-desc">{{ w.description || '作者未填写描述' }}</p>
+            <p class="d-desc">{{ w.description || t('noDesc') }}</p>
             <p class="d-meta">
-              <span v-if="w.authorId" class="author-name" @click.stop="openAuthor(w.authorId, null)">{{ w.authorName || '匿名' }}</span>
-              <span v-else>{{ w.authorName || '匿名' }}</span>
-              · v{{ w.version }} · 共 {{ w.questionsCount ?? '—' }} 题 · 收藏 {{ w.favoritesCount }} · {{ dateText(w.createdAt) }}
+              <span v-if="w.authorId" class="author-name" @click.stop="openAuthor(w.authorId, null)">{{ w.authorName || t('anonymous') }}</span>
+              <span v-else>{{ w.authorName || t('anonymous') }}</span>
+              · v{{ w.version }} · {{ t('questionsN', { n: w.questionsCount ?? '—' }) }} · {{ t('favoritesN', { n: w.favoritesCount }) }} · {{ dateText(w.createdAt) }}
             </p>
           </div>
           <div class="d-actions">
@@ -63,18 +63,18 @@
               class="btn btn-primary btn-sm"
               :disabled="importingKey === w.packageKey"
               @click="importPack(w)"
-            >{{ importingKey === w.packageKey ? '导入中…' : '导入' }}</button>
+            >{{ importingKey === w.packageKey ? t('importing') : t('importShort') }}</button>
             <template v-else>
               <button
                 class="btn btn-primary btn-sm"
                 :disabled="importingKey === w.packageKey"
                 @click="importExternal(w)"
-              >{{ importingKey === w.packageKey ? '处理中…' : '导入' }}</button>
-              <button class="btn btn-ghost btn-sm" title="浏览器下载（网盘链接时用）" @click="downloadExternal(w)">
+              >{{ importingKey === w.packageKey ? t('processing') : t('importShort') }}</button>
+              <button class="btn btn-ghost btn-sm" :title="t('downloadBrowser')" @click="downloadExternal(w)">
                 <TikuIcon name="download" :size="14" />
               </button>
             </template>
-            <button class="btn btn-ghost btn-sm icon-btn" title="查看详情与评论" @click="openDetail(w)">
+            <button class="btn btn-ghost btn-sm icon-btn" :title="t('viewDetail')" @click="openDetail(w)">
               <TikuIcon name="chevron-right" :size="14" />
             </button>
           </div>
@@ -98,7 +98,7 @@
       <header class="page-header">
         <div>
           <button class="btn btn-ghost btn-sm back-btn" @click="backToList">
-            <TikuIcon name="arrow-left" :size="14" /> 返回列表
+            <TikuIcon name="arrow-left" :size="14" /> {{ t('backList') }}
           </button>
         </div>
       </header>
@@ -106,36 +106,36 @@
       <div v-if="detailLoading" class="discover-state"><div class="sk-card tiku-skeleton"></div></div>
       <div v-else-if="detailError" class="discover-state">
         <TikuIcon name="info" :size="40" />
-        <h3>无法加载详情</h3>
+        <h3>{{ t('detailFail') }}</h3>
         <p class="text-secondary">{{ detailError }}</p>
-        <button class="btn btn-secondary" @click="backToList">返回列表</button>
+        <button class="btn btn-secondary" @click="backToList">{{ t('backList') }}</button>
       </div>
 
       <template v-else-if="detail">
         <div class="detail-card">
           <div class="detail-head">
             <h2 class="detail-title">{{ detail.latest.title }}</h2>
-            <span v-if="detail.latest.storageKind === 'HOSTED'" class="d-tag hosted">中心托管</span>
-            <span v-else-if="detail.latest.downloadUrl" class="d-tag ext">作者外链</span>
+            <span v-if="detail.latest.storageKind === 'HOSTED'" class="d-tag hosted">{{ t('tagHosted') }}</span>
+            <span v-else-if="detail.latest.downloadUrl" class="d-tag ext">{{ t('tagExternal') }}</span>
           </div>
           <p v-if="detail.author" class="detail-author">
-            作者：
+            {{ t('authorPrefix') }}
             <span class="author-name" @click="openAuthor(detail.author.id, detail.latest.packageKey)">
               {{ detail.author.nickname || detail.author.username }}
             </span>
-            <span v-if="detail.author.followersCount > 0" class="text-muted"> · {{ detail.author.followersCount }} 粉丝</span>
+            <span v-if="detail.author.followersCount > 0" class="text-muted"> · {{ t('followersN', { n: detail.author.followersCount }) }}</span>
           </p>
-          <p v-else class="detail-author text-muted">作者：{{ detail.latest.authorName || '匿名' }}</p>
-          <p class="detail-desc">{{ detail.latest.description || '作者未填写描述' }}</p>
+          <p v-else class="detail-author text-muted">{{ t('authorPrefix') }}{{ detail.latest.authorName || t('anonymous') }}</p>
+          <p class="detail-desc">{{ detail.latest.description || t('noDesc') }}</p>
           <p class="detail-meta">
-            共 {{ detail.latest.questionsCount ?? '—' }} 题<template v-if="detail.latest.materialsCount"> · 材料 {{ detail.latest.materialsCount }}</template>
-            · 收藏 {{ detail.latest.favoritesCount }} · 下载跳转 {{ detail.latest.downloadClicks }}
-            · 更新于 {{ dateText(detail.latest.updatedAt) }}
+            {{ t('questionsN', { n: detail.latest.questionsCount ?? '—' }) }}<template v-if="detail.latest.materialsCount"> · {{ t('materialsN', { n: detail.latest.materialsCount }) }}</template>
+            · {{ t('favoritesN', { n: detail.latest.favoritesCount }) }} · {{ t('downloadClicksN', { n: detail.latest.downloadClicks }) }}
+            · {{ t('updatedOn', { d: dateText(detail.latest.updatedAt) }) }}
           </p>
-          <p v-if="detail.latest.source" class="detail-source">来源声明：{{ detail.latest.source }}</p>
+          <p v-if="detail.latest.source" class="detail-source">{{ t('sourceNote', { v: detail.latest.source }) }}</p>
           <p v-if="detail.latest.checksum || detail.latest.fileSha256" class="detail-source">
-            指纹：<span class="mono">{{ shortKey(detail.latest.checksum || detail.latest.fileSha256) }}</span>
-            <span class="text-muted">（下载后可按此核对文件）</span>
+            {{ t('fingerprint') }}：<span class="mono">{{ shortKey(detail.latest.checksum || detail.latest.fileSha256) }}</span>
+            <span class="text-muted">{{ t('verifyHint') }}</span>
           </p>
 
           <div class="detail-actions">
@@ -150,62 +150,62 @@
                 class="btn btn-primary"
                 :disabled="importingKey === detail.latest.packageKey"
                 @click="importExternal(detail.latest)"
-              >{{ importingKey === detail.latest.packageKey ? '处理中…' : '导入到本应用' }}</button>
-              <button class="btn btn-secondary" @click="downloadExternal(detail.latest)">下载文件</button>
+              >{{ importingKey === detail.latest.packageKey ? t('processing') : t('importHere') }}</button>
+              <button class="btn btn-secondary" @click="downloadExternal(detail.latest)">{{ t('downloadFile') }}</button>
             </template>
-            <button class="btn btn-ghost" @click="openPack(detail.latest)">在官网打开作品页</button>
+            <button class="btn btn-ghost" @click="openPack(detail.latest)">{{ t('openOnWeb') }}</button>
           </div>
           <p v-if="detail.latest.storageKind !== 'HOSTED'" class="login-tip text-muted">
-            作者外链：若链接为网盘页面无法直接导入，会自动用浏览器下载；
-            下载完成后回到「题库」页点「导入」选择该文件即可。
+            {{ t('externalTip1') }}
+            {{ t('externalTip2') }}
           </p>
           <p class="login-tip text-muted">
-            收藏、评论与发布需要在题库广场登录后操作——
-            <span class="author-name" @click="openPlaza">前往官网</span>
+            {{ t('loginNeeded') }}
+            <span class="author-name" @click="openPlaza">{{ t('goWebsite') }}</span>
           </p>
         </div>
 
         <!-- 版本历史（只读展示） -->
         <section v-if="detail.versions.length > 1" class="detail-section">
-          <h3 class="section-title">版本历史（{{ detail.versions.length }}）</h3>
+          <h3 class="section-title">{{ t('versions', { n: detail.versions.length }) }}</h3>
           <div v-for="v in detail.versions" :key="v.version" class="ver-row">
             <div class="ver-main">
               <p class="ver-head">
                 v{{ v.version }}
-                <span v-if="v.version === detail.latest.version" class="d-tag hosted ver-cur">当前</span>
+                <span v-if="v.version === detail.latest.version" class="d-tag hosted ver-cur">{{ t('current') }}</span>
               </p>
               <p class="ver-meta">
-                {{ dateText(v.createdAt) }} · 共 {{ v.questionsCount ?? '—' }} 题 ·
-                指纹 <span class="mono">{{ shortKey(v.checksum || v.fileSha256) }}</span>
+                {{ dateText(v.createdAt) }} · {{ t('questionsN', { n: v.questionsCount ?? '—' }) }} ·
+                {{ t('fingerprint') }} <span class="mono">{{ shortKey(v.checksum || v.fileSha256) }}</span>
               </p>
             </div>
             <div class="ver-side">
-              <button v-if="v.version !== detail.latest.version && v.storageKind === 'HOSTED'" class="btn btn-ghost btn-sm" @click="importVersion(v)">导入此版本</button>
-              <button v-else-if="v.version !== detail.latest.version && v.downloadUrl" class="btn btn-ghost btn-sm" @click="downloadExternal(v)">下载此版本</button>
+              <button v-if="v.version !== detail.latest.version && v.storageKind === 'HOSTED'" class="btn btn-ghost btn-sm" @click="importVersion(v)">{{ t('importVer') }}</button>
+              <button v-else-if="v.version !== detail.latest.version && v.downloadUrl" class="btn btn-ghost btn-sm" @click="downloadExternal(v)">{{ t('downloadVer') }}</button>
             </div>
           </div>
         </section>
 
         <!-- 衍生作品 -->
         <section v-if="detail.derived && detail.derived.length" class="detail-section">
-          <h3 class="section-title">由此派生的作品</h3>
+          <h3 class="section-title">{{ t('derived') }}</h3>
           <div v-for="d in detail.derived" :key="d.packageKey" class="derived-item" @click="openDetail(d)">
             <span class="derived-title">{{ d.title }}</span>
-            <span class="text-muted"> · {{ d.authorName || '匿名' }} · v{{ d.version }}</span>
+            <span class="text-muted"> · {{ d.authorName || t('anonymous') }} · v{{ d.version }}</span>
           </div>
         </section>
 
         <!-- 评论区（只读） -->
         <section class="detail-section">
-          <h3 class="section-title">评论（{{ comments.length }}）</h3>
-          <p v-if="commentsLoading" class="text-muted">加载中…</p>
-          <p v-else-if="!comments.length" class="text-muted comment-empty">还没有评论。到官网登录后可以发表。</p>
+          <h3 class="section-title">{{ t('comments', { n: comments.length }) }}</h3>
+          <p v-if="commentsLoading" class="text-muted">{{ t('loading') }}</p>
+          <p v-else-if="!comments.length" class="text-muted comment-empty">{{ t('noComments') }}</p>
           <div v-for="c in comments" :key="c.id" class="comment-item">
             <p class="comment-head">
               <span v-if="c.userId" class="author-name" @click="openAuthor(c.userId, detail.latest.packageKey)">{{ c.authorName }}</span>
               <span v-else>{{ c.authorName }}</span>
               <span class="text-muted comment-date">{{ dateText(c.createdAt) }}</span>
-              <span v-if="c.likesCount > 0" class="comment-like">有帮助 · {{ c.likesCount }}</span>
+              <span v-if="c.likesCount > 0" class="comment-like">{{ t('helpful', { n: c.likesCount }) }}</span>
             </p>
             <p class="comment-body">{{ c.content }}</p>
           </div>
@@ -218,7 +218,7 @@
       <header class="page-header">
         <div>
           <button class="btn btn-ghost btn-sm back-btn" @click="backFromAuthor">
-            <TikuIcon name="arrow-left" :size="14" /> 返回
+            <TikuIcon name="arrow-left" :size="14" /> {{ t('back') }}
           </button>
         </div>
       </header>
@@ -226,20 +226,20 @@
       <div v-if="authorLoading" class="discover-state"><div class="sk-card tiku-skeleton"></div></div>
       <div v-else-if="authorError" class="discover-state">
         <TikuIcon name="info" :size="40" />
-        <h3>无法加载作者信息</h3>
+        <h3>{{ t('authorFail') }}</h3>
         <p class="text-secondary">{{ authorError }}</p>
       </div>
 
       <template v-else-if="authorInfo">
         <div class="detail-card author-card">
           <h2 class="detail-title">{{ authorInfo.author.nickname || authorInfo.author.username }}</h2>
-          <p class="text-muted">@{{ authorInfo.author.username }} · 加入于 {{ dateText(authorInfo.author.created_at) }}</p>
+          <p class="text-muted">@{{ authorInfo.author.username }} · {{ t('joinedOn', { d: dateText(authorInfo.author.created_at) }) }}</p>
           <p v-if="authorInfo.author.bio" class="detail-desc">{{ authorInfo.author.bio }}</p>
           <p class="detail-meta">
-            作品 {{ authorInfo.total }} · 粉丝 {{ authorInfo.followersCount || 0 }}
+            {{ t('worksN', { n: authorInfo.total }) }} · {{ t('followersN', { n: authorInfo.followersCount || 0 }) }}
           </p>
           <p class="login-tip text-muted">
-            关注作者需要登录——<span class="author-name" @click="openPlaza">前往官网</span>
+            {{ t('followNeedsLogin') }}<span class="author-name" @click="openPlaza">{{ t('goWebsite') }}</span>
           </p>
         </div>
 
@@ -247,11 +247,11 @@
           <div v-for="w in authorInfo.records" :key="w.packageKey" class="d-item">
             <div class="d-main" @click="openDetail(w)">
               <p class="d-title">{{ w.title }}</p>
-              <p class="d-desc">{{ w.description || '作者未填写描述' }}</p>
-              <p class="d-meta">v{{ w.version }} · 共 {{ w.questionsCount ?? '—' }} 题 · 收藏 {{ w.favoritesCount }} · {{ dateText(w.createdAt) }}</p>
+              <p class="d-desc">{{ w.description || t('noDesc') }}</p>
+              <p class="d-meta">v{{ w.version }} · {{ t('questionsN', { n: w.questionsCount ?? '—' }) }} · {{ t('favoritesN', { n: w.favoritesCount }) }} · {{ dateText(w.createdAt) }}</p>
             </div>
             <div class="d-actions">
-              <button class="btn btn-ghost btn-sm icon-btn" title="查看详情" @click="openDetail(w)">
+              <button class="btn btn-ghost btn-sm icon-btn" :title="t('viewDetail')" @click="openDetail(w)">
                 <TikuIcon name="chevron-right" :size="14" />
               </button>
             </div>
@@ -269,6 +269,130 @@ import TikuIcon from '../components/TikuIcon.vue'
 import { centerPacksUrl, getCenterUrl } from '../utils/center'
 import { openExternal } from '../utils/external'
 import http from '../api/http'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n({
+  messages: {
+    'zh-CN': {
+      pageTitle: '发现题库',
+      pageDesc: '浏览拾题题库广场的免费题库；点开作品可看详情与评论，托管作品可直接导入',
+      browseWeb: '在官网浏览',
+      tabNew: '最新',
+      tabHot: '热门',
+      searchPh: '搜标题、描述或作者',
+      search: '搜索',
+      offlineTitle: '网络不可用',
+      offlineDesc: '题库广场需要联网访问；本地题库的录题、刷题不受影响。',
+      retry: '重试',
+      plazaEmpty: '广场暂时没有作品',
+      netErr: '网络异常，请稍后重试。',
+      plazaEmptyTip: '稍后再来看看，或到官网发布你的第一个题库。',
+      tagHosted: '中心托管',
+      tagExternal: '作者外链',
+      noDesc: '作者未填写描述',
+      anonymous: '匿名',
+      questionsN: '共 {n} 题',
+      favoritesN: '收藏 {n}',
+      downloadBrowser: '浏览器下载（网盘链接时用）',
+      viewDetail: '查看详情与评论',
+      importShort: '导入',
+      importHere: '导入到本应用',
+      importing: '导入中…',
+      processing: '处理中…',
+      externalTip1: '作者外链：若链接为网盘页面无法直接导入，会自动用浏览器下载；',
+      externalTip2: '下载完成后回到「题库」页点「导入」选择该文件即可。',
+      loginNeeded: '收藏、评论与发布需要在题库广场登录后操作——',
+      back: '返回',
+      joinedOn: '加入于 {d}',
+      worksN: '作品 {n}',
+      detailFail: '无法加载详情',
+      backList: '返回列表',
+      authorPrefix: '作者：',
+      followersN: '{n} 粉丝',
+      materialsN: '材料 {n}',
+      downloadClicksN: '下载跳转 {n}',
+      updatedOn: '更新于 {d}',
+      fingerprint: '指纹',
+      verifyHint: '（下载后可按此核对文件）',
+      sourceNote: '来源声明：{v}',
+      downloadFile: '下载文件',
+      openOnWeb: '在官网打开作品页',
+      goWebsite: '前往官网',
+      versions: '版本历史（{n}）',
+      current: '当前',
+      importVer: '导入此版本',
+      downloadVer: '下载此版本',
+      derived: '由此派生的作品',
+      comments: '评论（{n}）',
+      loading: '加载中…',
+      noComments: '还没有评论。到官网登录后可以发表。',
+      helpful: '有帮助 · {n}',
+      authorFail: '无法加载作者信息',
+      followNeedsLogin: '关注作者需要登录——',
+      byAuthor: '的作者',
+      searchResult: '的搜索结果'
+    },
+    'en-US': {
+      pageTitle: 'Discover',
+      pageDesc: 'Browse free question banks shared on the PickQ plaza; open a work for details & comments — hosted works can be imported directly',
+      browseWeb: 'Browse on website',
+      tabNew: 'New',
+      tabHot: 'Popular',
+      searchPh: 'Search title, description or author',
+      search: 'Search',
+      offlineTitle: 'No network',
+      offlineDesc: 'The plaza needs an internet connection. Local banks, practice and review are unaffected.',
+      retry: 'Retry',
+      plazaEmpty: 'No works in the plaza yet',
+      netErr: 'Network error, please try again later.',
+      plazaEmptyTip: 'Come back later, or publish your first bank on the website.',
+      tagHosted: 'Hosted',
+      tagExternal: 'External link',
+      noDesc: 'No description by the author',
+      anonymous: 'Anonymous',
+      questionsN: '{n} questions',
+      favoritesN: '{n} favorites',
+      downloadBrowser: 'Download in browser (for cloud-drive links)',
+      viewDetail: 'View details & comments',
+      importShort: 'Import',
+      importHere: 'Import to this app',
+      importing: 'Importing…',
+      processing: 'Working…',
+      externalTip1: 'External link: if it is a cloud-drive page that cannot be imported directly, it will open in your browser instead;',
+      externalTip2: 'after downloading, go to the Banks page and click Import to pick the file.',
+      loginNeeded: 'Favoriting, commenting and publishing require login on the plaza —',
+      back: 'Back',
+      joinedOn: 'Joined {d}',
+      worksN: '{n} works',
+      detailFail: 'Failed to load details',
+      backList: 'Back to list',
+      authorPrefix: 'Author: ',
+      followersN: '{n} followers',
+      materialsN: '{n} materials',
+      downloadClicksN: '{n} downloads',
+      updatedOn: 'Updated {d}',
+      fingerprint: 'Fingerprint',
+      verifyHint: '(verify the file after download)',
+      sourceNote: 'Source: {v}',
+      downloadFile: 'Download file',
+      openOnWeb: 'Open work page on website',
+      goWebsite: 'Go to website',
+      versions: 'Versions ({n})',
+      current: 'Current',
+      importVer: 'Import this version',
+      downloadVer: 'Download this version',
+      derived: 'Derived works',
+      comments: 'Comments ({n})',
+      loading: 'Loading…',
+      noComments: 'No comments yet. Log in on the website to comment.',
+      helpful: 'Helpful · {n}',
+      authorFail: 'Failed to load author info',
+      followNeedsLogin: 'Following authors requires login —',
+      byAuthor: '\'s banks',
+      searchResult: 'results for'
+    }
+  }
+})
 
 /* ---------- 列表 ---------- */
 const size = 12
