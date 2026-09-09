@@ -77,7 +77,7 @@
               />
               <span class="text-muted mono">/ {{ formatScore(q.score) }}</span>
               <button class="btn btn-secondary btn-sm" :disabled="gradingQid === q.questionId" @click="quickGrade(q, q.score)">
-                全对
+                {{ t('fullMarks') }}
               </button>
               <button class="btn btn-primary btn-sm" :disabled="gradingQid === q.questionId" @click="gradePending(q)">
                 {{ gradingQid === q.questionId ? t('saving') : t('saveScore') }}
