@@ -3,21 +3,21 @@
     <!-- 页面头部 -->
     <header class="page-header">
       <div>
-        <h1 class="page-title">题库</h1>
-        <p class="page-desc">把学习资料变成题库（AI 整理），刷题与复习都在这里</p>
+        <h1 class="page-title">{{ t('pageTitle') }}</h1>
+        <p class="page-desc">{{ t('pageDesc') }}</p>
       </div>
       <div class="header-actions">
         <button ref="importMainBtn" class="btn btn-primary" @click="openImportChoice">
           <TikuIcon name="upload" :size="15" />
-          导入
+          {{ t('act.import') }}
         </button>
         <button class="btn btn-secondary" :disabled="total < 2" @click="openMerge">
           <TikuIcon name="package" :size="15" />
-          合并题库
+          {{ t('act.merge') }}
         </button>
         <button class="btn btn-secondary" @click="openCreate">
           <TikuIcon name="plus" :size="15" />
-          创建题库
+          {{ t('act.create') }}
         </button>
       </div>
     </header>
@@ -26,25 +26,25 @@
     <AiImportDialog ref="aiDialog" @done="onAiDone" />
 
     <!-- 导入选择层：按场景二选一（入口只留一个"导入"，避免新用户猜错） -->
-    <el-dialog v-model="importChoiceVisible" title="导入" width="min(92vw, 560px)" align-center>
-      <p class="text-secondary choice-lead">按你的情况选一种：</p>
+    <el-dialog v-model="importChoiceVisible" :title="t('choice.title')" width="min(92vw, 560px)" align-center>
+      <p class="text-secondary choice-lead">{{ t('choice.lead') }}</p>
       <div class="choice-grid">
         <button class="onboard-card onboard-primary" @click="pickAiImport">
           <span class="onboard-icon"><TikuIcon name="sparkle" :size="20" /></span>
           <span class="onboard-body">
             <span class="onboard-title">
-              我手上有试卷 / 学习资料
-              <em class="onboard-tag">大多数人的选择</em>
+              {{ t('choice.aiTitle') }}
+              <em class="onboard-tag">{{ t('choice.aiTag') }}</em>
             </span>
-            <span class="onboard-desc">上传 PDF、Word、照片或网页链接，AI 自动整理成题目，逐题确认后即可开刷</span>
+            <span class="onboard-desc">{{ t('choice.aiDesc') }}</span>
           </span>
           <span class="onboard-go"><TikuIcon name="chevron-right" :size="15" /></span>
         </button>
         <button class="onboard-card" @click="pickFileImport">
           <span class="onboard-icon onboard-icon-plain"><TikuIcon name="upload" :size="20" /></span>
           <span class="onboard-body">
-            <span class="onboard-title">别人发来了题库文件</span>
-            <span class="onboard-desc">选择 .tiku / .json 文件（别人分享的现成题库），导入即可用</span>
+            <span class="onboard-title">{{ t('choice.fileTitle') }}</span>
+            <span class="onboard-desc">{{ t('choice.fileDesc') }}</span>
           </span>
           <span class="onboard-go"><TikuIcon name="chevron-right" :size="15" /></span>
         </button>
@@ -62,8 +62,8 @@
 
     <!-- 空状态（无任何题库）：首次上手的场景化入口 -->
     <div v-else-if="banks.length === 0 && !searchActive" class="empty">
-      <h3>还没有题库</h3>
-      <p class="text-secondary empty-lead">拾题把「学习资料」变成「能刷的题库」。按你的情况选一种开始：</p>
+      <h3>{{ t('empty.title') }}</h3>
+      <p class="text-secondary empty-lead">{{ t('empty.lead') }}</p>
 
       <div class="onboard-grid">
         <!-- 主入口：AI 整理（最常用） -->
@@ -71,10 +71,10 @@
           <span class="onboard-icon"><TikuIcon name="sparkle" :size="20" /></span>
           <span class="onboard-body">
             <span class="onboard-title">
-              我手上有试卷 / 学习资料
-              <em class="onboard-tag">大多数人从这里开始</em>
+              {{ t('empty.aiTitle') }}
+              <em class="onboard-tag">{{ t('empty.aiTag') }}</em>
             </span>
-            <span class="onboard-desc">上传 PDF、Word、照片或网页链接，AI 自动整理成题目，确认后即可开刷</span>
+            <span class="onboard-desc">{{ t('empty.aiDesc') }}</span>
           </span>
           <span class="onboard-go"><TikuIcon name="chevron-right" :size="15" /></span>
         </button>
@@ -84,21 +84,21 @@
           <button class="onboard-sub" @click="doImport">
             <TikuIcon name="upload" :size="16" />
             <span class="onboard-sub-body">
-              <span class="onboard-sub-title">别人发来了题库文件</span>
-              <span class="onboard-sub-desc">.tiku / .json 文件，导入即可用</span>
+              <span class="onboard-sub-title">{{ t('empty.fileTitle') }}</span>
+              <span class="onboard-sub-desc">{{ t('empty.fileDesc') }}</span>
             </span>
           </button>
           <button class="onboard-sub" @click="openCreate">
             <TikuIcon name="plus" :size="16" />
             <span class="onboard-sub-body">
-              <span class="onboard-sub-title">想自己出题</span>
-              <span class="onboard-sub-desc">先建一个空题库，逐题录入</span>
+              <span class="onboard-sub-title">{{ t('empty.createTitle') }}</span>
+              <span class="onboard-sub-desc">{{ t('empty.createDesc') }}</span>
             </span>
           </button>
         </div>
 
         <p class="onboard-foot text-muted">
-          想直接刷现成的？<RouterLink to="/discover" class="onboard-link">去「发现题库」逛逛 →</RouterLink>
+          {{ t('empty.foot') }}<RouterLink to="/discover" class="onboard-link">{{ t('empty.discoverLink') }}</RouterLink>
         </p>
       </div>
     </div>
@@ -109,22 +109,22 @@
       <div class="bank-toolbar">
         <el-input
           v-model="keyword"
-          placeholder="搜索题库名称 / 描述"
+          :placeholder="t('toolbar.searchPh')"
           clearable
           style="width: 240px"
         >
           <template #prefix><TikuIcon name="search" :size="13" /></template>
         </el-input>
-        <el-select v-model="sort" style="width: 132px" title="排序方式">
-          <el-option label="最近创建" value="created" />
-          <el-option label="最近更新" value="updated" />
-          <el-option label="按名称" value="name" />
+        <el-select v-model="sort" style="width: 132px" :title="t('toolbar.sortTitle')">
+          <el-option :label="t('toolbar.sortCreated')" value="created" />
+          <el-option :label="t('toolbar.sortUpdated')" value="updated" />
+          <el-option :label="t('toolbar.sortName')" value="name" />
         </el-select>
-        <span v-if="searchActive" class="bank-match text-muted">匹配 {{ total }} 个题库</span>
+        <span v-if="searchActive" class="bank-match text-muted">{{ t('toolbar.match', { n: total }) }}</span>
         <span class="bar-grow"></span>
         <RouterLink to="/stats" class="stats-link">
           <TikuIcon name="chart" :size="13" />
-          学习统计
+          {{ t('toolbar.stats') }}
         </RouterLink>
       </div>
 
@@ -132,20 +132,20 @@
       <div v-if="overview && !searchActive" class="home-strip">
         <div class="home-stat">
           <span class="home-num mono">{{ overview.bankCount }}</span>
-          <span class="home-label">题库</span>
+          <span class="home-label">{{ t('strip.banks') }}</span>
         </div>
         <div class="home-stat">
           <span class="home-num mono">{{ overview.questionCount }}</span>
-          <span class="home-label">题目</span>
+          <span class="home-label">{{ t('strip.questions') }}</span>
         </div>
         <div class="home-stat" :class="{ 'home-hot': overview.dueTotal > 0 }">
           <span class="home-num mono">{{ overview.dueTotal }}</span>
-          <span class="home-label">今日待复习</span>
+          <span class="home-label">{{ t('strip.due') }}</span>
         </div>
         <button
           class="home-stat home-click"
           :disabled="!overview.lastSession"
-          title="查看最近一场练习的回顾"
+          :title="t('strip.lastTip')"
           @click="goLastSession"
         >
           <template v-if="overview.lastSession">
@@ -156,7 +156,7 @@
           </template>
           <template v-else>
             <span class="home-num mono">—</span>
-            <span class="home-label">还没有完成过练习</span>
+            <span class="home-label">{{ t('strip.noSession') }}</span>
           </template>
         </button>
       </div>
@@ -164,13 +164,13 @@
       <!-- 首次引导：有题库但从没交卷过 -->
       <div v-if="overview && overview.bankCount > 0 && !overview.lastSession && !searchActive" class="home-guide">
         <TikuIcon name="play" :size="14" />
-        <span>还没有做题记录：点下面任一题库进入「开始做题」，刷完第一场后这里会显示你的练习概况与复习提醒</span>
+        <span>{{ t('guideNoRecord') }}</span>
       </div>
 
       <!-- 搜索无结果 -->
       <div v-if="banks.length === 0" class="bank-filter-empty">
         <TikuIcon name="search" :size="30" />
-        <p class="text-secondary">没有匹配的题库，换个关键词试试</p>
+        <p class="text-secondary">{{ t('filterEmpty') }}</p>
       </div>
       <div v-else class="grid">
         <div
@@ -187,10 +187,10 @@
             <span v-if="bank.version" class="version-tag">v{{ bank.version }}</span>
             <span v-if="bank.authorName" class="author-tag">{{ bank.authorName }}</span>
           </div>
-          <p class="bank-desc">{{ bank.description || '暂无描述' }}</p>
+          <p class="bank-desc">{{ bank.description || t('noDesc') }}</p>
           <div class="bank-meta text-muted">
             <TikuIcon name="clock" :size="13" />
-            <span>创建于 {{ formatDate(bank.createdAt) }}</span>
+            <span>{{ t('createdOn', { d: formatDate(bank.createdAt) }) }}</span>
           </div>
         </div>
       </div>
@@ -211,36 +211,36 @@
     <!-- 创建题库弹窗 -->
     <el-dialog
       v-model="dialogVisible"
-      title="创建题库"
+      :title="t('dialogs.createTitle')"
       width="min(92vw, 480px)"
       :close-on-click-modal="false"
       align-center
     >
       <el-form label-position="top" @submit.prevent>
-        <el-form-item label="题库名称" required>
+        <el-form-item :label="t('dialogs.name')" required>
           <el-input
             v-model="form.name"
-            placeholder="例如：C1 驾考科目一"
+            :placeholder="t('dialogs.namePh')"
             maxlength="100"
             show-word-limit
             @keyup.enter="submitCreate"
           />
         </el-form-item>
-        <el-form-item label="描述（可选）">
+        <el-form-item :label="t('dialogs.desc')">
           <el-input
             v-model="form.description"
             type="textarea"
             :rows="3"
-            placeholder="这套题的主题、来源或使用说明"
+            :placeholder="t('dialogs.descPh')"
             maxlength="500"
             show-word-limit
           />
         </el-form-item>
       </el-form>
       <template #footer>
-        <button class="btn btn-ghost" @click="dialogVisible = false">取消</button>
+        <button class="btn btn-ghost" @click="dialogVisible = false">{{ t('dialogs.cancel') }}</button>
         <button class="btn btn-primary" :disabled="submitting" @click="submitCreate">
-          {{ submitting ? '创建中…' : '创建' }}
+          {{ submitting ? t('dialogs.submit') + '…' : t('dialogs.submit') }}
         </button>
       </template>
     </el-dialog>
@@ -248,13 +248,13 @@
     <!-- 合并题库弹窗 -->
     <el-dialog
       v-model="mergeVisible"
-      title="合并题库"
+      :title="t('dialogs.mergeTitle')"
       width="min(92vw, 560px)"
       :close-on-click-modal="false"
       align-center
     >
       <el-form label-position="top" @submit.prevent>
-        <el-form-item label="选择要合并的题库（至少 2 个；源题库会保留，合并产生新题库）" required>
+        <el-form-item :label="t('dialogs.mergePick')" required>
           <div class="merge-bank-list">
             <label
               v-for="b in allBanks"
@@ -265,37 +265,37 @@
               <input v-model="mergeIds" type="checkbox" :value="b.id" />
               <span class="merge-bank-name">{{ b.name }}</span>
               <span v-if="b.version" class="version-tag">v{{ b.version }}</span>
-              <span class="merge-bank-desc text-muted">{{ b.description || '暂无描述' }}</span>
+              <span class="merge-bank-desc text-muted">{{ b.description || t('noDesc') }}</span>
             </label>
-            <p v-if="allBanks.length === 0" class="text-muted merge-empty">暂无可合并的题库</p>
+            <p v-if="allBanks.length === 0" class="text-muted merge-empty">{{ t('dialogs.mergeEmpty') }}</p>
           </div>
         </el-form-item>
-        <el-form-item label="新题库名称" required>
+        <el-form-item :label="t('dialogs.mergeName')" required>
           <el-input
             v-model="mergeForm.name"
-            placeholder="例如：综合总题库"
+            :placeholder="t('dialogs.mergeNamePh')"
             maxlength="100"
             @keyup.enter="submitMerge"
           />
         </el-form-item>
-        <el-form-item label="描述（可选）">
+        <el-form-item :label="t('dialogs.desc')">
           <el-input
             v-model="mergeForm.description"
             type="textarea"
             :rows="2"
-            placeholder="这套合并题库的主题或说明"
+            :placeholder="t('dialogs.mergeDescPh')"
             maxlength="500"
           />
         </el-form-item>
         <p class="text-muted merge-note">
-          合并 = 把所选题库的题目与图片复制进新题库；各自的刷题记录、错题、复习进度留在原题库，不受影响。
-          新题库从零开始记录，导出题库文件时自动记录来源（sources）。
+          {{ t('mergeNote1') }}
+          {{ t('mergeNote2') }}
         </p>
       </el-form>
       <template #footer>
-        <button class="btn btn-ghost" @click="mergeVisible = false">取消</button>
+        <button class="btn btn-ghost" @click="mergeVisible = false">{{ t('dialogs.cancel') }}</button>
         <button class="btn btn-primary" :disabled="merging" @click="submitMerge">
-          {{ merging ? '合并中…' : '合并为新题库' }}
+          {{ merging ? t('dialogs.mergeSubmit') + '…' : t('dialogs.mergeSubmit') }}
         </button>
       </template>
     </el-dialog>
@@ -311,10 +311,10 @@
       >
         <span class="guide-arrow"></span>
         <p class="guide-text">
-          把你的试卷 / 资料变成题库，点「导入」开始
-          <small>PDF、Word、照片都可以，AI 自动整理成题目</small>
+          {{ t('bubble.main') }}
+          <small>{{ t('bubble.sub') }}</small>
         </p>
-        <button class="guide-close" title="不再提示" @click.stop="dismissGuideBubble">×</button>
+        <button class="guide-close" :title="t('bubble.close')" @click.stop="dismissGuideBubble">×</button>
       </div>
     </Teleport>
   </div>
@@ -323,12 +323,154 @@
 <script setup>
 import { computed, onUnmounted, reactive, ref, watch, watchEffect } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { createBank, getBanks, getHomeOverview, importBank, importTikuBank, mergeBanks } from '../api/banks'
 import { formatDate } from '../utils/format'
 import { pickFile, readArrayBuffer, readTextFile } from '../utils/files'
 import TikuIcon from '../components/TikuIcon.vue'
 import AiImportDialog from '../components/AiImportDialog.vue'
+
+const { t } = useI18n({
+  messages: {
+    'zh-CN': {
+      pageTitle: '题库',
+      pageDesc: '把学习资料变成题库（AI 整理），刷题与复习都在这里',
+      act: { import: '导入', merge: '合并题库', create: '创建题库', createShort: '创建' },
+      choice: {
+        title: '导入',
+        lead: '按你的情况选一种：',
+        aiTitle: '我手上有试卷 / 学习资料',
+        aiTag: '大多数人的选择',
+        aiDesc: '上传 PDF、Word、照片或网页链接，AI 自动整理成题目，逐题确认后即可开刷',
+        fileTitle: '别人发来了题库文件',
+        fileDesc: '选择 .tiku / .json 文件（别人分享的现成题库），导入即可用'
+      },
+      empty: {
+        title: '还没有题库',
+        lead: '拾题把「学习资料」变成「能刷的题库」。按你的情况选一种开始：',
+        aiTitle: '我手上有试卷 / 学习资料',
+        aiTag: '大多数人从这里开始',
+        aiDesc: '上传 PDF、Word、照片或网页链接，AI 自动整理成题目，确认后即可开刷',
+        fileTitle: '别人发来了题库文件',
+        fileDesc: '.tiku / .json 文件，导入即可用',
+        createTitle: '想自己出题',
+        createDesc: '先建一个空题库，逐题录入',
+        foot: '想直接刷现成的？',
+        discoverLink: '去「发现题库」逛逛 →'
+      },
+      toolbar: {
+        searchPh: '搜索题库名称 / 描述',
+        sortTitle: '排序方式',
+        sortCreated: '最近创建',
+        sortUpdated: '最近更新',
+        sortName: '按名称',
+        match: '匹配 {n} 个题库',
+        stats: '学习统计'
+      },
+      strip: {
+        banks: '题库',
+        questions: '题目',
+        due: '今日待复习',
+        lastTip: '查看最近一场练习的回顾',
+        noSession: '还没有完成过练习'
+      },
+      guideNoRecord: '还没有做题记录：点下面任一题库进入「开始做题」，刷完第一场后这里会显示你的练习概况与复习提醒',
+      filterEmpty: '没有匹配的题库，换个关键词试试',
+      createdOn: '创建于 {d}',
+      noDesc: '暂无描述',
+      newTag: 'New',
+      dialogs: {
+        createTitle: '创建题库',
+        createDesc: '从零开始建一套自己的题库',
+        name: '题库名称',
+        namePh: '例如：C1 驾考科目一',
+        desc: '描述（可选）',
+        descPh: '这套题的主题、来源或使用说明',
+        cancel: '取消',
+        submit: '创建',
+        mergeTitle: '合并题库',
+        mergePick: '选择要合并的题库（至少 2 个；源题库会保留，合并产生新题库）',
+        mergeEmpty: '暂无可合并的题库',
+        mergeName: '新题库名称',
+        mergeNamePh: '例如：综合总题库',
+        mergeDescPh: '这套合并题库的主题或说明',
+        mergeSubmit: '合并为新题库'
+      },
+      mergeNote1: '合并 = 把所选题库的题目与图片复制进新题库；各自的刷题记录、错题、复习进度留在原题库，不受影响。',
+      mergeNote2: '新题库从零开始记录，导出题库文件时自动记录来源（sources）。',
+      bubble: { main: '把你的试卷 / 资料变成题库，点「导入」开始', sub: 'PDF、Word、照片都可以，AI 自动整理成题目', close: '不再提示' }
+    },
+    'en-US': {
+      pageTitle: 'Question Banks',
+      pageDesc: 'Turn study materials into banks (AI-assisted), practice & review here',
+      act: { import: 'Import', merge: 'Merge Banks', create: 'Create Bank', createShort: 'Create' },
+      choice: {
+        title: 'Import',
+        lead: 'Choose what fits your situation:',
+        aiTitle: 'I have papers / study materials',
+        aiTag: "Most people start here",
+        aiDesc: 'Upload PDF, Word, photos or links; AI turns them into questions — review each one, then practice',
+        fileTitle: 'Someone sent me a bank file',
+        fileDesc: 'Pick a .tiku / .json file (a ready-made bank), import and start'
+      },
+      empty: {
+        title: 'No question banks yet',
+        lead: 'Turn your study materials into banks you can practice. Pick a starting point:',
+        aiTitle: 'I have papers / study materials',
+        aiTag: 'Most people start here',
+        aiDesc: 'Upload PDF, Word, photos or links; AI turns them into questions — confirm and practice',
+        fileTitle: 'Someone sent me a bank file',
+        fileDesc: '.tiku / .json file, import and go',
+        createTitle: 'I want to build my own',
+        createDesc: 'Create an empty bank, add questions one by one',
+        foot: 'Want ready-made banks?',
+        discoverLink: 'Browse the Discover plaza →'
+      },
+      toolbar: {
+        searchPh: 'Search bank name / description',
+        sortTitle: 'Sort',
+        sortCreated: 'Recently created',
+        sortUpdated: 'Recently updated',
+        sortName: 'By name',
+        match: '{n} banks matched',
+        stats: 'Stats'
+      },
+      strip: {
+        banks: 'Banks',
+        questions: 'Questions',
+        due: 'Due today',
+        lastTip: 'Review your last practice session',
+        noSession: 'No practice finished yet'
+      },
+      guideNoRecord: 'No practice records yet: open any bank below and start a session — your overview will appear here after your first round.',
+      filterEmpty: 'No banks match your search. Try other keywords.',
+      createdOn: 'Created {d}',
+      noDesc: 'No description',
+      newTag: 'New',
+      dialogs: {
+        createTitle: 'Create Question Bank',
+        createDesc: 'Build your own bank from scratch',
+        name: 'Bank name',
+        namePh: 'e.g. Driving Test Theory C1',
+        desc: 'Description (optional)',
+        descPh: 'Topic, source or usage notes',
+        cancel: 'Cancel',
+        submit: 'Create',
+        mergeTitle: 'Merge Question Banks',
+        mergePick: 'Choose banks to merge (at least 2; source banks are kept, a new bank is created)',
+        mergeEmpty: 'No banks available to merge',
+        mergeName: 'New bank name',
+        mergeNamePh: 'e.g. Combined Master Bank',
+        mergeDescPh: 'Topic or notes for the merged bank',
+        mergeSubmit: 'Merge into New Bank'
+      },
+      mergeNote1: 'Merging copies questions and images of the selected banks into a new bank; each source bank keeps its own practice records, mistakes and review progress.',
+      mergeNote2: 'The new bank starts fresh; exported bank files record their sources automatically.',
+      bubble: { main: 'Turn your papers / materials into a bank — click Import to start', sub: 'PDF, Word and photos all work; AI builds the questions', close: 'Don\'t show again' }
+    }
+  }
+})
 
 const router = useRouter()
 
