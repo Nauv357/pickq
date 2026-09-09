@@ -8,27 +8,27 @@
     <div
       class="qnav-head"
       :class="{ grabbable: draggable }"
-      :title="draggable ? '按住空白处可拖动题号盘位置' : undefined"
+      ::title="draggable ? t('dragTip') : undefined"
       @pointerdown="onHeadDown"
     >
       <span class="qnav-title">
         <TikuIcon name="list" :size="13" />
         {{ title }}
       </span>
-      <span class="qnav-count text-muted">{{ items.length }} 题</span>
+      <span class="qnav-count text-muted">{{ items.length }} {{ t('qUnit') }}</span>
       <span class="bar-grow"></span>
       <div class="qnav-tools" @pointerdown.stop>
         <button
           class="qnav-tool"
           :class="{ on: goOpen }"
-          :title="goOpen ? '收起跳转框' : '打开输入题号直达跳转'"
+          ::title="goOpen ? t('collapseJump') : t('openJump')"
           @click="toggleGo"
         >
           <TikuIcon name="search" :size="12" />
         </button>
         <button
           class="qnav-tool qnav-size"
-          :title="`题号盘大小：${sizeLabel}（点击切换）`"
+          :title="t('sizeTip') + '：' + sizeLabel + '（' + t('clickToggle') + '）'"
           @click="cycleSize"
         >Aa</button>
       </div>
@@ -38,7 +38,7 @@
       ref="goInputEl"
       v-model="goText"
       size="small"
-      placeholder="输入题号回车直达"
+      :placeholder="t('jumpPh')"
       clearable
       style="width: 100%"
       @keyup.enter="goByNumber"
@@ -52,15 +52,15 @@
         :key="it.questionId"
         class="qnav-num mono"
         :class="[`st-${it.status || 'plain'}`, { active: it.questionId === activeId }]"
-        :title="'跳转第 ' + (it.questionNumber ?? '—') + ' 题'"
+        :title="t('jumpTo') + ' ' + (it.questionNumber ?? '—')"
         @click="$emit('select', it.questionId)"
       >{{ it.questionNumber ?? '·' }}</button>
     </div>
     <div v-if="showLegend" class="qnav-legend">
-      <span><i class="lg st-ok"></i>对</span>
-      <span><i class="lg st-no"></i>错</span>
-      <span v-if="hasPartial"><i class="lg st-partial"></i>部分</span>
-      <span><i class="lg st-skip"></i>未答</span>
+      <span><i class="lg st-ok"></i>{{ t('stOk') }}</span>
+      <span><i class="lg st-no"></i>{{ t('stNo') }}</span>
+      <span v-if="hasPartial"><i class="lg st-partial"></i>{{ t('stPartial') }}</span>
+      <span><i class="lg st-skip"></i>{{ t('stSkip') }}</span>
     </div>
     <p v-if="hint" class="qnav-hint text-muted">{{ hint }}</p>
   </div>
@@ -68,6 +68,14 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n({
+  messages: {
+    'zh-CN': { dragTip: '按住空白处可拖动题号盘位置', qUnit: '题', collapseJump: '收起跳转框', openJump: '打开输入题号直达跳转', sizeTip: '题号盘大小', jumpPh: '输入题号回车直达', jumpTo: '跳转第', stOk: '对', stNo: '错', stPartial: '部分', stSkip: '未答' },
+    'en-US': { dragTip: 'Drag the blank area to move the number dock', qUnit: 'q', collapseJump: 'Collapse jump box', openJump: 'Jump by question number', sizeTip: 'Dock size', jumpPh: 'Type a number and press Enter', jumpTo: 'Jump to #', stOk: 'Right', stNo: 'Wrong', stPartial: 'Partial', stSkip: 'Skipped' }
+  }
+})
 import { ElMessage } from 'element-plus'
 import TikuIcon from './TikuIcon.vue'
 

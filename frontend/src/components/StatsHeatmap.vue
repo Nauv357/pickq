@@ -2,12 +2,12 @@
   <div class="heat-wrap">
     <div class="heat-head">
       <span class="heat-title text-muted">
-        每日做题量 · {{ view === 'year' ? '全年' : view === '30' ? '近 30 天' : '近 90 天' }}
+        {{ t('heatTitle') }} · {{ view === 'year' ? t('year') : view === '30' ? t('d30') : t('d90') }}
       </span>
       <div class="heat-toggle">
-        <button class="heat-tab" :class="{ on: view === '30' }" @click="view = '30'">30 天</button>
-        <button class="heat-tab" :class="{ on: view === '90' }" @click="view = '90'">90 天</button>
-        <button class="heat-tab" :class="{ on: view === 'year' }" @click="view = 'year'">全年</button>
+        <button class="heat-tab" :class="{ on: view === '30' }" @click="view = '30'">{{ t('d30') }}</button>
+        <button class="heat-tab" :class="{ on: view === '90' }" @click="view = '90'">{{ t('d90') }}</button>
+        <button class="heat-tab" :class="{ on: view === 'year' }" @click="view = 'year'">{{ t('year') }}</button>
       </div>
     </div>
 
@@ -31,33 +31,41 @@
     <div v-if="selDate" class="heat-detail">
       <span class="mono heat-date">{{ selDate }}</span>
       <template v-if="selStat">
-        <b>{{ selStat.count }}</b> 题
+        <b>{{ selStat.count }}</b> {{ t('qUnit') }}
         <span v-if="selStat.decided" class="text-muted">
-          · 正确率 {{ pct(selStat.correct, selStat.decided) }}
+          · {{ t('accuracy') }} {{ pct(selStat.correct, selStat.decided) }}
         </span>
-        <span v-else-if="selStat.count" class="text-muted">（未判定作答）</span>
+        <span v-else-if="selStat.count" class="text-muted">{{ t('notJudged') }}</span>
       </template>
-      <template v-else>没有学习记录</template>
-      <button class="heat-clear" title="清除选择" @click="selDate = null">
+      <template v-else>{{ t('noRecords') }}</template>
+      <button class="heat-clear" :title="t('clearSel')" @click="selDate = null">
         <TikuIcon name="x" :size="11" />
       </button>
     </div>
 
     <div class="heat-legend text-muted">
-      <span>少</span>
+      <span>{{ t('less') }}</span>
       <i class="heat-cell heat-l0"></i>
       <i class="heat-cell heat-l1"></i>
       <i class="heat-cell heat-l2"></i>
       <i class="heat-cell heat-l3"></i>
       <i class="heat-cell heat-l4"></i>
       <i class="heat-cell heat-l5"></i>
-      <span>多</span>
+      <span>{{ t('more') }}</span>
     </div>
   </div>
 </template>
 
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n({
+  messages: {
+    'zh-CN': { heatTitle: '每日做题量', year: '全年', d30: '近 30 天', d90: '近 90 天', qUnit: '题', accuracy: '正确率', notJudged: '（未判定作答）', noRecords: '没有学习记录', clearSel: '清除选择', less: '少', more: '多' },
+    'en-US': { heatTitle: 'Daily activity', year: 'Year', d30: 'Last 30 days', d90: 'Last 90 days', qUnit: 'q', accuracy: 'Accuracy', notJudged: '(unscored answers)', noRecords: 'No learning records', clearSel: 'Clear selection', less: 'Less', more: 'More' }
+  }
+})
 import TikuIcon from './TikuIcon.vue'
 
 const props = defineProps({
