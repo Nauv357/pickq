@@ -9,22 +9,22 @@
     <!-- 未配置 AI 模型 -->
     <div v-if="!configOk && !configLoading" class="no-config">
       <TikuIcon name="info" :size="34" />
-      <p class="text-secondary">还没有配置 AI 模型，AI 导入需要模型 Key（BYOK）</p>
-      <button class="btn btn-primary btn-sm" @click="goSettings">去设置页配置</button>
+      <p class="text-secondary">{{ t('noModelTip') }}</p>
+      <button class="btn btn-primary btn-sm" @click="goSettings">{{ t('goSettings') }}</button>
     </div>
 
     <!-- 表单：选文件（多选）+ 目标 + 补充开关 -->
     <div v-else-if="!running" class="ai-form">
       <div class="field">
-        <label class="field-label">选择文档（可多选）</label>
+        <label class="field-label">{{ t('pickDocs') }}</label>
         <div class="file-pick" :class="{ picked: files.length > 0 }" @click="pick">
           <TikuIcon name="file" :size="22" />
           <div class="file-info">
-            <span v-if="files.length" class="file-name">{{ files.length }} 个文件已选择</span>
-            <span v-else class="text-muted">点击选择文件（txt / md / docx / pdf / 图片）</span>
-            <span class="file-size text-muted">题目和答案分文件时一起选上，后端自动拼接</span>
+            <span v-if="files.length" class="file-name">{{ t('filesChosen', { n: files.length }) }}</span>
+            <span v-else class="text-muted">{{ t('pickHint') }}</span>
+            <span class="file-size text-muted">{{ t('multiFileTip') }}</span>
           </div>
-          <span class="file-clear" title="重新选择" @click.stop="pick">
+          <span class="file-clear" :title="t('repick')" @click.stop="pick">
             <TikuIcon name="refresh" :size="14" />
           </span>
         </div>
@@ -32,7 +32,7 @@
           <div v-for="(f, i) in files" :key="i" class="file-row">
             <span class="file-name">{{ f.name }}</span>
             <span class="file-size text-muted">{{ formatSize(f.size) }}</span>
-            <button class="file-clear" title="移除" @click="removeFile(i)">
+            <button class="file-clear" :title="t('remove')" @click="removeFile(i)">
               <TikuIcon name="x" :size="13" />
             </button>
           </div>
@@ -40,7 +40,7 @@
       </div>
 
       <div class="field">
-        <label class="field-label">导入目标</label>
+        <label class="field-label">{{ t('target') }}</label>
         <div v-if="lockedBankId" class="target-locked text-secondary">
           追加到题库「{{ lockedBankName }}」（{{ lockedBankId }}）
         </div>
@@ -50,22 +50,22 @@
             :class="{ active: targetMode === 'new' }"
             @click="targetMode = 'new'"
           >
-            <span class="mode-title">新建题库</span>
-            <span class="mode-desc">以第一个文件名作为题库名称</span>
+            <span class="mode-title">{{ t('newBank') }}</span>
+            <span class="mode-desc">{{ t('newBankDesc') }}</span>
           </button>
           <button
             class="target-option"
             :class="{ active: targetMode === 'existing' }"
             @click="targetMode = 'existing'"
           >
-            <span class="mode-title">追加到现有题库</span>
-            <span class="mode-desc">AI 生成的题目并入所选题库</span>
+            <span class="mode-title">{{ t('appendBank') }}</span>
+            <span class="mode-desc">{{ t('appendBankDesc') }}</span>
           </button>
         </div>
         <el-select
           v-if="targetMode === 'existing'"
           v-model="targetBankId"
-          placeholder="选择题库"
+          :placeholder="t('pickBank')"
           style="width: 100%; margin-top: 10px"
           filterable
         >
@@ -80,9 +80,9 @@
             <TikuIcon v-if="aiSupplement" name="check" :size="12" />
           </span>
           <span class="supplement-text">
-            <span class="mode-title">AI 补充缺失的答案和解析</span>
+            <span class="mode-title">{{ t('aiSupplement') }}</span>
             <span class="mode-desc">
-              勾选 = 原文答案优先、缺失时 AI 补充（预览页会标记"AI 补充"）；不勾选 = 只用原文信息，缺失答案留空待补
+              {{ t('aiSupplementTip') }}
             </span>
           </span>
         </button>
@@ -90,7 +90,7 @@
 
       <!-- 处理模式预设（单选：引擎与思考打包成意图；避免用户自行组合踩坑） -->
       <div class="field">
-        <label class="field-label">处理模式</label>
+        <label class="field-label">{{ t('processMode') }}</label>
         <div class="mode-options">
           <button
             v-for="m in MODE_PRESETS"
@@ -115,11 +115,11 @@
             <TikuIcon v-if="mineruEnhance" name="check" :size="12" />
           </span>
           <span class="supplement-text">
-            <span class="mode-title">MinerU 增强（拍照/扫描/纯图试卷）</span>
+            <span class="mode-title">{{ t('mineruEnhance') }}</span>
             <span class="mode-desc">
               {{ hasMineruKey
-                ? '把照片/扫描件版面里的图形题裁成独立题图（默认视觉直读只能看整张图）。文字型 PDF/Word 无需开启'
-                : '未配置 MinerU Key：点击后到「设置-AI 配置」填写（拍照试卷的图形题需要它裁题图）' }}
+                ? t('mineruOnTip')
+                : t('mineruOffTip') }}
             </span>
           </span>
         </button>
@@ -127,10 +127,10 @@
       </div>
 
       <div class="field">
-        <label class="field-label">支持格式与处理方式</label>
+        <label class="field-label">{{ t('formats') }}</label>
         <p class="form-tip text-muted">
-          txt / md 直接读取；Word、文字版 PDF（可选中文字的）由 AI 看图整理（公式/插图自动归位，最推荐）；
-          扫描件 PDF 与图片由多模态模型直读，含图形图表的扫描件可勾选上方「MinerU 增强」；doc 老格式请先另存为 .docx
+          {{ t('formatsTip1') }}
+          {{ t('formatsTip2') }}
         </p>
       </div>
     </div>
@@ -146,20 +146,20 @@
         <div class="progress-fill" :style="{ width: progress + '%' }"></div>
       </div>
       <p class="progress-num text-muted mono">{{ progress }}%</p>
-      <p class="form-tip text-muted">可关闭本窗口继续做其他事，任务在后台进行，完成后侧边栏与系统通知都会提醒你</p>
+      <p class="form-tip text-muted">{{ t('backgroundTip') }}</p>
       <p v-if="errorMsg" class="error-text">{{ errorMsg }}</p>
     </div>
 
     <template #footer>
       <template v-if="!running">
-        <button class="btn btn-ghost" @click="visible = false">取消</button>
+        <button class="btn btn-ghost" @click="visible = false">{{ t('cancel') }}</button>
         <button class="btn btn-primary" :disabled="!canSubmit || submitting" @click="submit">
-          {{ submitting ? '提交中…' : '开始解析' }}
+          {{ submitting ? t('submitting') : t('startParse') }}
         </button>
       </template>
       <template v-else>
         <button class="btn btn-secondary" @click="close">
-          {{ failed ? '关闭' : '关闭（后台继续）' }}
+          {{ failed ? t('close') : t('closeBg') }}
         </button>
       </template>
     </template>
@@ -168,6 +168,49 @@
 
 <script setup>
 import { computed, onBeforeUnmount, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n({
+  messages: {
+    'zh-CN': {
+      titleImport: 'AI 导入', titleAppend: 'AI 追加题目',
+      noModelTip: '还没有配置 AI 模型，AI 导入需要模型 Key（BYOK）', goSettings: '去设置页配置',
+      pickDocs: '选择文档（可多选）', filesChosen: '{n} 个文件已选择', pickHint: '点击选择文件（txt / md / docx / pdf / 图片）',
+      multiFileTip: '题目和答案分文件时一起选上，后端自动拼接', repick: '重新选择', remove: '移除',
+      target: '导入目标', newBank: '新建题库', newBankDesc: '以第一个文件名作为题库名称',
+      appendBank: '追加到现有题库', appendBankDesc: 'AI 生成的题目并入所选题库', pickBank: '选择题库',
+      aiSupplement: 'AI 补充缺失的答案和解析', aiSupplementTip: '勾选 = 原文答案优先、缺失时 AI 补充（预览页会标记"AI 补充"）；不勾选 = 只用原文信息，缺失答案留空待补',
+      processMode: '处理模式',
+      mineruEnhance: 'MinerU 增强（拍照/扫描/纯图试卷）',
+      mineruOnTip: '把照片/扫描件版面里的图形题裁成独立题图（默认视觉直读只能看整张图）。文字型 PDF/Word 无需开启',
+      mineruOffTip: '未配置 MinerU Key：点击后到「设置-AI 配置」填写（拍照试卷的图形题需要它裁题图）',
+      formats: '支持格式与处理方式',
+      formatsTip1: 'txt / md 直接读取；Word、文字版 PDF（可选中文字的）由 AI 看图整理（公式/插图自动归位，最推荐）；',
+      formatsTip2: '扫描件 PDF 与图片由多模态模型直读，含图形图表的扫描件可勾选上方「MinerU 增强」；doc 老格式请先另存为 .docx',
+      backgroundTip: '可关闭本窗口继续做其他事，任务在后台进行，完成后侧边栏与系统通知都会提醒你',
+      cancel: '取消', submitting: '提交中…', startParse: '开始解析', close: '关闭', closeBg: '关闭（后台继续）'
+    },
+    'en-US': {
+      titleImport: 'AI Import', titleAppend: 'AI Append',
+      noModelTip: 'No AI model configured — AI Import needs your own model key', goSettings: 'Set up in Settings',
+      pickDocs: 'Choose documents (multiple allowed)', filesChosen: '{n} files selected', pickHint: 'Click to choose files (txt / md / docx / pdf / images)',
+      multiFileTip: 'If questions and answers are in separate files, select them together — they will be combined automatically',
+      repick: 'Re-choose', remove: 'Remove',
+      target: 'Import target', newBank: 'Create a new bank', newBankDesc: 'Named after the first file',
+      appendBank: 'Append to an existing bank', appendBankDesc: 'AI-generated questions are merged into the selected bank', pickBank: 'Select a bank',
+      aiSupplement: 'AI fills missing answers & explanations', aiSupplementTip: 'Checked = use original answers first, AI fills gaps (marked "AI" in preview); unchecked = only original content, blanks stay empty',
+      processMode: 'Processing mode',
+      mineruEnhance: 'MinerU enhance (photos / scans / pure-image papers)',
+      mineruOnTip: 'Crops figure questions from photo/scan layouts into separate images (default vision reads the whole page only). Not needed for text PDFs/Word',
+      mineruOffTip: 'MinerU key not configured: click to add it in Settings → AI Setup (needed to crop figures from photographed papers)',
+      formats: 'Supported formats & how they are handled',
+      formatsTip1: 'txt / md are read directly; Word and text-layer PDFs are organized by AI vision (formulas/images placed back automatically — recommended);',
+      formatsTip2: 'Scanned PDFs and images are read by the vision model; for scans with figures/charts enable "MinerU enhance" above; old .doc format: save as .docx first',
+      backgroundTip: 'You can close this window — the task keeps running in the background; the sidebar and system notification will remind you when done',
+      cancel: 'Cancel', submitting: 'Submitting…', startParse: 'Start parsing', close: 'Close', closeBg: 'Close (keep running)'
+    }
+  }
+})
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { createAiImportJob, getAiImportJob, getAiSettings, subscribeAiJobStream } from '../api/aiImport'
@@ -183,7 +226,7 @@ const emit = defineEmits(['done'])
 
 const router = useRouter()
 const visible = ref(false)
-const title = computed(() => (props.bankId ? 'AI 追加题目' : 'AI 导入'))
+const title = computed(() => (props.bankId ? t('titleAppend') : t('titleImport')))
 
 const configLoading = ref(true)
 const configOk = ref(false)
