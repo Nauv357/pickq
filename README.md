@@ -16,6 +16,10 @@
 </p>
 
 <p align="center">
+  <b>中文</b> · <a href="README.en.md">English</a>
+</p>
+
+<p align="center">
   📥 只想用？直接下载 Windows 桌面版 → <a href="https://pickq.cn">pickq.cn</a>（安装包 / 便携版，解压即用）
 </p>
 
