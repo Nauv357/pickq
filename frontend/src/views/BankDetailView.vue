@@ -75,7 +75,7 @@
           <div class="progress-fill" :style="{ width: progress.progressPercent + '%' }"></div>
         </div>
         <p v-if="progress.recordsCount === 0" class="progress-hint text-muted">
-          {{ t('noRecordsYet') }}，点击「{{ t('startPractice') }}」{{ t('firstRoundHint') }}
+          {{ t('noRecordHint', { act: t('startPractice') }) }}
         </p>
       </section>
 
@@ -113,7 +113,7 @@
         <div class="tool-item">
           <button
             class="btn btn-secondary btn-sm"
-            :title="favoriteCount > 0 ? '一键开刷全部收藏题（收藏模式）' : '还没有收藏题'"
+            :title="favoriteCount > 0 ? t('favStartTip') : t('noFavTip')"
             :disabled="favStarting"
             @click="startFavoriteSession"
           >
@@ -163,7 +163,7 @@
             </button>
             <button
               class="btn btn-secondary btn-sm"
-              title="把本库无答案的客观题分批送 AI 判定回填（答案后配的批量兑现）"
+              :title="t('aiFillTip')"
               @click="openAiFill"
             >
               <TikuIcon name="sparkle" :size="13" />
@@ -172,7 +172,7 @@
             <button
               class="btn btn-secondary btn-sm"
               :class="{ active: selectionMode }"
-              :title="selectionMode ? '退出选择模式' : '勾选若干题目，另存为新题库或并入其他题库'"
+              :title="selectionMode ? t('exitSelectMode') : t('selectModeTip')"
               @click="toggleSelectionMode"
             >
               <TikuIcon name="check" :size="13" />
@@ -791,9 +791,11 @@ const { t } = useI18n({
       history: '练习历史', edit: '编辑', exportBank: '导出题库文件', printPaper: '打印试卷', delete: '删除', startPractice: '开始做题',
       answeredOf: '已做 / 共 {n} 题', accuracyOf: '正确率（作答 {n} 次）', progressPct: '完成度',
       noRecordsYet: '还没有做题记录', firstRoundHint: '刷第一轮',
+      noRecordHint: '还没有做题记录，点击「{act}」刷第一轮', favStartTip: '一键开刷全部收藏题（收藏模式）', noFavTip: '还没有收藏题',
       reviewPlan: '复习计划', dueTodayN: '今日待复习 {n} 题', reviewOffTip: '关闭时进度照记、错题照收，只是不提醒到期复习；重新开启后到期题会回到队列',
       wrongTab0: '错题', favTab0: '收藏',
       questions: '题目', materials: '材料', aiAppend: 'AI 追加', batchImport: '批量导入', aiFillAnswers: 'AI 补答案',
+      aiFillTip: '把本库无答案的客观题分批送 AI 判定回填（答案后配的批量兑现）', exitSelectMode: '退出选择模式', selectModeTip: '勾选若干题目，另存为新题库或并入其他题库',
       cancelSelect: '取消选题', selectSave: '选题另存', addQuestion: '添加题目',
       searchPh: '搜索题干 / 选项关键词', qType: '题型', qScope: '范围', all: '全部', undone: '未做', qCategory: '分类',
       filterResultN: '筛选结果 {n} 题', noMatch: '没有匹配的题目，试试调整筛选条件', noQuestions: '题库还没有题目', addFirstQuestion: '录入第一题',
@@ -807,9 +809,11 @@ const { t } = useI18n({
       history: 'History', edit: 'Edit', exportBank: 'Export bank file', printPaper: 'Print paper', delete: 'Delete', startPractice: 'Start practice',
       answeredOf: '{n} answered / total', accuracyOf: 'Accuracy ({n} attempts)', progressPct: 'Progress',
       noRecordsYet: 'No practice records yet', firstRoundHint: 'for your first round',
+      noRecordHint: 'No practice records yet — click “{act}” for your first round', favStartTip: 'Practice all favorites in one go (favorites mode)', noFavTip: 'No favorites yet',
       reviewPlan: 'Review plan', dueTodayN: '{n} due today', reviewOffTip: 'Progress and mistakes are still recorded while off — only due reminders stop; due questions return when re-enabled',
       wrongTab0: 'Mistakes', favTab0: 'Favorites',
       questions: 'Questions', materials: 'Materials', aiAppend: 'AI Append', batchImport: 'Batch import', aiFillAnswers: 'AI Fill answers',
+      aiFillTip: 'Batch-send unanswered objective questions to AI for judging & filling (for answer keys added later)', exitSelectMode: 'Exit select mode', selectModeTip: 'Select questions to save as a new bank or merge into another',
       cancelSelect: 'Cancel select', selectSave: 'Select & save as', addQuestion: 'Add question',
       searchPh: 'Search stem / options', qType: 'Type', qScope: 'Scope', all: 'All', undone: 'Undone', qCategory: 'Category',
       filterResultN: '{n} results', noMatch: 'No matching questions — try adjusting filters', noQuestions: 'No questions in this bank yet', addFirstQuestion: 'Add your first question',
