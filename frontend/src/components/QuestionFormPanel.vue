@@ -4,8 +4,8 @@
     <div class="panel-head">
       <div class="panel-title">
         <TikuIcon :name="mode === 'edit' ? 'edit' : 'plus'" :size="15" />
-        <span>{{ mode === 'edit' ? `编辑第 ${questionNumber ?? '—'} 题` : '添加题目' }}</span>
-        <span v-if="dirty" class="dirty-dot" title="有未保存的修改"></span>
+        <span>{{ mode === 'edit' ? t('editNth', { n: questionNumber ?? '—' }) : t('addQuestion') }}</span>
+        <span v-if="dirty" class="dirty-dot" :title="t('unsavedTip')"></span>
       </div>
       <div class="head-actions">
         <!-- 编辑模式：上一题 / 下一题（沿当前列表顺序，跨页自动翻页） -->
@@ -13,7 +13,7 @@
           <div class="nav-arrows">
             <button
               class="icon-btn"
-              title="上一题（若有未保存修改会先询问）"
+              :title="t('prevTip')"
               :disabled="!nav.hasPrev || aiGenerating || submitting"
               @click="goNav(-1)"
             >
@@ -21,11 +21,11 @@
             </button>
             <span
               class="nav-pos mono"
-              :title="`当前位置：第 ${nav.pos} 行 / 共 ${nav.total} 行（按当前列表顺序）`"
+              :title="t('posTip', { p: nav.pos, t: nav.total })"
             >{{ nav.pos > 0 ? nav.pos : '—' }} / {{ nav.total }}</span>
             <button
               class="icon-btn"
-              title="下一题（若有未保存修改会先询问）"
+              :title="t('nextTip')"
               :disabled="!nav.hasNext || aiGenerating || submitting"
               @click="goNav(1)"
             >
@@ -294,6 +294,20 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n({
+  messages: {
+    'zh-CN': {
+      editNth: '编辑第 {n} 题', addQuestion: '添加题目', unsavedTip: '有未保存的修改', prevTip: '上一题（若有未保存修改会先询问）',
+      nextTip: '下一题（若有未保存修改会先询问）', posTip: '当前位置：第 {p} 行 / 共 {t} 行（按当前列表顺序）'
+    },
+    'en-US': {
+      editNth: 'Editing question #{n}', addQuestion: 'Add question', unsavedTip: 'Unsaved changes', prevTip: 'Previous (asks first if there are unsaved changes)',
+      nextTip: 'Next (asks first if there are unsaved changes)', posTip: 'Position: row {p} / {t} (current list order)'
+    }
+  }
+})
 import { onBeforeRouteLeave } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { createQuestion, updateQuestion, aiAnalysisDraft } from '../api/questions'
