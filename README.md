@@ -10,6 +10,15 @@
 </p>
 
 <p align="center">
+  <em>
+    PickQ turns your PDFs, lecture notes &amp; screenshots into your own practice question bank —<br/>
+    AI drafts the questions (using your own API key), spaced repetition schedules reviews,<br/>
+    and everything stays on your device, fully offline. Windows desktop app, free &amp; local-first.<br/>
+    Made with exam-prep learners in mind (civil-service &amp; postgraduate entrance exams in China); everyone is welcome.
+  </em>
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="license MIT" />
   <img src="https://img.shields.io/badge/platform-Windows-0078d6" alt="platform Windows" />
   <a href="https://pickq.cn"><img src="https://img.shields.io/badge/官网-pickq.cn-2f81f7" alt="website" /></a>
