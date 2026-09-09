@@ -3,30 +3,30 @@
     <!-- 加载/处理中 -->
     <div v-if="loading" class="empty">
       <div class="stage-spin"><TikuIcon name="refresh" :size="26" /></div>
-      <h3>{{ stageText || '任务处理中…' }}</h3>
-      <p class="text-secondary">AI 正在整理题目，请稍候</p>
+      <h3>{{ stageText || t('processing') }}</h3>
+      <p class="text-secondary">{{ t('workingTip') }}</p>
     </div>
 
     <!-- 失败 / 已取消 -->
     <div v-else-if="errorMsg" class="error-state">
       <TikuIcon :name="canceled ? 'x' : 'x'" :size="40" />
-      <h3>{{ canceled ? '任务已取消' : '导入失败' }}</h3>
+      <h3>{{ canceled ? t('canceled') : t('failed') }}</h3>
       <p class="text-secondary">{{ errorMsg }}</p>
       <div class="error-actions">
         <button v-if="canceled" class="btn btn-danger" :disabled="deleting" @click="deleteAgain">
           <TikuIcon name="trash" :size="14" />
-          {{ deleting ? '删除中…' : '彻底删除此任务' }}
+          {{ deleting ? t('deleting') : t('deleteTask') }}
         </button>
-        <button class="btn btn-secondary" @click="$router.push(backTo)">返回</button>
+        <button class="btn btn-secondary" @click="$router.push(backTo)">{{ t('back') }}</button>
       </div>
     </div>
 
     <!-- 空结果 -->
     <div v-else-if="questions.length === 0" class="error-state">
       <TikuIcon name="file" :size="40" />
-      <h3>未能从文档提取题目</h3>
-      <p class="text-secondary">请调整文档内容或更换模型后重试</p>
-      <button class="btn btn-secondary" @click="$router.push('/')">返回题库列表</button>
+      <h3>{{ t('emptyTitle') }}</h3>
+      <p class="text-secondary">{{ t('emptyTip') }}</p>
+      <button class="btn btn-secondary" @click="$router.push('/')">{{ t('backToBanks') }}</button>
     </div>
 
     <template v-else>
@@ -37,12 +37,12 @@
             返回
           </button>
           <div class="title-line">
-            <h1 class="page-title">AI 导入预览</h1>
+            <h1 class="page-title">{{ t('title') }}</h1>
             <span class="file-tag">{{ fileName }}</span>
           </div>
           <p class="page-desc text-muted">
-            AI 共生成 {{ questions.length }} 题，其中 <b class="ai-supp-count">{{ aiSupplementCount }}</b> 题为 AI 补充答案（需重点核对）
-            <template v-if="noAnswerCount > 0">，<b class="no-answer-count">{{ noAnswerCount }}</b> 题暂无答案待补填</template>，可编辑后确认导入
+            {{ t('genSummary', { total: questions.length, ai: aiSupplementCount }) }}
+            <template v-if="noAnswerCount > 0">{{ t('noAnswerNote', { n: noAnswerCount }) }}</template>{{ t('editableNote') }}
           </p>
           <p v-if="jobMeta" class="page-desc text-muted proc-line">
             本次处理：{{ jobMeta.processPath || ENGINE_LABEL[jobMeta.engine] || jobMeta.engine }} · 思考{{ jobMeta.thinking ? '开' : '关' }} · AI 补充{{ jobMeta.aiSupplement ? '开' : '关' }}
@@ -498,6 +498,26 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n({
+  messages: {
+    'zh-CN': {
+      title: 'AI 导入预览', processing: '任务处理中…', workingTip: 'AI 正在整理题目，请稍候',
+      canceled: '任务已取消', failed: '导入失败', deleting: '删除中…', deleteTask: '彻底删除此任务',
+      back: '返回', emptyTitle: '未能从文档提取题目', emptyTip: '请调整文档内容或更换模型后重试', backToBanks: '返回题库列表',
+      genSummary: 'AI 共生成 {total} 题，其中 {ai} 题为 AI 补充答案（需重点核对）',
+      noAnswerNote: '，{n} 题暂无答案待补填', editableNote: '，可编辑后确认导入'
+    },
+    'en-US': {
+      title: 'AI Import Preview', processing: 'Processing the task…', workingTip: 'AI is organizing the questions, please wait',
+      canceled: 'Task canceled', failed: 'Import failed', deleting: 'Deleting…', deleteTask: 'Delete this task permanently',
+      back: 'Back', emptyTitle: 'No questions could be extracted', emptyTip: 'Adjust the document or switch models and retry', backToBanks: 'Back to banks',
+      genSummary: '{total} questions generated, {ai} with AI-filled answers (please verify carefully)',
+      noAnswerNote: ', {n} without answers yet', editableNote: ' — edit, then confirm the import'
+    }
+  }
+})
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { confirmAiImport, deleteAiJob, getAiImportJob, getJobImageUrl, listJobImages, listMaterialSnippets } from '../api/aiImport'
