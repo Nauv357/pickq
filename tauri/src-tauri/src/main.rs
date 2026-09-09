@@ -8,6 +8,7 @@ use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use tauri::{Emitter, Manager, RunEvent, WindowEvent};
@@ -65,6 +66,9 @@ mod single_instance {
 }
 
 static BACKEND: Mutex<Option<Child>> = Mutex::new(None);
+/// 更新下载取消标志 + 运行中的 curl 子进程（cancel_update 中止下载；部分文件保留供续传）
+static UPDATE_CANCEL: AtomicBool = AtomicBool::new(false);
+static UPDATE_CHILD: Mutex<Option<Child>> = Mutex::new(None);
 static LOG: std::sync::OnceLock<Mutex<std::fs::File>> = std::sync::OnceLock::new();
 /// 后端 stderr 中诊断出的关键失败原因（H2 占用等），供失败提示使用
 static ERR_HINT: Mutex<String> = Mutex::new(String::new());
@@ -414,7 +418,9 @@ struct UpdateProgress {
 }
 
 /// 下载安装包到 %TEMP%/shiti-setup-{version}-x64-setup.exe，校验 SHA256；
-/// 进度经事件 "shiti://update-progress" 推送前端
+/// 进度经事件 "shiti://update-progress" 推送前端。
+/// 断点续传：curl -C -，不删除未完成的部分文件（重试/重启后接着下载）；
+/// 取消下载：cancel_update 命令置标志并结束 curl，已下部分同样保留供续传。
 #[tauri::command]
 async fn download_update(
     app: tauri::AppHandle,
@@ -424,37 +430,54 @@ async fn download_update(
     version: String,
 ) -> Result<(), String> {
     let exe_path = std::env::temp_dir().join(format!("shiti-setup-{version}-x64-setup.exe"));
-    let _ = std::fs::remove_file(&exe_path);
+    UPDATE_CANCEL.store(false, Ordering::SeqCst);
 
-    let mut child = Command::new("curl.exe")
-        .args(["-L", "--fail", "-s", "-o"])
-        .arg(&exe_path)
-        .arg(&url)
-        .creation_flags(CREATE_NO_WINDOW)
-        .spawn()
-        .map_err(|e| format!("无法启动下载：{e}"))?;
+    // 已有完整文件则跳过下载直接校验（重复下载/已下载完成场景）
+    let existing = std::fs::metadata(&exe_path).map(|m| m.len()).unwrap_or(0);
+    if existing < size {
+        let child = Command::new("curl.exe")
+            .args(["-L", "--fail", "-s", "-C", "-", "-o"])
+            .arg(&exe_path)
+            .arg(&url)
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map_err(|e| format!("无法启动下载：{e}"))?;
+        *UPDATE_CHILD.lock().unwrap() = Some(child);
 
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                if !status.success() {
-                    let _ = std::fs::remove_file(&exe_path);
-                    return Err("下载失败，请检查网络后重试".to_string());
+        loop {
+            // 收到取消请求：终止 curl（部分文件保留，下次自动续传）
+            if UPDATE_CANCEL.load(Ordering::SeqCst) {
+                if let Some(mut c) = UPDATE_CHILD.lock().unwrap().take() {
+                    let _ = c.kill();
+                    let _ = c.wait();
+                }
+                return Err("下载已取消".to_string());
+            }
+            let mut finished: Option<bool> = None;
+            if let Some(c) = UPDATE_CHILD.lock().unwrap().as_mut() {
+                match c.try_wait() {
+                    Ok(Some(status)) => finished = Some(status.success()),
+                    Ok(None) => {}
+                    Err(_) => finished = Some(false),
+                }
+            }
+            if let Some(ok) = finished {
+                UPDATE_CHILD.lock().unwrap().take();
+                if !ok {
+                    return Err("下载失败，请检查网络后重试（已下载部分已保留，可直接重试续传）".to_string());
                 }
                 break;
             }
-            Ok(None) => {}
-            Err(e) => return Err(format!("下载进程异常：{e}")),
+            let downloaded = std::fs::metadata(&exe_path).map(|m| m.len()).unwrap_or(0);
+            let _ = app.emit(
+                "shiti://update-progress",
+                UpdateProgress {
+                    downloaded,
+                    total: size,
+                },
+            );
+            std::thread::sleep(Duration::from_millis(250));
         }
-        let downloaded = std::fs::metadata(&exe_path).map(|m| m.len()).unwrap_or(0);
-        let _ = app.emit(
-            "shiti://update-progress",
-            UpdateProgress {
-                downloaded,
-                total: size,
-            },
-        );
-        std::thread::sleep(Duration::from_millis(250));
     }
     let _ = app.emit(
         "shiti://update-progress",
@@ -479,10 +502,16 @@ async fn download_update(
         .map(|s| s.to_lowercase())
         .unwrap_or_default();
     if got != sha256.trim().to_lowercase() {
-        let _ = std::fs::remove_file(&exe_path);
+        let _ = std::fs::remove_file(&exe_path); // 内容损坏：删除避免下次误用
         return Err("下载文件校验失败（SHA256 不匹配），请重试".to_string());
     }
     Ok(())
+}
+
+/// 取消进行中的下载（保留已下载部分，下次下载自动续传）
+#[tauri::command]
+fn cancel_update() {
+    UPDATE_CANCEL.store(true, Ordering::SeqCst);
 }
 
 /// 安装更新：写等待脚本（等自身退出 → NSIS /S 装回当前 exe 目录 → 重启）并退出进程。
@@ -565,6 +594,7 @@ fn main() {
             restart_with_restore,
             check_update,
             download_update,
+            cancel_update,
             install_update
         ])
         .setup(|app| {

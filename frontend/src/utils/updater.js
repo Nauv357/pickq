@@ -73,6 +73,16 @@ export async function downloadUpdate(info, onProgress) {
   }
 }
 
+/** 取消进行中的下载（Rust 结束 curl；已下载部分保留，下次下载自动续传） */
+export async function cancelUpdate() {
+  if (!isDesktop()) return
+  try {
+    await invoke('cancel_update')
+  } catch {
+    /* 忽略 */
+  }
+}
+
 /** 安装并重启（应用进程将退出，由更新脚本接管） */
 export async function installUpdate(version) {
   if (!isDesktop()) return

@@ -27,6 +27,32 @@
         <p class="lightbox-hint">{{ t('lbHint') }}</p>
       </div>
     </Teleport>
+
+    <!-- 自动更新下载：点「立即更新」后直接下载安装（进度 + 停止下载） -->
+    <Teleport to="body">
+      <div v-if="updOpen" class="upd-mask">
+        <div class="upd-card">
+          <p class="upd-title">
+            {{ updState === 'install' ? t('updInstalling') : t('updDownloading', { v: updVer }) }}
+          </p>
+          <div v-if="updState === 'download'" class="upd-progress">
+            <div class="upd-bar"><div class="upd-fill" :style="{ width: updPct + '%' }"></div></div>
+            <p class="upd-pct">{{ updPct }}%</p>
+          </div>
+          <p v-if="updState === 'install'" class="upd-tip">{{ t('updInstallTip') }}</p>
+          <p v-else-if="updState === 'error'" class="upd-err">{{ updErr }}</p>
+          <div class="upd-actions">
+            <button v-if="updState === 'download'" class="upd-btn" @click="cancelFlow" :disabled="updCanceling">
+              {{ updCanceling ? '…' : t('updStop') }}
+            </button>
+            <template v-else-if="updState === 'error'">
+              <button class="upd-btn upd-btn-primary" @click="startDirectUpdate(updInfo)">{{ t('updRetry') }}</button>
+              <button class="upd-btn" @click="closeUpdDialog">{{ t('updClose') }}</button>
+            </template>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </el-config-provider>
 </template>
 
@@ -37,15 +63,31 @@ import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n({
   messages: {
-    'zh-CN': { lbFit: '适应屏幕', lbOriginal: '原始大小', lbClose: '关闭', lbAlt: '放大查看', lbHint: '原始大小模式下可滚动 / 滚轮缩放查看细节 · 点击空白处关闭' },
-    'en-US': { lbFit: 'Fit to screen', lbOriginal: 'Original size', lbClose: 'Close', lbAlt: 'Zoom in', lbHint: 'In original size you can scroll / zoom with the wheel · click outside to close' }
+    'zh-CN': {
+      lbFit: '适应屏幕', lbOriginal: '原始大小', lbClose: '关闭', lbAlt: '放大查看', lbHint: '原始大小模式下可滚动 / 滚轮缩放查看细节 · 点击空白处关闭',
+      updFound: '发现新版本 v{v}', updCurTo: '当前 v{cur} → 新版本 v{ver}', updNotesDef: '包含修复与改进。',
+      updNow: '立即更新', updIgnore: '忽略此版本',
+      updIgnored: '已忽略 v{v}，出现更新版本时会再提醒；也可随时在「设置」手动更新',
+      updDownloading: '正在下载 v{v}…', updInstalling: '下载完成，正在安装…', updInstallTip: '安装完成后应用将自动重启，请稍候',
+      updStop: '停止下载', updRetry: '重试', updClose: '关闭',
+      updCanceled: '已取消下载；已下载部分已保留，下次会从断点继续'
+    },
+    'en-US': {
+      lbFit: 'Fit to screen', lbOriginal: 'Original size', lbClose: 'Close', lbAlt: 'Zoom in', lbHint: 'In original size you can scroll / zoom with the wheel · click outside to close',
+      updFound: 'Update available: v{v}', updCurTo: 'Current v{cur} → New version v{ver}', updNotesDef: 'Fixes and improvements.',
+      updNow: 'Update now', updIgnore: 'Ignore this version',
+      updIgnored: 'Ignored v{v}; you will be reminded when a newer version appears. You can also update manually in Settings anytime',
+      updDownloading: 'Downloading v{v}…', updInstalling: 'Downloaded — installing…', updInstallTip: 'The app will restart automatically once the update is installed',
+      updStop: 'Stop download', updRetry: 'Retry', updClose: 'Close',
+      updCanceled: 'Download stopped; the partial file is kept and the next download resumes from where it left off'
+    }
   }
 })
 
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import TikuIcon from './components/TikuIcon.vue'
-import { isDesktop, checkForUpdate, getAppVersion } from './utils/updater'
+import { isDesktop, checkForUpdate, getAppVersion, downloadUpdate, installUpdate, cancelUpdate } from './utils/updater'
 import { openExternal } from './utils/external'
 
 const router = useRouter()
@@ -120,11 +162,21 @@ onBeforeUnmount(() => {
 /* ---------- 启动自动更新检查（仅桌面版；失败静默，不打扰） ----------
    行为：
    - 启动 5 秒后检查一次；有新版 → 居中弹窗（立即更新 / 忽略此版本 / 稍后）
+   - 「立即更新」：直接下载安装（进度对话框 + 停止下载按钮；断点续传）
    - 「忽略此版本」：记住版本号，只有出现更新的版本才再次自动提醒
      （手动渠道不受影响：设置 → 检查更新随时可用）
    - 「稍后」（× / ESC）：本次不提醒，下次启动再弹 */
 const SKIP_UPDATE_KEY = 'tiku:skip-update-version'
 let autoChecked = false
+
+/* 直接更新对话框状态 */
+const updOpen = ref(false)
+const updPct = ref(0)
+const updVer = ref('')
+const updState = ref('download') // download | install | error
+const updErr = ref('')
+const updCanceling = ref(false)
+let updInfo = null
 
 function getSkippedVersion() {
   try {
@@ -139,6 +191,54 @@ function setSkippedVersion(v) {
   } catch {
     /* 忽略 */
   }
+}
+
+/** 立即更新：下载（进度 + 可停止）→ 安装重启。失败可重试 */
+async function startDirectUpdate(info) {
+  if (!info) return
+  updInfo = info
+  updVer.value = info.version
+  updPct.value = 0
+  updState.value = 'download'
+  updErr.value = ''
+  updOpen.value = true
+  const res = await downloadUpdate(info, (p) => {
+    updPct.value = p
+  })
+  if (!res.ok) {
+    if (String(res.error || '').includes('取消')) {
+      // 用户停止下载：保留断点，关闭对话框
+      updOpen.value = false
+      ElMessage.info(t('updCanceled'))
+    } else {
+      updState.value = 'error'
+      updErr.value = String(res.error || '')
+    }
+    return
+  }
+  // 下载完成 → 安装（进程随即退出，由更新脚本接管重启）
+  updState.value = 'install'
+  updOpen.value = true
+  try {
+    await installUpdate(info.version)
+  } catch (e) {
+    updState.value = 'error'
+    updErr.value = String(e?.message || e || '')
+  }
+}
+
+async function cancelFlow() {
+  if (updCanceling.value) return
+  updCanceling.value = true
+  await cancelUpdate()
+  // downloadUpdate 将以「下载已取消」返回，由其关闭对话框；这里只做防双击
+  setTimeout(() => {
+    updCanceling.value = false
+  }, 1000)
+}
+
+function closeUpdDialog() {
+  updOpen.value = false
 }
 
 async function autoCheckUpdate() {
@@ -159,31 +259,33 @@ async function autoCheckUpdate() {
         .replace(/>/g, '&gt;')
     // 弹窗内容限高滚动，避免更新说明过长把弹窗撑得很高
     const html = `<div style="font-size:13px;line-height:1.8">
-        <p style="margin:0 0 4px;color:var(--text-secondary,#909399)">当前 v${esc(currentVer)} → 新版本 <b style="color:var(--accent,#409eff)">v${esc(r.info.version)}</b></p>
-        <div style="margin:2px 0 0;max-height:150px;overflow-y:auto;color:var(--text-primary,#303133);white-space:pre-wrap;padding-right:4px">${esc(r.info.notes || '包含修复与改进。')}</div>
+        <p style="margin:0 0 4px;color:var(--text-secondary,#909399)">${esc(
+          t('updCurTo', { cur: currentVer, ver: r.info.version })
+        )}</p>
+        <div style="margin:2px 0 0;max-height:150px;overflow-y:auto;color:var(--text-primary,#303133);white-space:pre-wrap;padding-right:4px">${esc(
+          r.info.notes || t('updNotesDef')
+        )}</div>
       </div>`
     try {
       await ElMessageBox({
-        title: `发现新版本 v${r.info.version}`,
+        title: t('updFound', { v: r.info.version }),
         message: html,
         dangerouslyUseHTMLString: true,
-        confirmButtonText: '立即更新',
+        confirmButtonText: t('updNow'),
         showCancelButton: true,
-        cancelButtonText: '忽略此版本',
+        cancelButtonText: t('updIgnore'),
         distinguishCancelAndClose: true,
         closeOnClickModal: false,
         customClass: 'update-dialog',
         type: 'info'
       })
-      // 立即更新 → 去设置页（页面已自动检查并显示可更新状态）
-      if (router.currentRoute.value.name !== 'settings') {
-        router.push({ name: 'settings' })
-      }
+      // 立即更新 → 直接下载并安装
+      await startDirectUpdate(r.info)
     } catch (action) {
       if (action === 'cancel') {
         // 忽略此版本
         setSkippedVersion(r.info.version)
-        ElMessage.success(`已忽略 v${r.info.version}，有新版本时会再提醒；也可随时在「设置」里手动更新`)
+        ElMessage.success(t('updIgnored', { v: r.info.version }))
       }
       // 'close'（×/ESC）= 稍后再说：不记录，下次启动再提醒
     }
@@ -280,6 +382,106 @@ async function autoCheckUpdate() {
   margin: 12px 0 0;
   font-size: 12px;
   color: rgba(255, 255, 255, 0.5);
+}
+
+/* ---------- 自动更新下载对话框 ---------- */
+.upd-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 2100;
+  background: rgba(5, 6, 8, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.upd-card {
+  width: 360px;
+  max-width: 92vw;
+  background: var(--bg-card, #fff);
+  border-radius: 14px;
+  padding: 26px 28px 22px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.24);
+}
+.upd-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary, #303133);
+  margin: 0 0 18px;
+  line-height: 1.6;
+}
+.upd-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.upd-bar {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--fill, #ececf0);
+  overflow: hidden;
+}
+.upd-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent, #409eff);
+  transition: width 0.2s ease;
+}
+.upd-pct {
+  min-width: 42px;
+  text-align: right;
+  font-size: 13px;
+  color: var(--text-secondary, #909399);
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.upd-tip {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary, #909399);
+  line-height: 1.8;
+}
+.upd-err {
+  margin: 0;
+  font-size: 13px;
+  color: #f56c6c;
+  line-height: 1.8;
+  word-break: break-all;
+}
+.upd-actions {
+  margin-top: 20px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.upd-btn {
+  padding: 7px 18px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color, #dcdfe6);
+  background: #fff;
+  color: var(--text-primary, #303133);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.upd-btn:hover:not(:disabled) {
+  border-color: var(--accent, #409eff);
+  color: var(--accent, #409eff);
+}
+.upd-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.upd-btn-primary {
+  border-color: var(--accent, #409eff);
+  background: var(--accent, #409eff);
+  color: #fff;
+}
+.upd-btn-primary:hover:not(:disabled) {
+  background: var(--accent-dark, #337ecc);
+  border-color: var(--accent-dark, #337ecc);
+  color: #fff;
 }
 </style>
 
