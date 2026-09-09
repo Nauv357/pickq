@@ -2,15 +2,15 @@
   <div class="page stats-page">
     <header class="page-header stats-header">
       <div>
-        <h1 class="page-title">学习统计</h1>
-        <p class="page-desc text-secondary">坚持看得见 · 每个数字都指向下一步（去做题 / 去复习）</p>
+        <h1 class="page-title">{{ t('title') }}</h1>
+        <p class="page-desc text-secondary">{{ t('subtitle') }}</p>
       </div>
       <div class="stats-actions">
         <button v-if="hasData" class="btn btn-primary btn-sm" @click="$router.push('/')">
           <TikuIcon name="play" :size="14" />
-          去做题
+          {{ t('goPractice') }}
         </button>
-        <span class="text-muted stats-note">数据仅存本机</span>
+        <span class="text-muted stats-note">{{ t('localOnly') }}</span>
       </div>
     </header>
 
@@ -22,12 +22,12 @@
     <!-- 空态：从未做过题 -->
     <div v-else-if="!hasData" class="empty stats-empty">
       <TikuIcon name="chart" :size="40" />
-      <h3>还没有学习记录</h3>
-      <p class="text-secondary">做完第一轮题后，这里会显示你的坚持天数、正确率趋势与复习健康</p>
+      <h3>{{ t('emptyTitle') }}</h3>
+      <p class="text-secondary">{{ t('emptyDesc') }}</p>
       <div class="empty-actions">
         <button class="btn btn-primary" @click="$router.push('/')">
           <TikuIcon name="play" :size="14" />
-          去刷第一轮
+          {{ t('goFirstRound') }}
         </button>
       </div>
     </div>
@@ -51,54 +51,54 @@
             </svg>
             <div class="goal-ring-num">
               <span class="mono">{{ s.todayCount }}</span>
-              <span class="goal-ring-label">已做</span>
+              <span class="goal-ring-label">{{ t('done') }}</span>
             </div>
           </div>
           <div class="goal-text">
-            <div class="kpi-title">今日目标</div>
+            <div class="kpi-title">{{ t('todayGoal') }}</div>
             <div class="goal-line">
               <span :class="{ done: goalDone }" class="mono">{{ s.todayCount }} / {{ goal }}</span>
-              <span v-if="goalDone" class="goal-ok">✓ 达成</span>
-              <span v-else-if="s.todayCount > 0" class="goal-rest text-muted">还差 {{ goal - s.todayCount }} 题</span>
+              <span v-if="goalDone" class="goal-ok">✓ {{ t('goalMet') }}</span>
+              <span v-else-if="s.todayCount > 0" class="goal-rest text-muted">{{ t('remainingN', { n: goal - s.todayCount }) }}</span>
             </div>
-            <div v-if="s.todayDecided" class="goal-rate text-muted">今日正确率 {{ pct(s.todayCorrect, s.todayDecided) }}</div>
-            <button class="goal-edit-link" @click="goalEditing = !goalEditing">调整目标</button>
+            <div v-if="s.todayDecided" class="goal-rate text-muted">{{ t('todayRateLabel') }} {{ pct(s.todayCorrect, s.todayDecided) }}</div>
+            <button class="goal-edit-link" @click="goalEditing = !goalEditing">{{ t('adjustGoal') }}</button>
             <div v-if="goalEditing" class="goal-editor">
               <el-input-number v-model="goalDraft" :min="1" :max="300" size="small" controls-position="right" style="width: 110px" />
-              <button class="btn btn-primary btn-sm" @click="saveGoal">保存</button>
+              <button class="btn btn-primary btn-sm" @click="saveGoal">{{ t('save') }}</button>
             </div>
           </div>
         </div>
 
         <!-- 连续学习 -->
         <div class="card kpi-card">
-          <div class="kpi-label"><TikuIcon name="flame" :size="15" :class="{ hot: s.streakDays > 0 }" class="flame" />连续学习</div>
-          <div class="kpi-num mono">{{ s.streakDays }}<span class="kpi-unit">天</span></div>
+          <div class="kpi-label"><TikuIcon name="flame" :size="15" :class="{ hot: s.streakDays > 0 }" class="flame" />{{ t('streak') }}</div>
+          <div class="kpi-num mono">{{ s.streakDays }}<span class="kpi-unit">{{ t('unitDays') }}</span></div>
           <div class="kpi-sub text-muted">
-            最长连胜 {{ s.longestStreak }} 天
-            <template v-if="s.streakDays > 0 && s.streakDays >= s.longestStreak && s.streakDays >= 3">· 正在刷新纪录</template>
+            {{ t('longestStreak') }} {{ s.longestStreak }} {{ t('unitDays') }}
+            <template v-if="s.streakDays > 0 && s.streakDays >= s.longestStreak && s.streakDays >= 3">· {{ t('newRecord') }}</template>
           </div>
         </div>
 
         <!-- 累计 -->
         <div class="card kpi-card">
-          <div class="kpi-label">累计做题</div>
-          <div class="kpi-num mono">{{ s.totalAnswered }}<span class="kpi-unit">题</span></div>
+          <div class="kpi-label">{{ t('totalDone') }}</div>
+          <div class="kpi-num mono">{{ s.totalAnswered }}<span class="kpi-unit">{{ t('unitQuestions') }}</span></div>
           <div class="kpi-sub text-muted">
-            <template v-if="s.decidedTotal">正确率 {{ pct(s.correctTotal, s.decidedTotal) }}</template>
-            <template v-else>（暂无判定记录）</template>
+            <template v-if="s.decidedTotal">{{ t('accuracy') }} {{ pct(s.correctTotal, s.decidedTotal) }}</template>
+            <template v-else>{{ t('noJudged') }}</template>
             <template v-if="s.totalSeconds >= 60"> · 用时 {{ fmtHours(s.totalSeconds) }}</template>
           </div>
         </div>
 
         <!-- 复习 -->
         <div class="card kpi-card">
-          <div class="kpi-label">今日复习</div>
-          <div class="kpi-num mono" :class="{ due: s.dueToday > 0 }">{{ s.dueToday }}<span class="kpi-unit">到期</span></div>
+          <div class="kpi-label">{{ t('reviewToday') }}</div>
+          <div class="kpi-num mono" :class="{ due: s.dueToday > 0 }">{{ s.dueToday }}<span class="kpi-unit">{{ t('due') }}</span></div>
           <div class="kpi-sub text-muted">
-            <template v-if="s.overdue > 0">逾期 {{ s.overdue }} 题</template>
-            <template v-else-if="s.dueToday > 0">今天到期，宜早不宜迟</template>
-            <template v-else>队列清爽</template>
+            <template v-if="s.overdue > 0">{{ t('overdueN', { n: s.overdue }) }}</template>
+            <template v-else-if="s.dueToday > 0">{{ t('dueSoon') }}</template>
+            <template v-else>{{ t('queueClear') }}</template>
             · 复习题 {{ s.reviewQuestionCount }}
           </div>
         </div>
@@ -109,7 +109,7 @@
         <!-- 学习日历（自绘热力图） -->
         <section class="card chart-card">
           <div class="chart-head">
-            <h2 class="chart-title">学习日历</h2>
+            <h2 class="chart-title">{{ t('calendar') }}</h2>
             <span v-if="s.streakDays > 0" class="streak-chip">
               <TikuIcon name="flame" :size="13" class="flame hot" /> 连续 {{ s.streakDays }} 天
             </span>
@@ -120,23 +120,23 @@
         <!-- 复习健康 -->
         <section class="card chart-card">
           <div class="chart-head">
-            <h2 class="chart-title">复习健康</h2>
-            <span v-if="s.dueToday > 0" class="badge-due">今天 {{ s.dueToday }} 题</span>
+            <h2 class="chart-title">{{ t('reviewHealth') }}</h2>
+            <span v-if="s.dueToday > 0" class="badge-due">{{ t('todayN', { n: s.dueToday }) }}</span>
           </div>
           <div ref="forecastEl" class="echart-box"></div>
           <div class="level-block">
             <div class="level-title text-muted">
-              <span>熟练度分布</span>
+              <span>{{ t('proficiencyDist') }}</span>
               <span>{{ s.reviewQuestionCount }} 题</span>
             </div>
             <div class="level-bar">
               <span v-for="(n, i) in s.levelDist" :key="i" class="level-seg" :class="`lv-${i}`" :style="{ width: levelPct(n) }" :title="`level ${i}：${n} 题`"></span>
             </div>
             <div class="level-legend text-muted">
-              <span><i class="lv-dot lv-0"></i>新</span>
-              <span><i class="lv-dot lv-1"></i>初学</span>
-              <span><i class="lv-dot lv-3"></i>渐稳</span>
-              <span><i class="lv-dot lv-5"></i>稳定</span>
+              <span><i class="lv-dot lv-0"></i>{{ t('lvNew') }}</span>
+              <span><i class="lv-dot lv-1"></i>{{ t('lvLearning') }}</span>
+              <span><i class="lv-dot lv-3"></i>{{ t('lvStabilizing') }}</span>
+              <span><i class="lv-dot lv-5"></i>{{ t('lvStable') }}</span>
             </div>
           </div>
           <div v-if="s.reviewQuestionCount === 0" class="chart-empty text-muted">
@@ -147,27 +147,27 @@
         <!-- 正确率趋势 -->
         <section class="card chart-card">
           <div class="chart-head">
-            <h2 class="chart-title">正确率趋势</h2>
-            <span class="text-muted chart-range">近 90 天 · 7 天均线</span>
+            <h2 class="chart-title">{{ t('accuracyTrend') }}</h2>
+            <span class="text-muted chart-range">{{ t('trendRange') }}</span>
           </div>
           <div v-if="trendEmpty" class="chart-empty text-muted">
             有判定记录的日期还太少，先多刷几轮再来看趋势
           </div>
           <div v-else ref="trendEl" class="echart-box"></div>
           <div class="trend-mini text-muted">
-            <span>今日正确率 <b :class="{ ok: todayRate >= 0.6 }">{{ todayRateText }}</b></span>
-            <span>累计正确率 <b>{{ pct(s.correctTotal, s.decidedTotal) }}</b></span>
-            <span>总用时 <b>{{ fmtHours(s.totalSeconds) }}</b></span>
+            <span>{{ t('todayRateLabel') }} <b :class="{ ok: todayRate >= 0.6 }">{{ todayRateText }}</b></span>
+            <span>{{ t('totalAccuracy') }} <b>{{ pct(s.correctTotal, s.decidedTotal) }}</b></span>
+            <span>{{ t('totalTime') }} <b>{{ fmtHours(s.totalSeconds) }}</b></span>
           </div>
         </section>
       </div>
 
-      <!-- ============ 深入分析（错题治愈 / 题库掌握度 / 最近练习；默认收起，按需展开） ============ -->
+      <!-- ============ {{ t('deepAnalysis') }}（错题治愈 / 题库掌握度 / 最近练习；默认收起，按需展开） ============ -->
       <section class="deep-section">
         <button class="deep-head" @click="deepOpen = !deepOpen">
           <TikuIcon name="chart" :size="15" />
-          <span>深入分析</span>
-          <span class="deep-sub text-muted">错题治愈 · 题库掌握度 · 最近练习</span>
+          <span>{{ t('deepAnalysis') }}</span>
+          <span class="deep-sub text-muted">{{ t('deepSub') }}</span>
           <span class="bar-grow"></span>
           <span class="deep-open text-muted">{{ deepOpen ? '收起' : '展开' }}</span>
           <TikuIcon :name="deepOpen ? 'chevron-up' : 'chevron-down'" :size="14" />
@@ -177,25 +177,25 @@
         <!-- D 题库 × 掌握度 -->
         <section class="card chart-card">
           <div class="chart-head">
-            <h2 class="chart-title">题库 × 掌握度</h2>
-            <span class="text-muted chart-range">薄弱优先 · 正确率 &lt; 60% 标红</span>
+            <h2 class="chart-title">{{ t('mastery') }}</h2>
+            <span class="text-muted chart-range">{{ t('masteryHint') }}</span>
           </div>
-          <div v-if="detailLoading" class="chart-empty text-muted">加载中…</div>
-          <div v-else-if="!detail || !weakBanks.length" class="chart-empty text-muted">还没有题库数据</div>
+          <div v-if="detailLoading" class="chart-empty text-muted">{{ t('loading') }}</div>
+          <div v-else-if="!detail || !weakBanks.length" class="chart-empty text-muted">{{ t('noBankData') }}</div>
           <div v-else class="bank-stat-list">
             <div v-for="b in weakBanks" :key="b.bankId" class="bank-stat-row">
               <button class="bank-stat-name" :title="`进入「${b.name}」`" @click="$router.push(`/banks/${b.bankId}`)">
                 {{ b.name }}
               </button>
-              <span class="bank-stat-count text-muted">{{ b.answered }}/{{ b.total }} 题</span>
+              <span class="bank-stat-count text-muted">{{ b.answered }}/{{ b.total }} {{ t('unitQuestions') }}</span>
               <div class="bank-stat-progress" :title="`已做 ${b.answered} / 共 ${b.total} 题`">
                 <div class="bank-stat-fill" :style="{ width: b.total ? Math.round((b.answered / b.total) * 100) + '%' : '0%' }"></div>
               </div>
               <span class="bank-stat-rate mono" :class="{ weak: isWeak(b) }">
                 {{ rateText(b) }}
               </span>
-              <span v-if="isWeak(b)" class="weak-tag">薄弱</span>
-              <button class="btn btn-ghost btn-xs" :disabled="!b.total" @click="$router.push(`/banks/${b.bankId}`)">去练</button>
+              <span v-if="isWeak(b)" class="weak-tag">{{ t('weak') }}</span>
+              <button class="btn btn-ghost btn-xs" :disabled="!b.total" @click="$router.push(`/banks/${b.bankId}`)">{{ t('goPracticeShort') }}</button>
             </div>
           </div>
         </section>
@@ -205,22 +205,22 @@
           <!-- E 错题治愈 -->
           <section class="card chart-card">
             <div class="chart-head">
-              <h2 class="chart-title">错题治愈</h2>
-              <span v-if="wrongHeal && wrongHeal.currentWrong > 0" class="badge-due">当前 {{ wrongHeal.currentWrong }} 题</span>
-              <span v-else-if="wrongHeal" class="goal-ok">错题本已清空 🎉</span>
+              <h2 class="chart-title">{{ t('wrongHeal') }}</h2>
+              <span v-if="wrongHeal && wrongHeal.currentWrong > 0" class="badge-due">{{ t('currentN', { n: wrongHeal.currentWrong }) }}</span>
+              <span v-else-if="wrongHeal" class="goal-ok">{{ t('wrongCleared') }} 🎉</span>
             </div>
-            <div v-if="detailLoading" class="chart-empty text-muted">加载中…</div>
+            <div v-if="detailLoading" class="chart-empty text-muted">{{ t('loading') }}</div>
             <template v-else-if="wrongHeal">
               <div class="heal-top">
                 <div class="heal-big">
                   <div class="kpi-num mono" :class="{ due: wrongHeal.currentWrong > 0 }">{{ wrongHeal.currentWrong }}</div>
-                  <div class="kpi-sub text-muted">当前错题（最近一次答错）</div>
+                  <div class="kpi-sub text-muted">{{ t('currentWrong') }}</div>
                 </div>
                 <div class="heal-repro">
                   <div class="heal-repro-num mono">
                     {{ wrongHeal.reproduceDecided ? pct(wrongHeal.reproduceCorrect, wrongHeal.reproduceDecided) : '—' }}
                   </div>
-                  <div class="kpi-sub text-muted">曾错题再考正确率</div>
+                  <div class="kpi-sub text-muted">{{ t('healedAccuracy') }}</div>
                 </div>
                 <div class="heal-trend">
                   <div class="heal-trend-bars">
@@ -237,11 +237,11 @@
                     <span>{{ wrongHeal.wrongTrend[0]?.month?.slice(2).replace('-', '/') }}</span>
                     <span>{{ wrongHeal.wrongTrend[wrongHeal.wrongTrend.length - 1]?.month?.slice(2).replace('-', '/') }}</span>
                   </div>
-                  <div class="kpi-sub text-muted">近 6 月错题数</div>
+                  <div class="kpi-sub text-muted">{{ t('wrong6m') }}</div>
                 </div>
               </div>
               <div v-if="wrongHeal.recentlyHealed.length" class="heal-list">
-                <div class="heal-list-title text-muted">最近治愈（曾错 → 现已做对）</div>
+                <div class="heal-list-title text-muted">{{ t('recentHealed') }}</div>
                 <div v-for="h in wrongHeal.recentlyHealed" :key="h.questionId" class="heal-item">
                   <span class="heal-check">✓</span>
                   <span class="heal-content">{{ h.content }}</span>
@@ -260,10 +260,10 @@
           <!-- F 最近练习 -->
           <section class="card chart-card">
             <div class="chart-head">
-              <h2 class="chart-title">最近练习</h2>
-              <span class="text-muted chart-range">最近 10 场 · 得分率</span>
+              <h2 class="chart-title">{{ t('recentSessions') }}</h2>
+              <span class="text-muted chart-range">{{ t('sessionsRange') }}</span>
             </div>
-            <div v-if="detailLoading" class="chart-empty text-muted">加载中…</div>
+            <div v-if="detailLoading" class="chart-empty text-muted">{{ t('loading') }}</div>
             <div v-else-if="!detail || !detail.recentSessions.length" class="chart-empty text-muted">
               还没有完成过会话：去刷完第一场吧
             </div>
@@ -290,6 +290,44 @@ import { GridComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import { getStatsDetail, getStatsSummary } from '../api/stats'
 import { formatDate } from '../utils/format'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n({
+  messages: {
+    'zh-CN': {
+      title: '学习统计', subtitle: '坚持看得见 · 每个数字都指向下一步（去做题 / 去复习）',
+      goPractice: '去做题', goPracticeShort: '去练', localOnly: '数据仅存本机',
+      emptyTitle: '还没有学习记录', emptyDesc: '做完第一轮题后，这里会显示你的坚持天数、正确率趋势与复习健康', goFirstRound: '去刷第一轮',
+      done: '已做', todayGoal: '今日目标', goalMet: '达成', remainingN: '还差 {n} 题', todayRateLabel: '今日正确率', adjustGoal: '调整目标', save: '保存',
+      streak: '连续学习', unitDays: '天', longestStreak: '最长连胜', newRecord: '正在刷新纪录',
+      totalDone: '累计做题', unitQuestions: '题', accuracy: '正确率', noJudged: '（暂无判定记录）',
+      reviewToday: '今日复习', due: '到期', overdueN: '逾期 {n} 题', dueSoon: '今天到期，宜早不宜迟', queueClear: '队列清爽',
+      calendar: '学习日历', reviewHealth: '复习健康', todayN: '今天 {n} 题', proficiencyDist: '熟练度分布',
+      lvNew: '新', lvLearning: '初学', lvStabilizing: '渐稳', lvStable: '稳定',
+      accuracyTrend: '正确率趋势', trendRange: '近 90 天 · 7 天均线', totalAccuracy: '累计正确率', totalTime: '总用时',
+      deepAnalysis: '深入分析', deepSub: '错题治愈 · 题库掌握度 · 最近练习',
+      mastery: '题库 × 掌握度', masteryHint: '薄弱优先 · 正确率 < 60% 标红', loading: '加载中…', noBankData: '还没有题库数据', weak: '薄弱',
+      wrongHeal: '错题治愈', currentN: '当前 {n} 题', wrongCleared: '错题本已清空', currentWrong: '当前错题（最近一次答错）', healedAccuracy: '曾错题再考正确率', wrong6m: '近 6 月错题数', recentHealed: '最近治愈（曾错 → 现已做对）',
+      recentSessions: '最近练习', sessionsRange: '最近 10 场 · 得分率'
+    },
+    'en-US': {
+      title: 'Learning Stats', subtitle: 'Progress you can see — every number points to the next step (practice / review)',
+      goPractice: 'Go practice', goPracticeShort: 'Practice', localOnly: 'Data stays on this device',
+      emptyTitle: 'No learning records yet', emptyDesc: 'After your first round, streaks, accuracy trends and review health will show here.', goFirstRound: 'Start your first round',
+      done: 'done', todayGoal: 'Today\'s goal', goalMet: 'Met', remainingN: '{n} more questions', todayRateLabel: 'Today\'s accuracy', adjustGoal: 'Adjust goal', save: 'Save',
+      streak: 'Day streak', unitDays: 'd', longestStreak: 'Longest streak', newRecord: 'new record',
+      totalDone: 'Total answered', unitQuestions: 'q', accuracy: 'Accuracy', noJudged: '(no scored records yet)',
+      reviewToday: 'Review today', due: 'due', overdueN: '{n} overdue', dueSoon: 'Due today — do it early', queueClear: 'Queue is clear',
+      calendar: 'Study calendar', reviewHealth: 'Review health', todayN: '{n} due today', proficiencyDist: 'Proficiency',
+      lvNew: 'New', lvLearning: 'Learning', lvStabilizing: 'Stabilizing', lvStable: 'Stable',
+      accuracyTrend: 'Accuracy trend', trendRange: 'Last 90 days · 7-day average', totalAccuracy: 'Overall accuracy', totalTime: 'Total time',
+      deepAnalysis: 'Deep dive', deepSub: 'Mistake healing · mastery per bank · recent sessions',
+      mastery: 'Bank × mastery', masteryHint: 'Weak first · accuracy < 60% marked red', loading: 'Loading…', noBankData: 'No bank data yet', weak: 'Weak',
+      wrongHeal: 'Mistake healing', currentN: '{n} current', wrongCleared: 'Mistake book cleared', currentWrong: 'Current mistakes (last wrong answer)', healedAccuracy: 'Accuracy on previously-missed', wrong6m: 'Mistakes in last 6 months', recentHealed: 'Recently healed (missed → now correct)',
+      recentSessions: 'Recent sessions', sessionsRange: 'Last 10 sessions · score rate'
+    }
+  }
+})
 import TikuIcon from '../components/TikuIcon.vue'
 import StatsHeatmap from '../components/StatsHeatmap.vue'
 
@@ -310,7 +348,7 @@ async function load() {
 }
 const hasData = computed(() => !!s.value && s.value.totalAnswered > 0)
 
-/* 深入分析区（二期 D/E/F）默认收起——渐进披露，避免首屏信息过载 */
+/* {{ t('deepAnalysis') }}区（二期 D/E/F）默认收起——渐进披露，避免首屏信息过载 */
 const deepOpen = ref(false)
 
 /* 趋势卡底部 mini 行 */
@@ -417,7 +455,7 @@ function saveGoal() {
   ElMessage.success(`每日目标已设为 ${g} 题`)
 }
 
-/* ============ 熟练度分布 ============ */
+/* ============ {{ t('proficiencyDist') }} ============ */
 function levelPct(n) {
   const total = s.value?.reviewQuestionCount || 0
   return total ? `${Math.max(0.5, (n / total) * 100)}%` : '0%'
@@ -896,7 +934,7 @@ onBeforeUnmount(() => {
   color: var(--success);
 }
 
-/* 复习健康：熟练度分布（压缩在卡内） */
+/* 复习健康：{{ t('proficiencyDist') }}（压缩在卡内） */
 .level-block {
   display: flex;
   flex-direction: column;
@@ -941,7 +979,7 @@ onBeforeUnmount(() => {
   border-radius: 50%;
 }
 
-/* ============ 深入分析（默认收起） ============ */
+/* ============ {{ t('deepAnalysis') }}（默认收起） ============ */
 .deep-section {
   margin-top: 14px;
   border: 1px solid var(--border);
@@ -982,7 +1020,7 @@ onBeforeUnmount(() => {
   line-height: 1.7;
 }
 
-/* ============ 二期 D/E/F（深入分析展开后） ============ */
+/* ============ 二期 D/E/F（{{ t('deepAnalysis') }}展开后） ============ */
 .second-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
