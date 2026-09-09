@@ -2,22 +2,22 @@
   <div class="page ai-jobs-page">
     <div class="page-head">
       <div>
-        <h1 class="page-title">AI 任务</h1>
+        <h1 class="page-title">{{ t('title') }}</h1>
         <p class="page-sub">
-          所有尚未确认导入的任务都会保留在这里（进行中 / 待确认 / 失败 / 已取消），
-          随时回来继续预览修改，不会被新任务挤掉。
+          {{ t('sub1') }}
+          {{ t('sub2') }}
         </p>
       </div>
       <div class="page-actions">
         <span v-if="runningCount()" class="ai-running-tip">
           <span class="ai-spin"><TikuIcon name="refresh" :size="13" /></span>
-          {{ runningCount() }} 个任务整理中
+          {{ t('runningN', { n: runningCount() }) }}
         </span>
       </div>
     </div>
 
     <div class="ai-jobs-card">
-      <div v-if="loading" class="empty-tip text-muted">加载中…</div>
+      <div v-if="loading" class="empty-tip text-muted">{{ t('loading') }}</div>
 
       <template v-else-if="jobs.length">
         <div v-for="job in jobs" :key="job.id" class="job-row" @click="openJob(job)">
@@ -36,11 +36,11 @@
                   <span class="job-progress">{{ job.progress ?? 0 }}%</span>
                 </template>
                 <template v-else-if="job.status === 'SUCCESS'">
-                  <span class="job-questions">{{ job.questions?.length ?? 0 }} 题</span>
-                  <span v-if="job.processPath" class="job-flags job-path" :title="'处理方式：' + job.processPath">{{ job.processPath }}</span>
-                  <span class="job-flags" v-if="job.thinking">思考</span>
-                  <span class="job-flags" v-if="job.aiSupplement">补答</span>
-                  <span v-if="fmtDur(job)" class="job-dur" title="单次处理时长">{{ fmtDur(job) }}</span>
+                  <span class="job-questions">{{ job.questions?.length ?? 0 }} {{ t('qUnit') }}</span>
+                  <span v-if="job.processPath" class="job-flags job-path" :title="t('processOf') + job.processPath">{{ job.processPath }}</span>
+                  <span class="job-flags" v-if="job.thinking">{{ t('thinking') }}</span>
+                  <span class="job-flags" v-if="job.aiSupplement">{{ t('aiFill') }}</span>
+                  <span v-if="fmtDur(job)" class="job-dur" :title="t('durTip')">{{ fmtDur(job) }}</span>
                 </template>
                 <span class="job-time">{{ fmtTime(job.createdAt) }}</span>
               </div>
@@ -56,13 +56,13 @@
             <button
               v-if="job.status === 'SUCCESS' || job.status === 'PROCESSING' || job.status === 'PENDING'"
               class="btn btn-primary btn-sm"
-              title="打开预览 / 继续整理"
+              :title="t('openPreview')"
               @click.stop="openJob(job)"
             >
-              {{ job.status === 'SUCCESS' ? '继续预览' : '查看进度' }}
+              {{ job.status === 'SUCCESS' ? t('continuePreview') : t('viewProgress') }}
             </button>
-            <button class="btn btn-ghost btn-sm danger" title="删除任务" @click.stop="removeJob(job)">
-              删除
+            <button class="btn btn-ghost btn-sm danger" :title="t('deleteJob')" @click.stop="removeJob(job)">
+              {{ t('delete') }}
             </button>
           </div>
         </div>
@@ -70,8 +70,8 @@
 
       <div v-else class="empty-state">
         <TikuIcon name="file" :size="40" />
-        <p>暂无待确认的 AI 导入任务</p>
-        <p class="text-muted">在任一题库页面点击「AI 追加」开始导入，任务会出现在这里</p>
+        <p>{{ t('emptyTitle') }}</p>
+        <p class="text-muted">{{ t('emptyTip') }}</p>
       </div>
     </div>
   </div>
@@ -79,6 +79,24 @@
 
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n({
+  messages: {
+    'zh-CN': {
+      title: 'AI 任务', sub1: '所有尚未确认导入的任务都会保留在这里（进行中 / 待确认 / 失败 / 已取消），', sub2: '随时回来继续预览修改，不会被新任务挤掉。',
+      runningN: '{n} 个任务整理中', loading: '加载中…', qUnit: '题', processOf: '处理方式：', thinking: '思考', aiFill: '补答', durTip: '单次处理时长',
+      openPreview: '打开预览 / 继续整理', continuePreview: '继续预览', viewProgress: '查看进度', deleteJob: '删除任务', delete: '删除',
+      emptyTitle: '暂无待确认的 AI 导入任务', emptyTip: '在任一题库页面点击「AI 追加」开始导入，任务会出现在这里'
+    },
+    'en-US': {
+      title: 'AI Tasks', sub1: 'Every task that has not been confirmed yet stays here (running / pending / failed / canceled),', sub2: 'come back anytime to review and edit — new tasks never push old ones out.',
+      runningN: '{n} tasks running', loading: 'Loading…', qUnit: 'q', processOf: 'Path: ', thinking: 'thinking', aiFill: 'AI-filled', durTip: 'single-run duration',
+      openPreview: 'Open preview / continue', continuePreview: 'Continue preview', viewProgress: 'View progress', deleteJob: 'Delete task', delete: 'Delete',
+      emptyTitle: 'No pending AI import tasks', emptyTip: 'Click "AI Append" on any bank page to start an import — tasks will show up here'
+    }
+  }
+})
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { deleteAiJob, getRecentAiJobs } from '../api/aiImport'
