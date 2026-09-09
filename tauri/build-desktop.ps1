@@ -1,4 +1,4 @@
-# 拾题桌面壳一键打包（Windows）
+﻿# 拾题桌面壳一键打包（Windows）
 # 步骤：mvn package（后端 fat jar）→ jlink 裁剪 JRE → 复制到 src-tauri 根 → tauri build（NSIS）
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot   # 仓库根
@@ -28,7 +28,7 @@ if (-not (Test-Path (Join-Path $jre 'bin\java.exe'))) {
 
 Write-Host '== 3/4 复制资源到 src-tauri 根（tauri.conf bundle.resources: jre/、app.jar） =='
 if (Test-Path (Join-Path $srcTauri 'jre')) { Remove-Item -Recurse -Force (Join-Path $srcTauri 'jre') }
-Copy-Item -Recurse (Join-Path $jre) (Join-Path $srcTauri 'jre')
+Copy-Item -Recurse $jre (Join-Path $srcTauri 'jre')
 Copy-Item $jar (Join-Path $srcTauri 'app.jar') -Force
 Write-Host ('    jre=' + [Math]::Round((Get-ChildItem (Join-Path $srcTauri 'jre') -Recurse -File | Measure-Object Length -Sum).Sum/1MB,1) + 'MB  jar=' + [Math]::Round((Get-Item (Join-Path $srcTauri 'app.jar')).Length/1MB,1) + 'MB')
 
@@ -46,7 +46,7 @@ $portableDir = Join-Path $srcTauri 'target\release\portable\拾题-便携版'
 if (Test-Path $portableDir) { Remove-Item -Recurse -Force $portableDir }
 New-Item -ItemType Directory -Path $portableDir | Out-Null
 Copy-Item $exe (Join-Path $portableDir 'tiku-desktop.exe')
-Copy-Item -Recurse (Join-Path $jre) (Join-Path $portableDir 'jre')
+Copy-Item -Recurse $jre (Join-Path $portableDir 'jre')
 Copy-Item (Join-Path $srcTauri 'app.jar') (Join-Path $portableDir 'app.jar')
 Copy-Item (Join-Path $tauri 'portable-assets\*') $portableDir
 $zipOut = Join-Path $srcTauri 'target\release\bundle\zip\拾题-便携版.zip'
