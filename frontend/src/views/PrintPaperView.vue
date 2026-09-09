@@ -4,41 +4,41 @@
     <div class="print-toolbar">
       <button class="btn btn-secondary btn-sm" @click="$router.push(`/banks/${id}`)">
         <TikuIcon name="arrow-left" :size="13" />
-        返回题库
+        {{ t('backToBank') }}
       </button>
       <div class="toolbar-right">
         <div class="scope-switch">
           <el-select v-model="scope" size="small" style="width: 100px" @change="reload">
-            <el-option label="全部" value="all" />
-            <el-option label="错题" value="wrong" />
-            <el-option label="收藏" value="favorite" />
-            <el-option label="未做" value="undone" />
+            <el-option :label="t('all')" value="all" />
+            <el-option :label="t('wrong')" value="wrong" />
+            <el-option :label="t('favorite')" value="favorite" />
+            <el-option :label="t('undone')" value="undone" />
           </el-select>
-          <el-select v-model="category" size="small" clearable filterable placeholder="分类" style="width: 116px" @change="reload">
+          <el-select v-model="category" size="small" clearable filterable :placeholder="t('category')" style="width: 116px" @change="reload">
             <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
           </el-select>
         </div>
         <div class="answer-switch">
-          <span class="switch-label">答案区：</span>
-          <button :class="{ active: !showAnswer }" @click="showAnswer = false">纯题目</button>
-          <button :class="{ active: showAnswer }" @click="showAnswer = true">带答案 + 解析</button>
+          <span class="switch-label">{{ t('answerArea') }}：</span>
+          <button :class="{ active: !showAnswer }" @click="showAnswer = false">{{ t('questionsOnly') }}</button>
+          <button :class="{ active: showAnswer }" @click="showAnswer = true">{{ t('withAnswers') }}</button>
         </div>
         <button class="btn btn-primary btn-sm" @click="doPrint">
           <TikuIcon name="file" :size="13" />
-          打印 / 另存为 PDF
+          {{ t('printBtn') }}
         </button>
       </div>
     </div>
-    <p class="print-tip">打印对话框可选「另存为 PDF」生成 PDF 文件；纯题目版适合学生作答，带答案版适合教师核对；范围与分类筛选即时生效。</p>
+    <p class="print-tip">{{ t('printTip') }}</p>
 
     <!-- 加载 / 错误 -->
     <div v-if="loading" class="print-state">
       <div class="stage-spin"><TikuIcon name="refresh" :size="24" /></div>
-      <p class="text-secondary">正在生成试卷（导出数据较大时需数秒）…</p>
+      <p class="text-secondary">{{ t('generating') }}</p>
     </div>
     <div v-else-if="errorMsg" class="print-state">
       <p class="error-text">{{ errorMsg }}</p>
-      <button class="btn btn-secondary btn-sm" @click="$router.push(`/banks/${id}`)">返回题库</button>
+      <button class="btn btn-secondary btn-sm" @click="$router.push(`/banks/${id}`)">{{ t('backToBank') }}</button>
     </div>
 
     <!-- 试卷 -->
@@ -51,7 +51,7 @@
       <section v-for="(g, gi) in groups" :key="gi" class="paper-group">
         <!-- 材料置顶（该组题目共用的大题干） -->
         <div v-if="g.material" class="paper-material">
-          <h3 class="material-title">材料 {{ g.material.materialKey }}</h3>
+          <h3 class="material-title">{{ t('material') }} {{ g.material.materialKey }}</h3>
           <div class="material-body" v-html="richHtml(g.material.content)"></div>
         </div>
 
@@ -75,16 +75,16 @@
           <!-- 答案 + 解析（带答案版） -->
           <template v-if="showAnswer">
             <div v-if="q.type === 'SUBJECTIVE'" class="q-answer-line">
-              <span class="answer-label">参考答案：</span>
+              <span class="answer-label">{{ t('referenceAnswer') }}：</span>
               <span v-if="q.referenceAnswer" class="answer-text" v-html="richHtml(q.referenceAnswer)"></span>
-              <span v-else class="answer-none">（无）</span>
+              <span v-else class="answer-none">{{ t('none') }}</span>
             </div>
             <div v-else class="q-answer-line">
-              <span class="answer-label">答案：</span>
+              <span class="answer-label">{{ t('answer') }}：</span>
               <span v-if="q.answerKeys && q.answerKeys.length" class="answer-text">{{ q.answerKeys.join('、') }}</span>
-              <span v-else class="answer-none">（无）</span>
-              <span v-if="q.answerSource === 'ORIGINAL'" class="src-tag">原文答案</span>
-              <span v-else-if="q.answerSource === 'AI_SUPPLEMENT'" class="src-tag src-ai">AI 补充</span>
+              <span v-else class="answer-none">{{ t('none') }}</span>
+              <span v-if="q.answerSource === 'ORIGINAL'" class="src-tag">{{ t('origAnswer') }}</span>
+              <span v-else-if="q.answerSource === 'AI_SUPPLEMENT'" class="src-tag src-ai">{{ t('aiAnswer') }}</span>
             </div>
             <div v-if="q.analysis" class="q-analysis" v-html="richHtml(q.analysis)"></div>
           </template>
@@ -98,6 +98,26 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n({
+  messages: {
+    'zh-CN': {
+      backToBank: '返回题库', all: '全部', wrong: '错题', favorite: '收藏', undone: '未做', category: '分类',
+      answerArea: '答案区', questionsOnly: '纯题目', withAnswers: '带答案 + 解析', printBtn: '打印 / 另存为 PDF',
+      printTip: '打印对话框可选「另存为 PDF」生成 PDF 文件；纯题目版适合学生作答，带答案版适合教师核对；范围与分类筛选即时生效。',
+      generating: '正在生成试卷（导出数据较大时需数秒）…', material: '材料', referenceAnswer: '参考答案', answer: '答案', none: '（无）',
+      origAnswer: '原文答案', aiAnswer: 'AI 补充'
+    },
+    'en-US': {
+      backToBank: 'Back to bank', all: 'All', wrong: 'Mistakes', favorite: 'Favorites', undone: 'Undone', category: 'Category',
+      answerArea: 'Answers', questionsOnly: 'Questions only', withAnswers: 'With answers + analysis', printBtn: 'Print / Save as PDF',
+      printTip: 'The print dialog offers "Save as PDF". Questions-only suits students taking the paper; with-answers suits teachers checking. Scope and category filters apply instantly.',
+      generating: 'Generating the paper (may take a few seconds for large exports)…', material: 'Material', referenceAnswer: 'Reference answer', answer: 'Answer', none: '(none)',
+      origAnswer: 'Original answer', aiAnswer: 'AI-filled'
+    }
+  }
+})
 import { useRoute } from 'vue-router'
 import { exportBank } from '../api/banks'
 import { getBankCategories } from '../api/sessions'
