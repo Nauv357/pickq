@@ -3,32 +3,32 @@
     <div v-if="!aiText && !generating" class="ai-analysis-trigger">
       <button class="btn btn-secondary btn-sm" :disabled="busy" @click="generate">
         <TikuIcon name="sparkle" :size="13" />
-        AI 解析
+        {{ t('aiAnalysis') }}
       </button>
       <span v-if="!everGenerated" class="text-muted ai-hint">
-        不会做/想深入理解？让 AI 针对这道题生成解析
+        {{ t('prompt') }}
       </span>
     </div>
 
     <div v-if="generating" class="ai-analysis-loading">
       <span class="ai-spinner" />
-      <span class="text-muted">AI 正在思考这道题…（约 10~40 秒）</span>
+      <span class="text-muted">{{ t('thinking') }}</span>
     </div>
 
     <div v-if="aiText" class="ai-analysis-result">
       <div class="ai-result-head">
-        <span class="ai-badge">AI 解析</span>
+        <span class="ai-badge">{{ t('aiAnalysis') }}</span>
         <span class="ai-actions">
           <button class="btn btn-secondary btn-sm" :disabled="busy" @click="generate">
-            重新生成
+            {{ t('regenerate') }}
           </button>
           <button class="btn btn-primary btn-sm" :disabled="saving" @click="save">
-            {{ saving ? '保存中…' : '保存为正式解析' }}
+            {{ saving ? t('saving') : t('saveAsAnalysis') }}
           </button>
         </span>
       </div>
       <div class="ai-result-body" v-html="richHtml(aiText)"></div>
-      <p v-if="saved" class="ai-saved-tip text-success">已保存为本题正式解析</p>
+      <p v-if="saved" class="ai-saved-tip text-success">{{ t('savedTip') }}</p>
       <p v-if="error && aiText" class="ai-error">{{ error }}</p>
     </div>
     <p v-if="error && !aiText" class="ai-error">{{ error }}</p>
@@ -37,6 +37,15 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n({
+  messages: {
+    'zh-CN': { aiAnalysis: 'AI 解析', prompt: '不会做/想深入理解？让 AI 针对这道题生成解析', thinking: 'AI 正在思考这道题…（约 10~40 秒）', regenerate: '重新生成', saving: '保存中…', saveAsAnalysis: '保存为正式解析', savedTip: '已保存为本题正式解析' },
+    'en-US': { aiAnalysis: 'AI Analysis', prompt: 'Stuck or want to dig deeper? Let AI explain this question', thinking: 'AI is thinking about this question… (about 10–40 s)', regenerate: 'Regenerate', saving: 'Saving…', saveAsAnalysis: 'Save as the official analysis', savedTip: 'Saved as the official analysis for this question' }
+  }
+})
+
 import { ElMessage } from 'element-plus'
 import { aiAnalysisQuestion, saveQuestionAnalysis } from '../api/questions'
 import { richTextToHtml } from '../utils/richText'
@@ -86,7 +95,7 @@ async function generate() {
       error.value = 'AI 未返回解析内容，请稍后重试'
     }
   } catch (e) {
-    error.value = e?.message || 'AI 解析失败，请稍后重试'
+    error.value = e?.message || t('aiAnalysis') + t('failRetry')
   } finally {
     generating.value = false
   }
