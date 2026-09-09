@@ -2,69 +2,61 @@
   <div class="page">
     <header class="page-header">
       <div>
-        <h1 class="page-title">设置</h1>
-        <p class="page-desc">刷题记录的备份与迁移（换设备 / 重装恢复）</p>
+        <h1 class="page-title">{{ t('pageTitle') }}</h1>
+        <p class="page-desc">{{ t('pageDesc') }}</p>
       </div>
     </header>
 
     <!-- 完整备份：一键打包全部本机数据（数据库一致性快照 + 图片 + AI 配置） -->
     <section class="panel">
-      <h2 class="panel-title">完整备份</h2>
-      <p class="panel-desc text-secondary">
-        一键下载本机<b>全部数据</b>的备份包：题库与题目、刷题记录与复习进度（数据库一致性快照）、
-        题目图片、AI 模型配置（含 Key，等同钥匙，请妥善保管备份文件）。
-        换电脑 / 重装 / 误删恢复都靠它。
-      </p>
+      <h2 class="panel-title">{{ t('backup.title') }}</h2>
+      <p class="panel-desc text-secondary" v-html="t('backup.descHtml')"></p>
       <div class="panel-actions">
         <button class="btn btn-primary" :disabled="backingUp" @click="doBackup">
           <TikuIcon name="download" :size="15" />
-          {{ backingUp ? '打包中…' : '一键备份并下载' }}
+          {{ backingUp ? t('backup.busy') : t('backup.btn') }}
         </button>
         <button v-if="isDesktopEnv" class="btn btn-secondary" :disabled="backingUp || restoring" @click="doRestore">
           <TikuIcon name="upload" :size="15" />
-          {{ restoring ? '处理中…' : '从备份恢复…' }}
+          {{ restoring ? t('backup.restoreBusy') : t('backup.restore') }}
         </button>
         <span class="form-tip text-muted backup-tip">
-          恢复 = 选择备份包 → 自动重启应用并还原数据，无需手动操作
+          {{ t('backup.tip') }}
         </span>
       </div>
     </section>
     <!-- 外观:双主题(Soft UI 白天 / 护眼暖黑夜,跟随系统) + 界面语言 -->
     <section class="panel">
-      <h2 class="panel-title">外观与语言</h2>
+      <h2 class="panel-title">{{ t('appearance.title') }}</h2>
       <p class="panel-desc text-secondary">
-        主题选择即时生效并保存在本机。黑夜为低蓝光护眼底色，适合长时间刷题。
-        当前生效：<span class="theme-state">{{ effectiveLabel }}</span><template v-if="themePref === 'system'">（跟随系统，系统切换时自动跟随）</template>
+        {{ t('appearance.desc1') }}<span class="theme-state">{{ effectiveLabel }}</span><template v-if="themePref === 'system'">{{ t('appearance.systemNote') }}</template>
       </p>
       <el-radio-group v-model="themePref" @change="onThemeChange">
-        <el-radio-button value="system">跟随系统</el-radio-button>
-        <el-radio-button value="light">白天</el-radio-button>
-        <el-radio-button value="dark">黑夜</el-radio-button>
+        <el-radio-button value="system">{{ t('appearance.themeSystem') }}</el-radio-button>
+        <el-radio-button value="light">{{ t('appearance.themeLight') }}</el-radio-button>
+        <el-radio-button value="dark">{{ t('appearance.themeDark') }}</el-radio-button>
       </el-radio-group>
       <p class="panel-desc text-secondary lang-desc">
-        界面语言：<template v-if="langPref === 'system'">跟随系统（当前：{{ currentLang === 'en-US' ? 'English' : '中文' }}）</template>
+        {{ t('appearance.langLead') }}<template v-if="langPref === 'system'">{{ t('appearance.langSystemNow', { v: currentLang === 'en-US' ? 'English' : '中文' }) }}</template>
       </p>
       <el-radio-group :model-value="langPref" @change="onLangChange">
-        <el-radio-button value="system">跟随系统</el-radio-button>
-        <el-radio-button value="zh-CN">中文</el-radio-button>
-        <el-radio-button value="en-US">English</el-radio-button>
+        <el-radio-button value="system">{{ t('appearance.langSystem') }}</el-radio-button>
+        <el-radio-button value="zh-CN">{{ t('appearance.langZh') }}</el-radio-button>
+        <el-radio-button value="en-US">{{ t('appearance.langEn') }}</el-radio-button>
       </el-radio-group>
     </section>
 
     <section class="panel">
-      <h2 class="panel-title">刷题记录</h2>
-      <p class="panel-desc text-secondary">
-        刷题记录保存在本机。导出为文件后，可在其他设备上先导入对应的题库文件，再导入记录文件恢复进度；
-        找不到对应题库文件的记录会被跳过并提示，不会静默丢弃。
-      </p>
+      <h2 class="panel-title">{{ t('records.title') }}</h2>
+      <p class="panel-desc text-secondary">{{ t('records.desc') }}</p>
       <div class="panel-actions">
         <button class="btn btn-secondary" :disabled="exporting" @click="doExport">
           <TikuIcon name="download" :size="15" />
-          {{ exporting ? '导出中…' : '导出记录文件' }}
+          {{ exporting ? t('records.exporting') : t('records.export') }}
         </button>
         <button class="btn btn-primary" :disabled="importing" @click="doImport">
           <TikuIcon name="upload" :size="15" />
-          {{ importing ? '导入中…' : '导入记录文件' }}
+          {{ importing ? t('records.importing') : t('records.import') }}
         </button>
       </div>
 
@@ -72,41 +64,33 @@
       <div v-if="importResult" class="import-result">
         <p v-if="importResult.imported > 0" class="ok-line">
           <TikuIcon name="check" :size="14" />
-          成功导入 {{ importResult.imported }} 条记录
+          {{ t('records.ok', { n: importResult.imported }) }}
         </p>
         <p v-if="importResult.missingBanks?.length" class="warn-line">
           <TikuIcon name="info" :size="14" />
-          有 {{ importResult.missingBanks.length }} 条记录因找不到对应的题库文件（packageKey + version）被跳过，请先导入对应版本的题库文件
+          {{ t('records.missing', { n: importResult.missingBanks.length }) }}
         </p>
         <p v-if="importResult.missingQuestions?.length" class="warn-line">
           <TikuIcon name="info" :size="14" />
-          {{ importResult.missingQuestions.length }} 个题目在当前题库中不存在：
+          {{ t('records.missingQ', { n: importResult.missingQuestions.length }) }}
           {{ importResult.missingQuestions.slice(0, 5).join('、') }}{{ importResult.missingQuestions.length > 5 ? '…' : '' }}
         </p>
       </div>
     </section>
 
     <section class="panel">
-      <h2 class="panel-title">AI 模型配置</h2>
-      <p class="panel-desc text-secondary">
-        用于「AI 导入」（文档 / 图片 → 题目）。Key 仅保存在本机配置文件，前端只显示脱敏后的 Key；
-        支持 DeepSeek / 通义 / Kimi / OpenAI / 本地 Ollama 等 OpenAI 兼容端点。
-      </p>
-      <p class="form-tip text-muted role-tip">
-        三者角色：① 文本模型 = 题目整理与思考的主力；② 多模态模型（识图）= 含图文档必需——
-        文字版 Word/PDF 的直传视觉、扫描件的直读都靠它，有图文档务必配置；③ MinerU（可选）=
-        仅"扫描件/纯图片且含图形图表"需提取版面与题图时使用，导入对话框会按文件提示。
-        纯文字 txt/md 只需文本模型。
-      </p>
+      <h2 class="panel-title">{{ t('ai.title') }}</h2>
+      <p class="panel-desc text-secondary">{{ t('ai.desc') }}</p>
+      <p class="form-tip text-muted role-tip">{{ t('ai.roleTip') }}</p>
       <p class="key-guide-entry">
-        第一次配置、不知道 Key 去哪弄？
-        <button class="key-guide-link" @click="openKeyGuide">点这里看「如何获取 API Key」分步教程 →</button>
+        {{ t('ai.guideEntry') }}
+        <button class="key-guide-link" @click="openKeyGuide">{{ t('ai.guideLink') }}</button>
       </p>
       <el-form label-position="top" @submit.prevent>
         <!-- 服务商预设：选择后自动填充 Base URL / 模型名（仍可手动修改），只需填 API Key -->
         <div class="preset-row">
-          <el-form-item label="选择服务商（自动填充配置，可手动修改）">
-            <el-select v-model="presetAgent" placeholder="选择服务商…" clearable style="width: 320px" @change="applyPreset">
+          <el-form-item :label="t('ai.presetLabel')">
+            <el-select v-model="presetAgent" :placeholder="t('ai.presetPh')" clearable style="width: 320px" @change="applyPreset">
               <el-option
                 v-for="p in presetAgents"
                 :key="p.name"
@@ -117,29 +101,29 @@
                 <span class="preset-desc">{{ p.desc }}</span>
               </el-option>
             </el-select>
-            <p class="form-tip text-muted">选择后自动填入 Base URL 与模型名，只需再填 API Key；也可不选，全部手动填写</p>
+            <p class="form-tip text-muted">{{ t('ai.presetTip') }}</p>
           </el-form-item>
         </div>
         <div class="ai-grid">
-          <el-form-item label="Base URL">
+          <el-form-item :label="t('ai.baseUrl')">
             <el-input v-model="aiForm.baseUrl" placeholder="https://api.deepseek.com/v1" />
           </el-form-item>
-          <el-form-item label="API Key">
+          <el-form-item :label="t('ai.apiKey')">
             <el-input
               v-model="aiForm.apiKey"
               type="password"
               show-password
               :placeholder="maskedKey || 'sk-…'"
             />
-            <p class="form-tip text-muted">留空 = 保留原有 Key{{ hasKey ? '（当前：' + maskedKey + '）' : '' }}</p>
+            <p class="form-tip text-muted">{{ t('ai.keyKeep') }}{{ hasKey ? t('ai.keyCurrent', { v: maskedKey }) : '' }}</p>
           </el-form-item>
-          <el-form-item label="模型（文本整理）">
+          <el-form-item :label="t('ai.modelText')">
             <el-input v-model="aiForm.model" placeholder="deepseek-chat" />
           </el-form-item>
-          <el-form-item label="多模态模型（图片/扫描件，可留空 = 同文本模型）">
+          <el-form-item :label="t('ai.modelVision')">
             <el-input v-model="aiForm.visionModel" placeholder="qwen-vl-plus" />
           </el-form-item>
-          <el-form-item label="MinerU 解析 API Key（可选）">
+          <el-form-item :label="t('ai.mineru')">
             <el-input
               v-model="aiForm.mineruKey"
               type="password"
@@ -147,13 +131,13 @@
               :placeholder="maskedMineruKey || 'sk-…'"
             />
             <p class="form-tip text-muted">
-              用于 pdf/图片/docx 的结构化解析（版面/OCR/公式/表格→增强文本），AI 整理仍用上方模型；留空 = 使用本地解析路径。申请：
+              {{ t('ai.mineruTip') }}
               <a href="https://mineru.net/apiManage/token" target="_blank" rel="noopener">mineru.net/apiManage/token</a>
-              {{ hasMineruKey ? '（当前：' + maskedMineruKey + '）' : '' }}
+              {{ hasMineruKey ? t('ai.keyCurrent', { v: maskedMineruKey }) : '' }}
             </p>
           </el-form-item>
         </div>
-        <p class="form-tip text-muted">「思考模式」在 AI 导入的「处理模式」中按需选择：智能推荐与精细默认开启（更稳更准），最快模式关闭（更快）</p>
+        <p class="form-tip text-muted">{{ t('ai.thinkingTip') }}</p>
       </el-form>
 
       <!-- 测试结果 -->
@@ -166,48 +150,42 @@
       <div class="panel-actions">
         <button class="btn btn-secondary" :disabled="testing" @click="doTest">
           <TikuIcon name="refresh" :size="14" />
-          {{ testing ? '测试中…' : '测试连接' }}
+          {{ testing ? t('ai.testing') : t('ai.test') }}
         </button>
         <button class="btn btn-primary" :disabled="saving" @click="doSave">
-          {{ saving ? '保存中…' : '保存配置' }}
+          {{ saving ? t('ai.saving') : t('ai.save') }}
         </button>
-        <span class="form-tip text-muted test-tip">测试连接会先保存当前表单内容</span>
+        <span class="form-tip text-muted test-tip">{{ t('ai.testTip') }}</span>
       </div>
     </section>
 
     <!-- API Key 获取指引弹窗（分服务商分步；Ollama 无需 Key） -->
-    <el-dialog v-model="keyGuideVisible" :title="`如何获取 API Key：${guideFor.label}`" width="min(92vw, 540px)" align-center>
-      <p class="guide-what text-secondary">
-        配置只需填三样：<b>Base URL</b> 与 <b>模型名</b> 选择服务商后会自动填入，
-        你只需拿到并填好 <b>API Key</b>。Key 只在创建页完整显示一次，且只保存在你的本机。
-      </p>
+    <el-dialog v-model="keyGuideVisible" :title="`${t('ai.guideTitle')}：${guideFor.label}`" width="min(92vw, 540px)" align-center>
+      <p class="guide-what text-secondary" v-html="t('ai.guideWhat')"></p>
       <ol class="key-steps">
         <li v-for="(s, i) in guideFor.steps" :key="i">{{ s }}</li>
       </ol>
       <template #footer>
-        <button class="btn btn-ghost" @click="keyGuideVisible = false">关闭</button>
+        <button class="btn btn-ghost" @click="keyGuideVisible = false">{{ t('ai.close') }}</button>
         <button
           v-if="guideFor.url"
           class="btn btn-primary"
           @click="openGuideUrl"
         >
-          打开 {{ guideFor.label }} 创建页
+          {{ t('ai.open', { label: guideFor.label }) }}
         </button>
       </template>
     </el-dialog>
 
     <section class="panel">
-      <h2 class="panel-title">作者信息</h2>
-      <p class="panel-desc text-secondary">
-        导出题库文件时自动带入的默认作者展示名（本地记忆）。题库广场上线后，登录账号身份会取代这里的名字；
-        未填写时导出弹窗可手动输入。
-      </p>
+      <h2 class="panel-title">{{ t('author.title') }}</h2>
+      <p class="panel-desc text-secondary">{{ t('author.desc') }}</p>
       <el-form label-position="top" @submit.prevent>
-        <el-form-item label="默认作者名">
+        <el-form-item :label="t('author.name')">
           <div class="author-row" style="display: flex; gap: 10px; align-items: center; width: 100%">
-            <el-input v-model="authorName" placeholder="例如：小明老师" maxlength="100" style="max-width: 320px" />
+            <el-input v-model="authorName" :placeholder="t('author.namePh')" maxlength="100" style="max-width: 320px" />
             <button class="btn btn-primary" :disabled="savingAuthor" @click="saveAuthor">
-              {{ savingAuthor ? '保存中…' : '保存' }}
+              {{ savingAuthor ? t('author.save') + '…' : t('author.save') }}
             </button>
           </div>
         </el-form-item>
@@ -215,38 +193,36 @@
     </section>
 
     <section class="panel">
-      <h2 class="panel-title">关于</h2>
-      <p class="panel-desc text-secondary">
-        拾题 · 自建题库刷题应用（离线优先）。数据存放于本机数据目录，核心功能不依赖登录和网络。
-      </p>
+      <h2 class="panel-title">{{ t('about.title') }}</h2>
+      <p class="panel-desc text-secondary">{{ t('about.appDesc') }}</p>
 
       <!-- 桌面版：版本 + 自动更新 -->
       <div v-if="isDesktopEnv" class="update-box">
         <div class="update-meta">
-          <span class="text-secondary">当前版本</span>
+          <span class="text-secondary">{{ t('about.currentVer') }}</span>
           <span class="mono update-ver">v{{ versionLabel }}</span>
-          <span v-if="updateInfo" class="update-new mono">新版本 v{{ updateInfo.version }} 可更新</span>
+          <span v-if="updateInfo" class="update-new mono">{{ t('about.newVer', { v: updateInfo.version }) }}</span>
         </div>
         <div class="update-actions">
           <button class="btn btn-secondary" :disabled="busy" @click="doCheckUpdate">
             <TikuIcon name="refresh" :size="14" />
-            {{ checking ? '检查中…' : '检查更新' }}
+            {{ checking ? t('about.checking') : t('about.check') }}
           </button>
           <button v-if="updateInfo && !downloading && !installing" class="btn btn-primary" @click="doDownload">
-            下载并安装
+            {{ t('about.download') }}
           </button>
         </div>
         <div v-if="downloading" class="update-progress">
           <el-progress :percentage="progressPct" :stroke-width="10" />
-          <p class="form-tip text-muted">正在下载新版本安装包（约 {{ sizeMB }} MB）…</p>
+          <p class="form-tip text-muted">{{ t('about.downloading', { p: progressPct }) }}</p>
         </div>
         <p v-if="installing" class="form-tip">
-          即将安装并自动重启应用，请稍候…
+          {{ t('about.installing') }}
         </p>
         <p v-if="updateInfo?.notes" class="form-tip text-muted update-notes">{{ updateInfo.notes }}</p>
         <p v-if="updateError" class="form-tip update-error">{{ updateError }}</p>
       </div>
-      <p v-else class="form-tip text-muted">网页版不提供自动更新，请从官网下载桌面版。</p>
+      <p v-else class="form-tip text-muted">{{ t('about.webNoUpdate') }}</p>
     </section>
   </div>
 </template>
@@ -264,6 +240,186 @@ import { getTheme, setTheme, currentTheme } from '../utils/theme'
 import { setLang, getLangPref, currentLang } from '../i18n/lang'
 import { isDesktop, getAppVersion, checkForUpdate, downloadUpdate, installUpdate } from '../utils/updater'
 import { openExternal } from '../utils/external'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n({
+  messages: {
+    'zh-CN': {
+      pageTitle: '设置',
+      pageDesc: '刷题记录的备份与迁移（换设备 / 重装恢复）',
+      backup: {
+        title: '完整备份',
+        descHtml:
+          '一键下载本机<b>全部数据</b>的备份包：题库与题目、刷题记录与复习进度（数据库一致性快照）、题目图片、AI 模型配置（含 Key，等同钥匙，请妥善保管备份文件）。换电脑 / 重装 / 误删恢复都靠它。',
+        btn: '一键备份并下载',
+        busy: '打包中…',
+        restore: '从备份恢复…',
+        restoreBusy: '处理中…',
+        tip: '恢复 = 选择备份包 → 自动重启应用并还原数据，无需手动操作'
+      },
+      appearance: {
+        title: '外观与语言',
+        desc1: '主题选择即时生效并保存在本机。黑夜为低蓝光护眼底色，适合长时间刷题。当前生效：',
+        systemNote: '（跟随系统，系统切换时自动跟随）',
+        themeSystem: '跟随系统',
+        themeLight: '白天',
+        themeDark: '黑夜',
+        langLead: '界面语言：',
+        langSystem: '跟随系统',
+        langSystemNow: '跟随系统（当前：{v}）',
+        langZh: '中文',
+        langEn: 'English'
+      },
+      records: {
+        title: '刷题记录',
+        desc: '刷题记录保存在本机。导出为文件后，可在其他设备上先导入对应的题库文件，再导入记录文件恢复进度；找不到对应题库文件的记录会被跳过并提示，不会静默丢弃。',
+        export: '导出记录文件',
+        exporting: '导出中…',
+        import: '导入记录文件',
+        importing: '导入中…',
+        ok: '成功导入 {n} 条记录',
+        missing: '有 {n} 条记录因找不到对应的题库文件（packageKey + version）被跳过，请先导入对应版本的题库文件',
+        missingQ: '{n} 个题目在当前题库中不存在：'
+      },
+      ai: {
+        title: 'AI 模型配置',
+        desc: '用于「AI 导入」（文档 / 图片 → 题目）。Key 仅保存在本机配置文件，前端只显示脱敏后的 Key；支持 DeepSeek / 通义 / Kimi / OpenAI / 本地 Ollama 等 OpenAI 兼容端点。',
+        roleTip:
+          '三者角色：① 文本模型 = 题目整理与思考的主力；② 多模态模型（识图）= 含图文档必需——文字版 Word/PDF 的直传视觉、扫描件的直读都靠它，有图文档务必配置；③ MinerU（可选）= 仅"扫描件/纯图片且含图形图表"需提取版面与题图时使用。纯文字 txt/md 只需文本模型。',
+        guideEntry: '第一次配置、不知道 Key 去哪弄？',
+        guideLink: '点这里看「如何获取 API Key」分步教程 →',
+        presetLabel: '选择服务商（自动填充配置，可手动修改）',
+        presetPh: '选择服务商…',
+        presetTip: '选择后自动填入 Base URL 与模型名，只需再填 API Key；也可不选，全部手动填写',
+        baseUrl: 'Base URL',
+        apiKey: 'API Key',
+        keyKeep: '留空 = 保留原有 Key',
+        keyCurrent: '（当前：{v}）',
+        modelText: '模型（文本整理）',
+        modelVision: '多模态模型（图片/扫描件，可留空 = 同文本模型）',
+        mineru: 'MinerU 解析 API Key（可选）',
+        mineruTip: '用于 pdf/图片/docx 的结构化解析（版面/OCR/公式/表格→增强文本），AI 整理仍用上方模型；留空 = 使用本地解析路径。申请：',
+        test: '测试连接',
+        testing: '测试中…',
+        save: '保存配置',
+        saving: '保存中…',
+        testTip: '测试连接会先保存当前表单内容',
+        thinkingTip: '「思考模式」在 AI 导入的「处理模式」中按需选择：智能推荐与精细默认开启（更稳更准），最快模式关闭（更快）',
+        guideTitle: '如何获取 API Key',
+        guideWhat:
+          '配置只需填三样：<b>Base URL</b> 与 <b>模型名</b> 选择服务商后会自动填入，你只需拿到并填好 <b>API Key</b>。Key 只在创建页完整显示一次，且只保存在你的本机。',
+        close: '关闭',
+        open: '打开 {label} 创建页'
+      },
+      author: {
+        title: '作者信息',
+        desc: '导出题库文件时自动带入的默认作者展示名（本地记忆）。题库广场上线后，登录账号身份会取代这里的名字；未填写时导出弹窗可手动输入。',
+        name: '默认作者名',
+        namePh: '例如：小明老师',
+        save: '保存'
+      },
+      about: {
+        title: '关于',
+        appDesc: '拾题 · 自建题库刷题应用（离线优先）。数据存放于本机数据目录，核心功能不依赖登录和网络。',
+        currentVer: '当前版本',
+        newVer: '新版本 v{v} 可更新',
+        check: '检查更新',
+        checking: '检查中…',
+        download: '下载并安装',
+        downloading: '下载中… {p}%',
+        installing: '即将安装并自动重启应用，请稍候…',
+        webNoUpdate: '网页版不提供自动更新，请从官网下载桌面版。'
+      }
+    },
+    'en-US': {
+      pageTitle: 'Settings',
+      pageDesc: 'Backup & migration of your data (new device / reinstall)',
+      backup: {
+        title: 'Full Backup',
+        descHtml:
+          'Download a backup of <b>everything</b> on this machine: banks & questions, practice records and review progress (consistent DB snapshot), images and AI config (includes your API keys — treat it as your key). Backup is how you move to a new computer, recover from reinstalls or accidents.',
+        btn: 'Backup & download',
+        busy: 'Packing…',
+        restore: 'Restore from backup…',
+        restoreBusy: 'Working…',
+        tip: 'Restore = pick a backup file; the app restarts itself and restores automatically — no manual steps'
+      },
+      appearance: {
+        title: 'Appearance & Language',
+        desc1: 'Theme applies instantly and is saved locally. Dark mode is a low-blue-light theme for long sessions. Currently:',
+        systemNote: '(Follows system; updates when the system changes)',
+        themeSystem: 'System',
+        themeLight: 'Light',
+        themeDark: 'Dark',
+        langLead: 'Language: ',
+        langSystem: 'System',
+        langSystemNow: 'Follows system (currently {v})',
+        langZh: '中文',
+        langEn: 'English'
+      },
+      records: {
+        title: 'Practice Records',
+        desc: 'Practice records are stored locally. After exporting, import the matching bank file first on the other device, then import the records file. Records whose bank file is missing are skipped with a notice — never silently dropped.',
+        export: 'Export records file',
+        exporting: 'Exporting…',
+        import: 'Import records file',
+        importing: 'Importing…',
+        ok: 'Imported {n} records',
+        missing: '{n} records were skipped because their bank file (packageKey + version) was not found. Import the matching bank file first.',
+        missingQ: '{n} questions do not exist in the current bank: '
+      },
+      ai: {
+        title: 'AI Model Setup',
+        desc: 'Used by AI Import (documents / images → questions). Keys are stored only in a local config file; the UI shows masked keys. Works with any OpenAI-compatible endpoint (OpenAI, DeepSeek, Anthropic, Gemini, Groq, Mistral, Ollama…).',
+        roleTip:
+          'Three roles: ① text model = the main engine for organizing questions; ② vision (multimodal) model = required for image-bearing documents — direct vision for Word/PDF text and reading scans rely on it; ③ MinerU (optional) = only needed for scans / pure images containing figures & charts. Plain txt/md only needs a text model.',
+        guideEntry: 'New here and don\'t know where to get a key?',
+        guideLink: 'See the step-by-step “How to get an API key” guide →',
+        presetLabel: 'Provider preset (auto-fills config; you can still edit)',
+        presetPh: 'Select a provider…',
+        presetTip: 'Selecting a provider fills Base URL and model names — you only need to add the API key. Or leave it blank and fill everything manually.',
+        baseUrl: 'Base URL',
+        apiKey: 'API Key',
+        keyKeep: 'Leave empty to keep the existing key',
+        keyCurrent: ' (current: {v})',
+        modelText: 'Model (text)',
+        modelVision: 'Vision model (images / scans; leave empty = same as text model)',
+        mineru: 'MinerU API Key (optional)',
+        mineruTip: 'Used for structured parsing of pdf/images/docx (layout/OCR/formulas/tables → richer text); question organizing still uses the models above. Leave empty for the local parsing path. Apply at: ',
+        test: 'Test connection',
+        testing: 'Testing…',
+        save: 'Save config',
+        saving: 'Saving…',
+        testTip: 'Testing saves the current form first',
+        thinkingTip: '“Thinking mode” is chosen per job in the AI import dialog: Smart / Careful default to on (more stable), Fastest turns it off (faster).',
+        guideTitle: 'How to get an API key',
+        guideWhat:
+          'You only need three things: <b>Base URL</b> and <b>model name</b> are auto-filled when you pick a provider — you just need an <b>API key</b>. Keys are shown in full only once on the provider page, and are stored only on your machine.',
+        close: 'Close',
+        open: 'Open the {label} key page'
+      },
+      author: {
+        title: 'Author Info',
+        desc: 'Default author display name written into exported bank files (saved locally). Once the plaza account system is live, your account name will take over. Leave empty to type it manually in the export dialog.',
+        name: 'Default author name',
+        namePh: 'e.g. Ms. Zhang',
+        save: 'Save'
+      },
+      about: {
+        title: 'About',
+        appDesc: 'PickQ · self-hosted question bank app (offline-first). Data lives in a local folder; core features need no login or network.',
+        currentVer: 'Current version',
+        newVer: 'v{v} is available',
+        check: 'Check for updates',
+        checking: 'Checking…',
+        download: 'Download & install',
+        downloading: 'Downloading… {p}%',
+        installing: 'Installing — the app will restart itself, please wait…',
+        webNoUpdate: 'The web version has no auto-update; download the desktop app from the website.'
+      }
+    }
+  }
+})
 
 /* ---------- 版本与自动更新（桌面版；自建频道 pickq.cn/updates） ---------- */
 const isDesktopEnv = ref(isDesktop())
@@ -421,11 +577,13 @@ async function doRestore() {
 
 /* ---------- 外观(双主题,规范 v2.1 §4.10) ---------- */
 const themePref = ref(getTheme())
-const effectiveLabel = ref(currentTheme() === 'dark' ? '黑夜' : '白天')
+// 随语言与主题响应式（useI18n 的 t 随 locale 变化触发重算）
+const effectiveLabel = computed(() =>
+  currentTheme() === 'dark' ? t('appearance.themeDark') : t('appearance.themeLight')
+)
 
 function onThemeChange(v) {
   setTheme(v)
-  effectiveLabel.value = currentTheme() === 'dark' ? '黑夜' : '白天'
 }
 
 /* ---------- 界面语言（跟随系统 / 中文 / English） ---------- */
