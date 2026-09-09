@@ -50,7 +50,7 @@
             <span class="q-type" :class="`type-${String(q.questionType).toLowerCase()}`">{{ q.typeLabel }}</span>
             <span class="review-badge" :class="reviewState(q).cls">{{ reviewState(q).text }}</span>
             <span class="review-meta text-muted mono">
-              {{ formatScore(reviewState(q).earned) }}/{{ formatScore(q.score) }} 分
+              {{ formatScore(reviewState(q).earned) }}/{{ formatScore(q.score) }} {{ t('unitPoint') }}
               <span v-if="q.seconds != null"> · {{ q.seconds }}s</span>
             </span>
           </div>
@@ -136,18 +136,18 @@
           </div>
 
           <div class="review-answer">
-            <span v-if="q.questionType !== 'SUBJECTIVE'" class="text-muted">我的答案：{{ q.selectedKeys?.length ? q.selectedKeys.join('、') : '未作答' }}</span>
+            <span v-if="q.questionType !== 'SUBJECTIVE'" class="text-muted">{{ t('myAnswer') }}：{{ q.selectedKeys?.length ? q.selectedKeys.join('、') : t('notAnswered') }}</span>
             <template v-if="q.answerKeys">
               <span class="dot"></span>
-              <span class="text-secondary">正确答案：{{ q.answerKeys.join('、') }}</span>
+              <span class="text-secondary">{{ t('correctAnswer') }}：{{ q.answerKeys.join('、') }}</span>
             </template>
             <span v-if="q.seconds != null" class="dot"></span>
-            <span v-if="q.seconds != null" class="text-muted">用时 {{ q.seconds }}s</span>
+            <span v-if="q.seconds != null" class="text-muted">{{ t('timeUsed') }} {{ q.seconds }}s</span>
           </div>
 
           <template v-if="q.answerText || q.analysis">
-            <p v-if="q.answerText" class="review-text"><b>答案：</b>{{ q.answerText }}</p>
-            <p v-if="q.analysis" class="review-text"><b>解析：</b><span v-html="richHtml(q.analysis)"></span></p>
+            <p v-if="q.answerText" class="review-text"><b>{{ t('answerLbl') }}：</b>{{ q.answerText }}</p>
+            <p v-if="q.analysis" class="review-text"><b>{{ t('analysisLbl') }}：</b><span v-html="richHtml(q.analysis)"></span></p>
           </template>
 
           <!-- 单题 AI 辅助解析（回顾错题时按需追问，可保存为正式解析） -->
@@ -166,7 +166,7 @@
           v-if="!dockNarrow || dockFabOpen"
           class="review-dock"
           :class="{ 'dock-pop': dockNarrow }"
-          title="答题卡"
+          :title="t('answerSheet')"
           :items="dockItems"
           :show-legend="true"
           :draggable="!dockNarrow"
@@ -177,11 +177,11 @@
           v-if="dockNarrow"
           class="dock-fab"
           :class="{ open: dockFabOpen }"
-          :title="dockFabOpen ? '收起答题卡' : '打开答题卡（对错色 + 跳题）'"
+          :title="dockFabOpen ? t('collapseSheet') : t('openSheet')"
           @click="dockFabOpen = !dockFabOpen"
         >
           <TikuIcon :name="dockFabOpen ? 'x' : 'list'" :size="14" />
-          <span>{{ dockFabOpen ? '收起' : '答题卡' }}</span>
+          <span>{{ dockFabOpen ? t('collapse') : t('answerSheet') }}</span>
         </button>
       </template>
     </template>
@@ -194,8 +194,8 @@
             <TikuIcon name="arrow-left" :size="14" />
             {{ t('backToBank') }}
           </RouterLink>
-          <h1 class="page-title">练习历史</h1>
-          <p class="page-desc">共 {{ total }} 场练习，点击查看回顾</p>
+          <h1 class="page-title">{{ t('historyTitle') }}</h1>
+          <p class="page-desc">{{ t('sessionsTotal', { n: total }) }}</p>
         </div>
       </header>
 
@@ -208,9 +208,9 @@
 
       <div v-else-if="sessions.length === 0" class="empty">
         <TikuIcon name="clock" :size="40" />
-        <h3>还没有练习记录</h3>
-        <p class="text-secondary">去题库点击「开始做题」，刷完一场就会出现在这里</p>
-        <button class="btn btn-primary" @click="$router.push(`/banks/${id}`)">去刷题</button>
+        <h3>{{ t('emptyTitle') }}</h3>
+        <p class="text-secondary">{{ t('emptyTip') }}</p>
+        <button class="btn btn-primary" @click="$router.push(`/banks/${id}`)">{{ t('goPractice') }}</button>
       </div>
 
       <div v-else class="sess-list">
@@ -222,10 +222,10 @@
         >
           <span class="mode-tag">{{ MODE_LABELS[s.mode] || s.mode }}</span>
           <span class="status-tag" :class="s.status === 'COMPLETED' ? 'status-done' : 'status-doing'">
-            {{ s.status === 'COMPLETED' ? '已完成' : '进行中' }}
+            {{ s.status === 'COMPLETED' ? t('completed') : t('running') }}
           </span>
-          <span class="sess-score mono">{{ formatScore(s.totalScore) }} / {{ formatScore(s.maxScore) }} 分</span>
-          <span class="sess-answer text-muted mono">答对 {{ s.correctCount }} / {{ s.answeredCount }}</span>
+          <span class="sess-score mono">{{ formatScore(s.totalScore) }} / {{ formatScore(s.maxScore) }} {{ t('unitPoint') }}</span>
+          <span class="sess-answer text-muted mono">{{ t('correctOf', { a: s.correctCount, b: s.answeredCount }) }}</span>
           <span class="sess-time text-muted mono">{{ formatDuration(s.totalSeconds) }}</span>
           <span class="sess-date text-muted">{{ formatDate(s.createdAt) }}</span>
           <TikuIcon name="chevron-right" :size="14" class="sess-arrow" />
@@ -258,6 +258,7 @@ const { t } = useI18n({
       notSubmittedTip: '本场尚未交卷，交卷后可查看完整答案与解析',
       material: '材料', expandMaterial: '展开材料', collapseMaterial: '收起材料',
       myAnswer: '我的作答', notAnswered: '未作答', earnedScore: '实得', selfGradePrompt: '对照参考答案自评赋分：', regrade: '重新自评：',
+      unitPoint: '分',
       fullMarks: '全对', saving: '保存中…', saveScore: '保存得分', referenceAnswer: '参考答案'
     },
     'en-US': {
@@ -266,10 +267,12 @@ const { t } = useI18n({
       notSubmittedTip: 'This session is not submitted yet — full answers and explanations appear after submission',
       material: 'Material', expandMaterial: 'Expand material', collapseMaterial: 'Collapse material',
       myAnswer: 'My answer', notAnswered: 'Not answered', earnedScore: 'Earned', selfGradePrompt: 'Grade against the reference answer: ', regrade: 'Regrade: ',
+      unitPoint: 'pts',
       fullMarks: 'Full marks', saving: 'Saving…', saveScore: 'Save score', referenceAnswer: 'Reference answer'
     }
   }
 })
+
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getSessionDetail, listSessions } from '../api/sessions'

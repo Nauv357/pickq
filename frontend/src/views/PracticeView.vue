@@ -41,7 +41,7 @@
             <div class="pending-q">
               <span class="mono">#{{ q.questionNumber ?? '—' }}</span>
               <span class="q-type type-subjective">{{ t('subjectiveType') }}</span>
-              <span class="text-muted">{{ formatScore(q.score) }} 分</span>
+              <span class="text-muted">{{ formatScore(q.score) }} {{ t('unitPoint') }}</span>
             </div>
             <div class="pending-content" v-html="richHtml(q.content)"></div>
             <div class="pending-row">
@@ -111,7 +111,7 @@
               <span class="report-badge" :class="badgeClass(q)">{{ badgeText(q) }}</span>
               <span class="report-content">{{ q.content }}</span>
               <span class="report-meta text-muted mono">
-                {{ formatScore(q.earnedScore ?? 0) }}/{{ formatScore(q.score) }} 分
+                {{ formatScore(q.earnedScore ?? 0) }}/{{ formatScore(q.score) }} {{ t('unitPoint') }}
                 <span v-if="q.seconds != null"> · {{ q.seconds }}s</span>
                 <TikuIcon :name="reportOpen[q.questionId] ? 'chevron-up' : 'chevron-down'" :size="12" />
               </span>
@@ -185,7 +185,7 @@
         <div class="empty">
           <TikuIcon name="file" :size="40" />
           <h3>请从题库详情开始做题</h3>
-          <p class="text-secondary">做题采用会话制：抽一组题全部作答后，交卷统一判分</p>
+          <p class="text-secondary">{{ t('sessionModeTip') }}</p>
           <button class="btn btn-primary" @click="$router.push(`/banks/${id}`)">
             <TikuIcon name="chevron-left" :size="14" />
             {{ t('backToBank') }}
@@ -239,7 +239,7 @@
           <div v-if="answeredCount === total" class="done-banner">
             <TikuIcon name="check" :size="14" />
             <span>
-              全部作答完成 · 可返回检查修改，点击右上角「交卷」统一判分
+              {{ t('allAnsweredTip') }}
             </span>
           </div>
 
@@ -247,7 +247,7 @@
             <div class="q-head">
               <span class="q-index mono">第 {{ current.questionNumber ?? currentIndex + 1 }} 题</span>
               <span class="q-type" :class="`type-${String(current.questionType).toLowerCase()}`">{{ current.typeLabel }}</span>
-              <span class="q-score text-muted">{{ formatScore(current.score) }} 分</span>
+              <span class="q-score text-muted">{{ formatScore(current.score) }} {{ t('unitPoint') }}</span>
               <span class="bar-grow"></span>
               <button
                 class="fav-btn"
@@ -300,8 +300,8 @@
             <div class="submit-row">
               <template v-if="!answeredLocal">
                 <span class="hint text-muted">
-                  <template v-if="current.questionType === 'MULTIPLE'">可多选 · 作答后交卷统一判分</template>
-                  <template v-else-if="current.questionType === 'SUBJECTIVE'">输入后交卷统一判分，可随时修改</template>
+                  <template v-if="current.questionType === 'MULTIPLE'">{{ t('multiTip') }}</template>
+                  <template v-else-if="current.questionType === 'SUBJECTIVE'">{{ t('subjTip') }}</template>
                   <template v-else>未作答，可直接跳过</template>
                 </span>
               </template>
@@ -353,6 +353,7 @@ const { t } = useI18n({
       pendingSubjective: '有 {n} 道主观题待自评赋分，自评后总分自动更新',
       subjectiveGrade: '主观题自评', subjectiveType: '主观题', myAnswer: '我的作答', referenceAnswer: '参考答案',
       none: '（无）', selfScorePrompt: '自评得分（0 ~ {s} 分）', fullMarks: '全对', saving: '保存中…', saveScore: '保存得分',
+      unitPoint: '分', sessionModeTip: '做题采用会话制：抽一组题全部作答后，交卷统一判分', allAnsweredTip: '全部作答完成 · 可返回检查修改，点击右上角「交卷」统一判分', multiTip: '可多选 · 作答后交卷统一判分', subjTip: '输入后交卷统一判分，可随时修改',
       statCorrect: '答对 / 总题数', statAccuracy: '正确率', statTime: '总用时', detailTitle: '每题明细（点击展开答案与解析）',
       selfGradeLbl: '自评', earnedScore: '实得', correctAnswer: '正确答案', answerLbl: '答案', analysisLbl: '解析',
       noAnalysis: '本题没有附加答案文字与解析'
@@ -363,6 +364,7 @@ const { t } = useI18n({
       pendingSubjective: '{n} subjective question(s) await self-grading — the total updates automatically',
       subjectiveGrade: 'Grade subjective questions', subjectiveType: 'Subjective', myAnswer: 'My answer', referenceAnswer: 'Reference answer',
       none: '(none)', selfScorePrompt: 'Self score (0 ~ {s})', fullMarks: 'Full marks', saving: 'Saving…', saveScore: 'Save score',
+      unitPoint: 'pts', sessionModeTip: 'Session-based: answer a set, then submit for unified scoring', allAnsweredTip: 'All answered — you can go back to check, then click Submit (top right) for scoring', multiTip: 'Multiple answers allowed · submitted for scoring at the end', subjTip: 'Type your answer; submitted for scoring at the end, editable anytime',
       statCorrect: 'Correct / total', statAccuracy: 'Accuracy', statTime: 'Total time', detailTitle: 'Question details (click to expand answers & analysis)',
       selfGradeLbl: 'Self-grade', earnedScore: 'Earned', correctAnswer: 'Correct answer', answerLbl: 'Answer', analysisLbl: 'Analysis',
       noAnalysis: 'No extra answer text or analysis for this question'
