@@ -4,8 +4,8 @@
     <div v-if="bankError" class="error-state">
       <TikuIcon name="file" :size="40" />
       <h3>{{ bankError }}</h3>
-      <p class="text-secondary">题库可能已被删除，或地址有误</p>
-      <button class="btn btn-secondary" @click="$router.push('/')">返回题库列表</button>
+      <p class="text-secondary">{{ t('notFoundDesc') }}</p>
+      <button class="btn btn-secondary" @click="$router.push('/')">{{ t('backToBanks') }}</button>
     </div>
 
     <!-- ============ 成绩报告（交卷后） ============ -->
@@ -14,17 +14,17 @@
         <div class="report-title-line">
           <button class="bar-btn" @click="$router.push(`/banks/${id}`)">
             <TikuIcon name="arrow-left" :size="14" />
-            返回题库
+            {{ t('backToBank') }}
           </button>
-          <h1 class="report-title">成绩报告</h1>
+          <h1 class="report-title">{{ t('reportTitle') }}</h1>
           <span v-if="modeLabel" class="mode-tag">{{ modeLabel }}</span>
         </div>
         <div class="report-score">
           <span class="score-num">{{ formatScore(report.totalScore) }} / {{ formatScore(report.maxScore) }}</span>
-          <span class="score-label">得分 / 满分 · {{ formatDuration(report.totalSeconds) }}</span>
+          <span class="score-label">{{ t('scoreFull') }} · {{ formatDuration(report.totalSeconds) }}</span>
           <button class="btn btn-secondary btn-sm" @click="goReview">
             <TikuIcon name="list" :size="13" />
-            查看详细回顾
+            {{ t('viewReview') }}
           </button>
         </div>
       </header>
@@ -33,27 +33,27 @@
         <!-- 待自评主观题（交卷后当场赋分，赋完总分实时更新） -->
         <div v-if="pendingSubjective.length" class="pending-banner">
           <TikuIcon name="sparkle" :size="14" />
-          <span>有 <b>{{ pendingSubjective.length }}</b> 道主观题待自评赋分，自评后总分自动更新</span>
+          <span>{{ t('pendingSubjective', { n: pendingSubjective.length }) }}</span>
         </div>
         <div v-if="pendingSubjective.length" class="pending-grade">
-          <div class="section-title"><h2>主观题自评</h2></div>
+          <div class="section-title"><h2>{{ t('subjectiveGrade') }}</h2></div>
           <div v-for="q in pendingSubjective" :key="q.questionId" class="pending-item">
             <div class="pending-q">
               <span class="mono">#{{ q.questionNumber ?? '—' }}</span>
-              <span class="q-type type-subjective">主观题</span>
+              <span class="q-type type-subjective">{{ t('subjectiveType') }}</span>
               <span class="text-muted">{{ formatScore(q.score) }} 分</span>
             </div>
             <div class="pending-content" v-html="richHtml(q.content)"></div>
             <div class="pending-row">
-              <span class="text-muted">我的作答：</span>
+              <span class="text-muted">{{ t('myAnswer') }}：</span>
               <span class="pending-answer" v-html="richHtml(q.userAnswer)"></span>
             </div>
             <div class="pending-row">
-              <span class="text-muted">参考答案：</span>
-              <span class="pending-answer" v-html="richHtml(q.referenceAnswer || '（无）')"></span>
+              <span class="text-muted">{{ t('referenceAnswer') }}：</span>
+              <span class="pending-answer" v-html="richHtml(q.referenceAnswer || t('none'))"></span>
             </div>
             <div class="pending-btns">
-              <span class="text-muted">自评得分（0 ~ {{ formatScore(q.score) }} 分）：</span>
+              <span class="text-muted">{{ t('selfScorePrompt', { s: formatScore(q.score) }) }}：</span>
               <el-slider
                 :model-value="gradeVal(q)"
                 :min="0"
@@ -80,7 +80,7 @@
                 全对
               </button>
               <button class="btn btn-primary btn-sm" :disabled="gradingQid === q.questionId" @click="gradePending(q)">
-                {{ gradingQid === q.questionId ? '保存中…' : '保存得分' }}
+                {{ gradingQid === q.questionId ? t('saving') : t('saveScore') }}
               </button>
             </div>
           </div>
@@ -90,21 +90,21 @@
           <div class="report-stats">
             <div class="stat">
               <span class="stat-num mono">{{ report.correctCount }} / {{ report.totalQuestions }}</span>
-              <span class="stat-label">答对 / 总题数</span>
+              <span class="stat-label">{{ t('statCorrect') }}</span>
             </div>
             <div class="stat">
               <span class="stat-num mono">{{ report.totalQuestions ? Math.round((report.correctCount / report.totalQuestions) * 100) : 0 }}%</span>
-              <span class="stat-label">正确率</span>
+              <span class="stat-label">{{ t('statAccuracy') }}</span>
             </div>
             <div class="stat">
               <span class="stat-num mono">{{ formatDuration(report.totalSeconds) }}</span>
-              <span class="stat-label">总用时</span>
+              <span class="stat-label">{{ t('statTime') }}</span>
             </div>
           </div>
         </div>
 
         <div class="report-questions">
-          <div class="section-title"><h2>每题明细（点击展开答案与解析）</h2></div>
+          <div class="section-title"><h2>{{ t('detailTitle') }}</h2></div>
           <div v-for="(q, i) in report.questions" :key="q.questionId" class="report-item">
             <div class="report-row" @click="toggleReportOpen(q.questionId)">
               <span class="q-number mono">#{{ q.questionNumber ?? i + 1 }}</span>
@@ -118,24 +118,24 @@
             </div>
             <div v-if="reportOpen[q.questionId]" class="report-detail">
               <div v-if="q.questionType === 'SUBJECTIVE' && q.userAnswer" class="rd-row">
-                <b>我的作答：</b><span v-html="richHtml(q.userAnswer)"></span>
+                <b>{{ t('myAnswer') }}：</b><span v-html="richHtml(q.userAnswer)"></span>
               </div>
               <div v-else-if="q.selectedKeys && q.selectedKeys.length" class="rd-row">
-                <b>我的作答：</b>{{ formatKeys(q.selectedKeys) }}
+                <b>{{ t('myAnswer') }}：</b>{{ formatKeys(q.selectedKeys) }}
               </div>
-              <div v-if="q.selfGrade" class="rd-row"><b>自评：</b>实得 {{ formatScore(q.earnedScore ?? 0) }} / {{ formatScore(q.score) }} 分</div>
+              <div v-if="q.selfGrade" class="rd-row"><b>{{ t('selfGradeLbl') }}：</b>{{ t('earnedScore') }} {{ formatScore(q.earnedScore ?? 0) }} / {{ formatScore(q.score) }}</div>
               <div v-if="q.answerKeys && q.answerKeys.length" class="rd-row">
-                <b>正确答案：</b>{{ formatKeys(q.answerKeys) }}
+                <b>{{ t('correctAnswer') }}：</b>{{ formatKeys(q.answerKeys) }}
               </div>
-              <div v-if="q.answerText" class="rd-row"><b>答案：</b>{{ q.answerText }}</div>
+              <div v-if="q.answerText" class="rd-row"><b>{{ t('answerLbl') }}：</b>{{ q.answerText }}</div>
               <div v-if="q.questionType === 'SUBJECTIVE' && q.referenceAnswer" class="rd-row">
-                <b>参考答案：</b><span v-html="richHtml(q.referenceAnswer)"></span>
+                <b>{{ t('referenceAnswer') }}：</b><span v-html="richHtml(q.referenceAnswer)"></span>
               </div>
-              <div v-if="q.analysis" class="rd-row"><b>解析：</b><span v-html="richHtml(q.analysis)"></span></div>
+              <div v-if="q.analysis" class="rd-row"><b>{{ t('analysisLbl') }}：</b><span v-html="richHtml(q.analysis)"></span></div>
               <p
                 v-if="!q.analysis && !q.answerText && !(q.answerKeys && q.answerKeys.length) && !q.referenceAnswer"
                 class="text-muted"
-              >本题没有附加答案文字与解析</p>
+              >{{ t('noAnalysis') }}</p>
               <!-- 单题 AI 辅助解析（交卷回顾时对错题/难题按需追问，可保存为正式解析） -->
               <QuestionAiAnalysis
                 v-if="q.questionId"
@@ -153,9 +153,9 @@
     <template v-else>
       <!-- 工具条（与做题无关信息最小化） -->
       <header class="practice-bar">
-        <button class="bar-btn" :title="'返回题库：' + (bank?.name || '')" @click="$router.push(`/banks/${id}`)">
+        <button class="bar-btn" :title="t('backToBank') + '：' + (bank?.name || '')" @click="$router.push(`/banks/${id}`)">
           <TikuIcon name="chevron-left" :size="16" />
-          <span class="bar-back-text">返回</span>
+          <span class="bar-back-text">{{ t('back') }}</span>
         </button>
         <span class="bar-name" :title="bank?.name">{{ bank?.name }}</span>
         <span v-if="modeLabel" class="mode-tag">{{ modeLabel }}</span>
@@ -188,7 +188,7 @@
           <p class="text-secondary">做题采用会话制：抽一组题全部作答后，交卷统一判分</p>
           <button class="btn btn-primary" @click="$router.push(`/banks/${id}`)">
             <TikuIcon name="chevron-left" :size="14" />
-            返回题库
+            {{ t('backToBank') }}
           </button>
         </div>
       </div>
@@ -199,7 +199,7 @@
           <TikuIcon name="file" :size="40" />
           <h3>加载失败</h3>
           <p class="text-secondary">{{ loadError }}</p>
-          <button class="btn btn-primary" @click="$router.push(`/banks/${id}`)">返回题库</button>
+          <button class="btn btn-primary" @click="$router.push(`/banks/${id}`)">{{ t('backToBank') }}</button>
         </div>
       </div>
 
@@ -343,6 +343,32 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n({
+  messages: {
+    'zh-CN': {
+      notFoundDesc: '题库可能已被删除，或地址有误', backToBanks: '返回题库列表', backToBank: '返回题库',
+      reportTitle: '成绩报告', scoreFull: '得分 / 满分', viewReview: '查看详细回顾',
+      pendingSubjective: '有 {n} 道主观题待自评赋分，自评后总分自动更新',
+      subjectiveGrade: '主观题自评', subjectiveType: '主观题', myAnswer: '我的作答', referenceAnswer: '参考答案',
+      none: '（无）', selfScorePrompt: '自评得分（0 ~ {s} 分）', fullMarks: '全对', saving: '保存中…', saveScore: '保存得分',
+      statCorrect: '答对 / 总题数', statAccuracy: '正确率', statTime: '总用时', detailTitle: '每题明细（点击展开答案与解析）',
+      selfGradeLbl: '自评', earnedScore: '实得', correctAnswer: '正确答案', answerLbl: '答案', analysisLbl: '解析',
+      noAnalysis: '本题没有附加答案文字与解析'
+    },
+    'en-US': {
+      notFoundDesc: 'This bank may have been deleted, or the link is wrong', backToBanks: 'Back to banks', backToBank: 'Back to bank',
+      reportTitle: 'Score Report', scoreFull: 'Score / Full', viewReview: 'View detailed review',
+      pendingSubjective: '{n} subjective question(s) await self-grading — the total updates automatically',
+      subjectiveGrade: 'Grade subjective questions', subjectiveType: 'Subjective', myAnswer: 'My answer', referenceAnswer: 'Reference answer',
+      none: '(none)', selfScorePrompt: 'Self score (0 ~ {s})', fullMarks: 'Full marks', saving: 'Saving…', saveScore: 'Save score',
+      statCorrect: 'Correct / total', statAccuracy: 'Accuracy', statTime: 'Total time', detailTitle: 'Question details (click to expand answers & analysis)',
+      selfGradeLbl: 'Self-grade', earnedScore: 'Earned', correctAnswer: 'Correct answer', answerLbl: 'Answer', analysisLbl: 'Analysis',
+      noAnalysis: 'No extra answer text or analysis for this question'
+    }
+  }
+})
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getBank } from '../api/banks'
