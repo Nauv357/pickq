@@ -55,7 +55,7 @@ Question-bank tools generally fall into two camps: you use someone else's bank (
 2. Upload PDF / Word / images, pick a model (first time: fill in your API key under Settings → AI Model, with step-by-step guides inside the app);
 3. Review questions one by one in the preview (edit options, fill answers, handle images) → confirm → start practicing.
 
-![Import entry](docs/screenshots/import.png)
+![Import entry](docs/screenshots/en-import.png)
 
 ### Way 2: Import a question-bank file someone shared
 
@@ -71,7 +71,7 @@ The **Discover** page browses the community plaza (pickq.cn) and imports a bank 
 - **Review**: due reminders based on a memory schedule, so "learned it but forgot it" becomes rare;
 - **Stats**: accuracy trends, whether mistakes are actually healed, review distribution — all reviewable.
 
-![Question bank list](docs/screenshots/home.png)　![Stats](docs/screenshots/stats.png)
+![Question bank list](docs/screenshots/en-home.png)　![Stats](docs/screenshots/en-stats.png)
 
 ## Share your question banks
 
