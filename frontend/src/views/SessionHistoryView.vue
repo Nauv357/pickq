@@ -6,34 +6,34 @@
         <div>
           <button class="back-link" @click="$router.push(`/banks/${id}`)">
             <TikuIcon name="arrow-left" :size="14" />
-            返回题库
+            {{ t('backToBank') }}
           </button>
           <div class="title-line">
-            <h1 class="page-title">练习回顾</h1>
+            <h1 class="page-title">{{ t('title') }}</h1>
             <span class="mode-tag">{{ MODE_LABELS[viewSession.mode] || viewSession.mode }}</span>
             <span class="status-tag" :class="viewSession.status === 'COMPLETED' ? 'status-done' : 'status-doing'">
-              {{ viewSession.status === 'COMPLETED' ? '已完成' : '进行中' }}
+              {{ viewSession.status === 'COMPLETED' ? t('completed') : t('running') }}
             </span>
           </div>
           <div class="page-meta text-muted">
-            <span>答对 {{ viewSession.correctCount }} / {{ viewSession.answeredCount }}</span>
+            <span>{{ t('correctOf', { a: viewSession.correctCount, b: viewSession.answeredCount }) }}</span>
             <span class="dot"></span>
-            <span>得分 {{ viewSession.totalScore }} / {{ viewSession.maxScore }}</span>
+            <span>{{ t('scoreOf', { a: viewSession.totalScore, b: viewSession.maxScore }) }}</span>
             <span class="dot"></span>
-            <span>用时 {{ formatDuration(viewSession.totalSeconds) }}</span>
+            <span>{{ t('timeUsed') }} {{ formatDuration(viewSession.totalSeconds) }}</span>
             <span class="dot"></span>
             <span>{{ formatDate(viewSession.createdAt) }}</span>
           </div>
         </div>
         <button v-if="viewSession.status !== 'COMPLETED'" class="btn btn-primary" @click="continuePractice">
           <TikuIcon name="play" :size="14" />
-          继续做题
+          {{ t('continuePractice') }}
         </button>
       </header>
 
       <div v-if="viewSession.status !== 'COMPLETED'" class="warn-banner">
         <TikuIcon name="info" :size="15" />
-        <span>本场尚未交卷，交卷后可查看完整答案与解析</span>
+        <span>{{ t('notSubmittedTip') }}</span>
       </div>
 
       <!-- 每题回顾（全宽；编辑/回顾时右侧悬浮"答题卡"圆钮，不挤占列表宽度） -->
@@ -59,10 +59,10 @@
           <!-- 共享材料（资料分析组内题，回顾页只展示一次，可折叠） -->
           <div v-if="showMaterial(q)" class="review-material" :class="{ collapsed: isMaterialCollapsed(q.materialId) }">
             <div class="material-head" @click="toggleMaterial(q.materialId)">
-              <span class="material-title">材料</span>
+              <span class="material-title">{{ t('material') }}</span>
               <span class="material-toggle">
                 <TikuIcon :name="isMaterialCollapsed(q.materialId) ? 'chevron-down' : 'chevron-up'" :size="13" />
-                {{ isMaterialCollapsed(q.materialId) ? '展开材料' : '收起材料' }}
+                {{ isMaterialCollapsed(q.materialId) ? t('expandMaterial') : t('collapseMaterial') }}
               </span>
             </div>
             <div v-show="!isMaterialCollapsed(q.materialId)" class="material-body" v-html="richHtml(q.materialContent)"></div>
@@ -86,16 +86,16 @@
           <!-- 主观题：用户作答 + 自评赋分 -->
           <div v-if="q.questionType === 'SUBJECTIVE'" class="review-subjective">
             <div class="review-answer">
-              <span class="text-muted">我的作答：</span>
-              <span class="sub-answer" v-html="richHtml(q.userAnswer || '未作答')"></span>
+              <span class="text-muted">{{ t('myAnswer') }}：</span>
+              <span class="sub-answer" v-html="richHtml(q.userAnswer || t('notAnswered'))"></span>
             </div>
             <div v-if="q.selfGrade" class="self-grade-badge" :class="`sg-${String(q.selfGrade).toLowerCase()}`">
               {{ selfGradeText(q.selfGrade) }}
-              <span class="sg-score mono">· 实得 {{ formatScore(selfGradeEarned(q)) }} / {{ formatScore(q.score) }} 分</span>
+              <span class="sg-score mono">· {{ t('earnedScore') }} {{ formatScore(selfGradeEarned(q)) }} / {{ formatScore(q.score) }}</span>
             </div>
             <!-- 赋分控件：未自评 或 重新自评中（自由给分 0~满分，0.5 步进） -->
             <div v-if="(!q.selfGrade && q.userAnswer) || regradingQid === q.questionId" class="review-grade">
-              <span class="text-muted">{{ q.selfGrade ? '重新自评：' : '对照参考答案自评赋分：' }}</span>
+              <span class="text-muted">{{ q.selfGrade ? t('regrade') : t('selfGradePrompt') }}</span>
               <div class="review-grade-btns">
                 <el-slider
                   :model-value="gradeVal(q)"
@@ -119,18 +119,18 @@
                   @update:model-value="(v) => setDraft(q, v)"
                 />
                 <span class="text-muted mono">/ {{ formatScore(q.score) }}</span>
-                <button class="btn btn-secondary btn-sm" :disabled="gradingQid === q.questionId" @click="quickGrade(q, q.score)">全对</button>
+                <button class="btn btn-secondary btn-sm" :disabled="gradingQid === q.questionId" @click="quickGrade(q, q.score)">{{ t('fullMarks') }}</button>
                 <button class="btn btn-primary btn-sm" :disabled="gradingQid === q.questionId" @click="doGradeScore(q)">
-                  {{ gradingQid === q.questionId ? '保存中…' : '保存得分' }}
+                  {{ gradingQid === q.questionId ? t('saving') : t('saveScore') }}
                 </button>
               </div>
             </div>
             <!-- 已自评：可重新赋分 -->
             <div v-if="q.selfGrade && regradingQid !== q.questionId" class="review-grade">
-              <button class="btn btn-ghost btn-sm" @click="regradingQid = q.questionId">重新自评</button>
+              <button class="btn btn-ghost btn-sm" @click="regradingQid = q.questionId">{{ t('regrade') }}</button>
             </div>
             <template v-if="q.referenceAnswer">
-              <div class="sub-ref-title">参考答案</div>
+              <div class="sub-ref-title">{{ t('referenceAnswer') }}</div>
               <div class="sub-ref-body" v-html="richHtml(q.referenceAnswer)"></div>
             </template>
           </div>
@@ -192,7 +192,7 @@
         <div>
           <RouterLink :to="`/banks/${id}`" class="back-link">
             <TikuIcon name="arrow-left" :size="14" />
-            返回题库
+            {{ t('backToBank') }}
           </RouterLink>
           <h1 class="page-title">练习历史</h1>
           <p class="page-desc">共 {{ total }} 场练习，点击查看回顾</p>
@@ -248,6 +248,28 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n({
+  messages: {
+    'zh-CN': {
+      backToBank: '返回题库', title: '练习回顾', completed: '已完成', running: '进行中',
+      correctOf: '答对 {a} / {b}', scoreOf: '得分 {a} / {b}', timeUsed: '用时', continuePractice: '继续做题',
+      notSubmittedTip: '本场尚未交卷，交卷后可查看完整答案与解析',
+      material: '材料', expandMaterial: '展开材料', collapseMaterial: '收起材料',
+      myAnswer: '我的作答', notAnswered: '未作答', earnedScore: '实得', selfGradePrompt: '对照参考答案自评赋分：', regrade: '重新自评：',
+      fullMarks: '全对', saving: '保存中…', saveScore: '保存得分', referenceAnswer: '参考答案'
+    },
+    'en-US': {
+      backToBank: 'Back to bank', title: 'Session Review', completed: 'Completed', running: 'In progress',
+      correctOf: '{a} / {b} correct', scoreOf: 'Score {a} / {b}', timeUsed: 'Time', continuePractice: 'Continue practicing',
+      notSubmittedTip: 'This session is not submitted yet — full answers and explanations appear after submission',
+      material: 'Material', expandMaterial: 'Expand material', collapseMaterial: 'Collapse material',
+      myAnswer: 'My answer', notAnswered: 'Not answered', earnedScore: 'Earned', selfGradePrompt: 'Grade against the reference answer: ', regrade: 'Regrade: ',
+      fullMarks: 'Full marks', saving: 'Saving…', saveScore: 'Save score', referenceAnswer: 'Reference answer'
+    }
+  }
+})
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getSessionDetail, listSessions } from '../api/sessions'
