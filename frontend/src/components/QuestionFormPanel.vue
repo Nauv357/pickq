@@ -300,11 +300,27 @@ const { t } = useI18n({
   messages: {
     'zh-CN': {
       editNth: '编辑第 {n} 题', addQuestion: '添加题目', unsavedTip: '有未保存的修改', prevTip: '上一题（若有未保存修改会先询问）',
-      nextTip: '下一题（若有未保存修改会先询问）', posTip: '当前位置：第 {p} 行 / 共 {t} 行（按当前列表顺序）'
+      nextTip: '下一题（若有未保存修改会先询问）', posTip: '当前位置：第 {p} 行 / 共 {t} 行（按当前列表顺序）',
+      aiNeedStem: '请先填写题干', aiEmptyRet: 'AI 未返回内容，请稍后重试', aiFilled: 'AI 解析已填入（可修改后保存）',
+      imgInserted: '图片已插入（[图片:…] 标记）', imgInsertedOpt: '图片已插入选项（[图片:…] 标记）',
+      stemRequired: '请输入题干', need2Options: '至少需要 2 个选项', optionEmpty: '选项内容不能为空', pickCorrect: '请选择正确答案',
+      multiPick2: '多选题请至少选择 2 个正确答案', scorePositive: '分值必须大于 0',
+      savedContinue: '第 {n} 题已保存，继续录入下一题', savedDone: '第 {n} 题已保存', updatedStay: '题目已更新，可继续编辑或切换题目',
+      aiBusyNav: 'AI 解析生成中，稍候再切换题目', aiBusyJump: 'AI 解析生成中，稍候再跳转', aiBusyClose: 'AI 解析生成中，稍候再关闭',
+      closeAskMsg: '当前题目还有未保存的修改，先保存吗？选择「放弃修改」将丢失这些改动。', closePanelTitle: '关闭编辑面板',
+      leaveAskMsg: '当前题目还有未保存的修改，离开前要保存吗？选择「放弃修改」将丢失这些改动。', leavePageTitle: '离开当前页面'
     },
     'en-US': {
       editNth: 'Editing question #{n}', addQuestion: 'Add question', unsavedTip: 'Unsaved changes', prevTip: 'Previous (asks first if there are unsaved changes)',
-      nextTip: 'Next (asks first if there are unsaved changes)', posTip: 'Position: row {p} / {t} (current list order)'
+      nextTip: 'Next (asks first if there are unsaved changes)', posTip: 'Position: row {p} / {t} (current list order)',
+      aiNeedStem: 'Please fill in the question stem first', aiEmptyRet: 'AI returned nothing — please try again later', aiFilled: 'AI analysis filled in (you can edit it before saving)',
+      imgInserted: 'Image inserted ([图片:…] marker)', imgInsertedOpt: 'Image inserted into the option ([图片:…] marker)',
+      stemRequired: 'Please enter the question stem', need2Options: 'At least 2 options are required', optionEmpty: 'Option text cannot be empty', pickCorrect: 'Please select the correct answer',
+      multiPick2: 'For multiple choice, select at least 2 correct answers', scorePositive: 'The score must be greater than 0',
+      savedContinue: 'Question #{n} saved — continue with the next one', savedDone: 'Question #{n} saved', updatedStay: 'Question updated — keep editing or switch questions',
+      aiBusyNav: 'AI analysis is generating; wait a moment before switching questions', aiBusyJump: 'AI analysis is generating; wait a moment before jumping', aiBusyClose: 'AI analysis is generating; wait a moment before closing',
+      closeAskMsg: 'This question has unsaved changes. Save first? Choosing “Discard changes” will lose them.', closePanelTitle: 'Close edit panel',
+      leaveAskMsg: 'This question has unsaved changes. Save before leaving? Choosing “Discard changes” will lose them.', leavePageTitle: 'Leave this page'
     }
   }
 })
@@ -423,7 +439,7 @@ const aiGenerating = ref(false)
 async function aiGenerateAnalysis() {
   if (aiGenerating.value) return
   if (!form.content || !form.content.trim()) {
-    ElMessage.warning('请先填写题干')
+    ElMessage.warning(t('aiNeedStem'))
     return
   }
   //材料内容（关联材料时取文本供参考）
@@ -450,11 +466,11 @@ async function aiGenerateAnalysis() {
     //拦截器已解包 body.data → resp 即解析文本字符串
     const text = resp ?? ''
     if (!text) {
-      ElMessage.warning('AI 未返回内容，请稍后重试')
+      ElMessage.warning(t('aiEmptyRet'))
       return
     }
     form.analysis = form.analysis ? `${form.analysis}\n\n${text}` : text
-    ElMessage.success('AI 解析已填入（可修改后保存）')
+    ElMessage.success(t('aiFilled'))
   } catch (e) {
     /* 拦截器已提示 */
   } finally {
@@ -477,7 +493,7 @@ async function insertImage(field) {
       const res = await uploadImage(props.bankId, file)
       const marker = imageMarker(res.name)
       form[field] = form[field] ? `${form[field]}\n${marker}` : marker
-      ElMessage.success('图片已插入（[图片:…] 标记）')
+      ElMessage.success(t('imgInserted'))
     } catch (e) {
       /* 拦截器已提示 */
     } finally {
@@ -503,7 +519,7 @@ async function insertOptionImage(i) {
       const opt = form.options[i]
       if (!opt) return
       opt.text = opt.text ? `${opt.text}\n${marker}` : marker
-      ElMessage.success('图片已插入选项（[图片:…] 标记）')
+      ElMessage.success(t('imgInsertedOpt'))
     } catch (e) {
       /* 拦截器已提示 */
     } finally {
@@ -597,29 +613,29 @@ function buildPayload() {
 
 function validate() {
   if (!form.content.trim()) {
-    ElMessage.warning('请输入题干')
+    ElMessage.warning(t('stemRequired'))
     return false
   }
   if (form.questionType !== 'JUDGE' && form.questionType !== 'SUBJECTIVE') {
     if (form.options.length < 2) {
-      ElMessage.warning('至少需要 2 个选项')
+      ElMessage.warning(t('need2Options'))
       return false
     }
     if (form.options.some((o) => !o.text.trim())) {
-      ElMessage.warning('选项内容不能为空')
+      ElMessage.warning(t('optionEmpty'))
       return false
     }
   }
   if (form.questionType !== 'SUBJECTIVE' && !form.answerKeys.length) {
-    ElMessage.warning('请选择正确答案')
+    ElMessage.warning(t('pickCorrect'))
     return false
   }
   if (form.questionType === 'MULTIPLE' && form.answerKeys.length < 2) {
-    ElMessage.warning('多选题请至少选择 2 个正确答案')
+    ElMessage.warning(t('multiPick2'))
     return false
   }
   if (!form.score || form.score < 1) {
-    ElMessage.warning('分值必须大于 0')
+    ElMessage.warning(t('scorePositive'))
     return false
   }
   return true
@@ -641,7 +657,7 @@ async function submit() {
     try {
       const savedNumber = form.questionNumber
       await doSave()
-      ElMessage.success(`第 ${savedNumber} 题已保存，继续录入下一题`)
+      ElMessage.success(t('savedContinue', { n: savedNumber }))
       // 清空表单继续录下一题（保留题型，方便连续录同题型）；题号顺延
       const keepType = form.questionType
       Object.assign(form, defaultForm())
@@ -667,7 +683,7 @@ async function saveCurrent(silent = false) {
   try {
     await doSave()
     baseline.value = JSON.stringify(form)
-    if (!silent) ElMessage.success('题目已更新，可继续编辑或切换题目')
+    if (!silent) ElMessage.success(t('updatedStay'))
     emit('saved', { questionNumber: form.questionNumber })
     return true
   } catch (e) {
@@ -701,8 +717,8 @@ async function closeWithConfirm(act) {
   }
   try {
     await ElMessageBox.confirm(
-      '当前题目还有未保存的修改，先保存吗？选择「放弃修改」将丢失这些改动。',
-      '关闭编辑面板',
+      t('closeAskMsg'),
+      t('closePanelTitle'),
       {
         confirmButtonText: '保存并关闭',
         cancelButtonText: '放弃修改',
@@ -720,7 +736,7 @@ async function closeWithConfirm(act) {
 
 function goNav(dir) {
   if (aiGenerating.value) {
-    ElMessage.warning('AI 解析生成中，稍候再切换题目')
+    ElMessage.warning(t('aiBusyNav'))
     return
   }
   switchAway(() => emit('navigate', dir))
@@ -734,7 +750,7 @@ watch(
     const qid = props.jumpRequest?.questionId
     if (qid == null) return
     if (aiGenerating.value) {
-      ElMessage.warning('AI 解析生成中，稍候再跳转')
+      ElMessage.warning(t('aiBusyJump'))
       return
     }
     switchAway(() => emit('jump-to', qid))
@@ -743,7 +759,7 @@ watch(
 
 function requestClose() {
   if (aiGenerating.value) {
-    ElMessage.warning('AI 解析生成中，稍候再关闭')
+    ElMessage.warning(t('aiBusyClose'))
     return
   }
   closeWithConfirm(() => emit('closed'))
@@ -755,8 +771,8 @@ onBeforeRouteLeave(async () => {
   if (!isEdit.value || !dirty.value) return true
   try {
     await ElMessageBox.confirm(
-      '当前题目还有未保存的修改，离开前要保存吗？选择「放弃修改」将丢失这些改动。',
-      '离开当前页面',
+      t('leaveAskMsg'),
+      t('leavePageTitle'),
       {
         confirmButtonText: '保存并离开',
         cancelButtonText: '放弃修改',
@@ -787,7 +803,7 @@ async function submitAndFinish() {
   submitting.value = true
   try {
     await doSave()
-    ElMessage.success(`第 ${form.questionNumber} 题已保存`)
+    ElMessage.success(t('savedDone', { n: form.questionNumber }))
     emit('saved', { questionNumber: form.questionNumber })
     emit('closed')
   } catch (e) {

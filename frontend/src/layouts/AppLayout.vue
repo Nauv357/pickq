@@ -144,7 +144,12 @@ const { t } = useI18n({
       offlineNote: '离线优先 · 数据在本机',
       theme: { label: '主题', light: '白天', dark: '黑夜' },
       themeToggleTitle: '点击切换主题(当前: {v})',
-      expandSidebar: '展开侧边栏'
+      expandSidebar: '展开侧边栏',
+      delAskCancel: '将取消任务「{name}」的处理（取消后可再次删除彻底清理），确定吗？',
+      delAskDelete: '将删除任务「{name}」及其整理结果，确定吗？',
+      delTitle: '删除 AI 导入任务',
+      taskCanceled: '已取消任务',
+      taskDeleted: '任务已删除'
     },
     'en-US': {
       brandSub: 'Your Question Banks',
@@ -153,7 +158,12 @@ const { t } = useI18n({
       offlineNote: 'Offline-first · data stays on this device',
       theme: { label: 'Theme', light: 'Light', dark: 'Dark' },
       themeToggleTitle: 'Toggle theme (current: {v})',
-      expandSidebar: 'Expand sidebar'
+      expandSidebar: 'Expand sidebar',
+      delAskCancel: 'This will cancel processing of task “{name}” (you can delete it completely afterward). Proceed?',
+      delAskDelete: 'This will delete task “{name}” and its results. Proceed?',
+      delTitle: 'Delete AI import task',
+      taskCanceled: 'Task canceled',
+      taskDeleted: 'Task deleted'
     }
   }
 })
@@ -300,9 +310,9 @@ async function removeRecentJob(job) {
   try {
     await ElMessageBox.confirm(
       active
-        ? `将取消任务「${job.fileName}」的处理（取消后可再次删除彻底清理），确定吗？`
-        : `将删除任务「${job.fileName}」及其整理结果，确定吗？`,
-      '删除 AI 导入任务',
+        ? t('delAskCancel', { name: job.fileName })
+        : t('delAskDelete', { name: job.fileName }),
+      t('delTitle'),
       {
         type: 'warning',
         confirmButtonText: '删除',
@@ -316,7 +326,7 @@ async function removeRecentJob(job) {
   try {
     await deleteAiJob(job.id)
     recentJobs.value = recentJobs.value.filter((j) => j.id !== job.id)
-    ElMessage.success(active ? '已取消任务' : '任务已删除')
+    ElMessage.success(active ? t('taskCanceled') : t('taskDeleted'))
   } catch (e) {
     /* 拦截器已提示 */
   }

@@ -72,8 +72,8 @@ import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n({
   messages: {
-    'zh-CN': { dragTip: '按住空白处可拖动题号盘位置', qUnit: '题', collapseJump: '收起跳转框', openJump: '打开输入题号直达跳转', sizeTip: '题号盘大小', jumpPh: '输入题号回车直达', jumpTo: '跳转第', stOk: '对', stNo: '错', stPartial: '部分', stSkip: '未答' },
-    'en-US': { dragTip: 'Drag the blank area to move the number dock', qUnit: 'q', collapseJump: 'Collapse jump box', openJump: 'Jump by question number', sizeTip: 'Dock size', jumpPh: 'Type a number and press Enter', jumpTo: 'Jump to #', stOk: 'Right', stNo: 'Wrong', stPartial: 'Partial', stSkip: 'Skipped' }
+    'zh-CN': { dragTip: '按住空白处可拖动题号盘位置', qUnit: '题', collapseJump: '收起跳转框', openJump: '打开输入题号直达跳转', sizeTip: '题号盘大小', jumpPh: '输入题号回车直达', jumpTo: '跳转第', warnNumber: '请输入有效的题号', noNumberIn: '当前 {total} 题中没有第 {n} 题', stOk: '对', stNo: '错', stPartial: '部分', stSkip: '未答' },
+    'en-US': { dragTip: 'Drag the blank area to move the number dock', qUnit: 'q', collapseJump: 'Collapse jump box', openJump: 'Jump by question number', sizeTip: 'Dock size', jumpPh: 'Type a number and press Enter', jumpTo: 'Jump to #', warnNumber: 'Enter a valid question number', noNumberIn: 'Question {n} is not in the current {total} questions', stOk: 'Right', stNo: 'Wrong', stPartial: 'Partial', stSkip: 'Skipped' }
   }
 })
 import { ElMessage } from 'element-plus'
@@ -212,12 +212,12 @@ onBeforeUnmount(() => {
 function goByNumber() {
   const n = Number(goText.value)
   if (!Number.isInteger(n) || n < 1) {
-    ElMessage.warning('请输入有效的题号')
+    ElMessage.warning(t('warnNumber'))
     return
   }
   const hit = props.items.find((x) => x.questionNumber === n)
   if (!hit) {
-    ElMessage.info(`当前 ${props.items.length} 题中没有第 ${n} 题`)
+    ElMessage.info(t('noNumberIn', { total: props.items.length, n }))
     return
   }
   goText.value = ''

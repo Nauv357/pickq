@@ -87,13 +87,23 @@ const { t } = useI18n({
       title: 'AI 任务', sub1: '所有尚未确认导入的任务都会保留在这里（进行中 / 待确认 / 失败 / 已取消），', sub2: '随时回来继续预览修改，不会被新任务挤掉。',
       runningN: '{n} 个任务整理中', loading: '加载中…', qUnit: '题', processOf: '处理方式：', thinking: '思考', aiFill: '补答', durTip: '单次处理时长',
       openPreview: '打开预览 / 继续整理', continuePreview: '继续预览', viewProgress: '查看进度', deleteJob: '删除任务', delete: '删除',
-      emptyTitle: '暂无待确认的 AI 导入任务', emptyTip: '在任一题库页面点击「AI 追加」开始导入，任务会出现在这里'
+      emptyTitle: '暂无待确认的 AI 导入任务', emptyTip: '在任一题库页面点击「AI 追加」开始导入，任务会出现在这里',
+      delAskCancel: '将取消任务「{name}」的处理（取消后可再次删除彻底清理），确定吗？',
+      delAskDelete: '将删除任务「{name}」及其整理结果，确定吗？',
+      delTitle: '删除 AI 导入任务',
+      taskCanceled: '已取消任务',
+      taskDeleted: '任务已删除'
     },
     'en-US': {
       title: 'AI Tasks', sub1: 'Every task that has not been confirmed yet stays here (running / pending / failed / canceled),', sub2: 'come back anytime to review and edit — new tasks never push old ones out.',
       runningN: '{n} tasks running', loading: 'Loading…', qUnit: 'q', processOf: 'Path: ', thinking: 'thinking', aiFill: 'AI-filled', durTip: 'single-run duration',
       openPreview: 'Open preview / continue', continuePreview: 'Continue preview', viewProgress: 'View progress', deleteJob: 'Delete task', delete: 'Delete',
-      emptyTitle: 'No pending AI import tasks', emptyTip: 'Click "AI Append" on any bank page to start an import — tasks will show up here'
+      emptyTitle: 'No pending AI import tasks', emptyTip: 'Click "AI Append" on any bank page to start an import — tasks will show up here',
+      delAskCancel: 'This will cancel processing of task “{name}” (you can delete it completely afterward). Proceed?',
+      delAskDelete: 'This will delete task “{name}” and its results. Proceed?',
+      delTitle: 'Delete AI import task',
+      taskCanceled: 'Task canceled',
+      taskDeleted: 'Task deleted'
     }
   }
 })
@@ -177,9 +187,9 @@ async function removeJob(job) {
   try {
     await ElMessageBox.confirm(
       active
-        ? `将取消任务「${job.fileName}」的处理（取消后可再次删除彻底清理），确定吗？`
-        : `将删除任务「${job.fileName}」及其整理结果，确定吗？`,
-      '删除 AI 导入任务',
+        ? t('delAskCancel', { name: job.fileName })
+        : t('delAskDelete', { name: job.fileName }),
+      t('delTitle'),
       {
         type: 'warning',
         confirmButtonText: '删除',
@@ -193,7 +203,7 @@ async function removeJob(job) {
   try {
     await deleteAiJob(job.id)
     jobs.value = jobs.value.filter((j) => j.id !== job.id)
-    ElMessage.success(active ? '已取消任务' : '任务已删除')
+    ElMessage.success(active ? t('taskCanceled') : t('taskDeleted'))
   } catch (e) {
     /* 拦截器已提示 */
   }

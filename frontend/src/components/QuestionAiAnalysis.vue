@@ -41,8 +41,8 @@ import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n({
   messages: {
-    'zh-CN': { aiAnalysis: 'AI 解析', prompt: '不会做/想深入理解？让 AI 针对这道题生成解析', thinking: 'AI 正在思考这道题…（约 10~40 秒）', regenerate: '重新生成', saving: '保存中…', saveAsAnalysis: '保存为正式解析', savedTip: '已保存为本题正式解析' },
-    'en-US': { aiAnalysis: 'AI Analysis', prompt: 'Stuck or want to dig deeper? Let AI explain this question', thinking: 'AI is thinking about this question… (about 10–40 s)', regenerate: 'Regenerate', saving: 'Saving…', saveAsAnalysis: 'Save as the official analysis', savedTip: 'Saved as the official analysis for this question' }
+    'zh-CN': { aiAnalysis: 'AI 解析', prompt: '不会做/想深入理解？让 AI 针对这道题生成解析', thinking: 'AI 正在思考这道题…（约 10~40 秒）', regenerate: '重新生成', saving: '保存中…', saveAsAnalysis: '保存为正式解析', savedTip: '已保存为本题正式解析', savedToast: '解析已保存' },
+    'en-US': { aiAnalysis: 'AI Analysis', prompt: 'Stuck or want to dig deeper? Let AI explain this question', thinking: 'AI is thinking about this question… (about 10–40 s)', regenerate: 'Regenerate', saving: 'Saving…', saveAsAnalysis: 'Save as the official analysis', savedTip: 'Saved as the official analysis for this question', savedToast: 'Analysis saved' }
   }
 })
 
@@ -108,7 +108,7 @@ async function save() {
   try {
     await saveQuestionAnalysis(props.questionId, aiText.value)
     saved.value = true
-    ElMessage.success('解析已保存')
+    ElMessage.success(t('savedToast'))
     emit('saved', aiText.value)
   } catch (e) {
     error.value = e?.message || '保存失败'

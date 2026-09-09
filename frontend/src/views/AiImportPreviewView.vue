@@ -34,7 +34,7 @@
         <div>
           <button class="back-link" @click="$router.push(backTo)">
             <TikuIcon name="arrow-left" :size="14" />
-            返回
+            {{ t('back') }}
           </button>
           <div class="title-line">
             <h1 class="page-title">{{ t('title') }}</h1>
@@ -507,14 +507,26 @@ const { t } = useI18n({
       canceled: '任务已取消', failed: '导入失败', deleting: '删除中…', deleteTask: '彻底删除此任务',
       back: '返回', emptyTitle: '未能从文档提取题目', emptyTip: '请调整文档内容或更换模型后重试', backToBanks: '返回题库列表',
       genSummary: 'AI 共生成 {total} 题，其中 {ai} 题为 AI 补充答案（需重点核对）',
-      noAnswerNote: '，{n} 题暂无答案待补填', editableNote: '，可编辑后确认导入'
+      noAnswerNote: '，{n} 题暂无答案待补填', editableNote: '，可编辑后确认导入',
+      matLinked: '已更新材料「{key}」的关联', imgCopied: '已复制 {marker}，粘贴到题目任意输入框', imgCopyFail: '复制失败，请手动输入 {marker}', keepOneQ: '至少保留一题',
+      matDeleted: '已删除材料「{key}」，关联题目已解除引用', alreadyImported: '该任务已导入过',
+      listPosNum: '列表第 {i} 题（#{n}）', listPosNoNum: '列表第 {i} 题（未编号）',
+      warnStemEmpty: '{pos}题干为空', warnOptIncomplete: '{pos}选项不完整（至少 2 个且文本非空）',
+      importedN: '已导入 {n} 道题目', cancelAsk: '取消后将删除该任务的整理结果，且无法恢复。确定取消导入吗？',
+      cancelTitle: '取消导入', canceledDone: '已取消导入', taskDeleted: '任务已删除'
     },
     'en-US': {
       title: 'AI Import Preview', processing: 'Processing the task…', workingTip: 'AI is organizing the questions, please wait',
       canceled: 'Task canceled', failed: 'Import failed', deleting: 'Deleting…', deleteTask: 'Delete this task permanently',
       back: 'Back', emptyTitle: 'No questions could be extracted', emptyTip: 'Adjust the document or switch models and retry', backToBanks: 'Back to banks',
       genSummary: '{total} questions generated, {ai} with AI-filled answers (please verify carefully)',
-      noAnswerNote: ', {n} without answers yet', editableNote: ' — edit, then confirm the import'
+      noAnswerNote: ', {n} without answers yet', editableNote: ' — edit, then confirm the import',
+      matLinked: 'Updated the material “{key}” links', imgCopied: 'Copied {marker} — paste it into any question input', imgCopyFail: 'Copy failed — type {marker} manually', keepOneQ: 'Keep at least one question',
+      matDeleted: 'Deleted material “{key}”; linked questions were unlinked', alreadyImported: 'This task has already been imported',
+      listPosNum: '#{n} (item {i} in the list)', listPosNoNum: 'unnumbered item {i} in the list',
+      warnStemEmpty: 'Question {pos} has an empty stem', warnOptIncomplete: 'Question {pos} has incomplete options (need at least 2, all with text)',
+      importedN: 'Imported {n} questions', cancelAsk: 'Canceling deletes this task’s results and cannot be undone. Cancel the import?',
+      cancelTitle: 'Cancel import', canceledDone: 'Import canceled', taskDeleted: 'Task deleted'
     }
   }
 })
@@ -687,7 +699,7 @@ function applyMaterialLink() {
     questions.value[i].materialKey = materialLinkSelection.value.includes(i) ? materialLinkKey.value : null
   }
   materialLinkVisible.value = false
-  ElMessage.success(`已更新材料「${materialLinkKey.value}」的关联`)
+  ElMessage.success(t('matLinked', { key: materialLinkKey.value }))
 }
 
 // 已引用编号（扫描题目/材料文本中的 [图片N]，素材区高亮"已用"）
@@ -751,9 +763,9 @@ async function copyImageRef(num) {
   const marker = `[图片${num}]`
   try {
     await navigator.clipboard.writeText(marker)
-    ElMessage.success(`已复制 ${marker}，粘贴到题目任意输入框`)
+    ElMessage.success(t('imgCopied', { marker }))
   } catch (e) {
-    ElMessage.warning('复制失败，请手动输入 ' + marker)
+    ElMessage.warning(t('imgCopyFail', { marker }))
   }
 }
 
@@ -945,7 +957,7 @@ function toggleMulti(q, key) {
 
 function removeQuestion(index) {
   if (questions.value.length <= 1) {
-    ElMessage.warning('至少保留一题')
+    ElMessage.warning(t('keepOneQ'))
     return
   }
   questions.value.splice(index, 1)
@@ -959,7 +971,7 @@ function removeMaterial(index) {
   for (const q of questions.value) {
     if (q.materialKey === m.materialKey) q.materialKey = null
   }
-  ElMessage.success(`已删除材料「${m.materialKey}」，关联题目已解除引用`)
+  ElMessage.success(t('matDeleted', { key: m.materialKey }))
 }
 
 function addQuestion() {
@@ -968,21 +980,21 @@ function addQuestion() {
 
 async function confirm() {
   if (confirmed.value) {
-    ElMessage.info('该任务已导入过')
+    ElMessage.info(t('alreadyImported'))
     return
   }
   // 校验（失败即滚动高亮到该题卡片；提示同时带题号，避免与列表位置混淆）
-  const qLabel = (q, i) => (q.questionNumber != null ? `列表第 ${i + 1} 题（#${q.questionNumber}）` : `列表第 ${i + 1} 题（未编号）`)
+  const qPos = (q, i) => (q.questionNumber != null ? t('listPosNum', { i: i + 1, n: q.questionNumber }) : t('listPosNoNum', { i: i + 1 }))
   for (let i = 0; i < questions.value.length; i++) {
     const q = questions.value[i]
     if (!q.content.trim()) {
-      ElMessage.warning(`${qLabel(q, i)}题干为空`)
+      ElMessage.warning(t('warnStemEmpty', { pos: qPos(q, i) }))
       focusCard(i)
       return
     }
     if (q.type !== 'JUDGE' && q.type !== 'SUBJECTIVE') {
       if (q.options.length < 2 || q.options.some((o) => !o.text.trim())) {
-        ElMessage.warning(`${qLabel(q, i)}选项不完整（至少 2 个且文本非空）`)
+        ElMessage.warning(t('warnOptIncomplete', { pos: qPos(q, i) }))
         focusCard(i)
         return
       }
@@ -1017,7 +1029,7 @@ async function confirm() {
     const res = await confirmAiImport(jobId.value, targetBankId, payload)
     confirmed.value = true
     // 确认后任务不再出现在侧边栏"最近 AI 导入"（后端标记 confirmed）
-    ElMessage.success(`已导入 ${res.importedCount} 道题目`)
+    ElMessage.success(t('importedN', { n: res.importedCount }))
     router.replace(`/banks/${res.bankId}`)
   } catch (e) {
     /* 拦截器已提示；后端兜底校验报"第 N 题…"时同样聚焦到该卡片（提交顺序 = 列表顺序） */
@@ -1065,8 +1077,8 @@ async function cancel() {
   if (canceling.value) return
   try {
     await ElMessageBox.confirm(
-      '取消后将删除该任务的整理结果，且无法恢复。确定取消导入吗？',
-      '取消导入',
+      t('cancelAsk'),
+      t('cancelTitle'),
       {
         type: 'warning',
         confirmButtonText: '取消导入',
@@ -1080,7 +1092,7 @@ async function cancel() {
   canceling.value = true
   try {
     await deleteAiJob(jobId.value)
-    ElMessage.success('已取消导入')
+    ElMessage.success(t('canceledDone'))
     router.replace(backTo.value)
   } catch (e) {
     /* 拦截器已提示 */
@@ -1095,7 +1107,7 @@ async function deleteAgain() {
   deleting.value = true
   try {
     await deleteAiJob(jobId.value)
-    ElMessage.success('任务已删除')
+    ElMessage.success(t('taskDeleted'))
     router.replace(backTo.value)
   } catch (e) {
     /* 拦截器已提示 */

@@ -308,7 +308,8 @@ const { t } = useI18n({
       deepAnalysis: '深入分析', deepSub: '错题治愈 · 题库掌握度 · 最近练习',
       mastery: '题库 × 掌握度', masteryHint: '薄弱优先 · 正确率 < 60% 标红', loading: '加载中…', noBankData: '还没有题库数据', weak: '薄弱',
       wrongHeal: '错题治愈', currentN: '当前 {n} 题', wrongCleared: '错题本已清空', currentWrong: '当前错题（最近一次答错）', healedAccuracy: '曾错题再考正确率', wrong6m: '近 6 月错题数', recentHealed: '最近治愈（曾错 → 现已做对）',
-      recentSessions: '最近练习', sessionsRange: '最近 10 场 · 得分率'
+      recentSessions: '最近练习', sessionsRange: '最近 10 场 · 得分率',
+      goalRangeWarn: '目标需在 1~300 之间', goalSetDone: '每日目标已设为 {n} 题'
     },
     'en-US': {
       title: 'Learning Stats', subtitle: 'Progress you can see — every number points to the next step (practice / review)',
@@ -324,7 +325,8 @@ const { t } = useI18n({
       deepAnalysis: 'Deep dive', deepSub: 'Mistake healing · mastery per bank · recent sessions',
       mastery: 'Bank × mastery', masteryHint: 'Weak first · accuracy < 60% marked red', loading: 'Loading…', noBankData: 'No bank data yet', weak: 'Weak',
       wrongHeal: 'Mistake healing', currentN: '{n} current', wrongCleared: 'Mistake book cleared', currentWrong: 'Current mistakes (last wrong answer)', healedAccuracy: 'Accuracy on previously-missed', wrong6m: 'Mistakes in last 6 months', recentHealed: 'Recently healed (missed → now correct)',
-      recentSessions: 'Recent sessions', sessionsRange: 'Last 10 sessions · score rate'
+      recentSessions: 'Recent sessions', sessionsRange: 'Last 10 sessions · score rate',
+      goalRangeWarn: 'The goal must be between 1 and 300', goalSetDone: 'Daily goal set to {n} questions'
     }
   }
 })
@@ -442,7 +444,7 @@ const goalDone = computed(() => s.value?.todayCount >= goal.value)
 function saveGoal() {
   const g = Math.round(goalDraft.value)
   if (!(g >= 1 && g <= 300)) {
-    ElMessage.warning('目标需在 1~300 之间')
+    ElMessage.warning(t('goalRangeWarn'))
     return
   }
   goal.value = g
@@ -452,7 +454,7 @@ function saveGoal() {
   } catch (e) {
     /* 忽略 */
   }
-  ElMessage.success(`每日目标已设为 ${g} 题`)
+  ElMessage.success(t('goalSetDone', { n: g }))
 }
 
 /* ============ {{ t('proficiencyDist') }} ============ */

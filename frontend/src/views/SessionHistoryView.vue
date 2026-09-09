@@ -259,7 +259,7 @@ const { t } = useI18n({
       material: '材料', expandMaterial: '展开材料', collapseMaterial: '收起材料',
       myAnswer: '我的作答', notAnswered: '未作答', earnedScore: '实得', selfGradePrompt: '对照参考答案自评赋分：', regrade: '重新自评：',
       unitPoint: '分',
-      fullMarks: '全对', saving: '保存中…', saveScore: '保存得分', referenceAnswer: '参考答案'
+      fullMarks: '全对', saving: '保存中…', saveScore: '保存得分', referenceAnswer: '参考答案', selfSaveDone: '自评已保存（{earned} / {score} 分）'
     },
     'en-US': {
       backToBank: 'Back to bank', title: 'Session Review', completed: 'Completed', running: 'In progress',
@@ -268,7 +268,7 @@ const { t } = useI18n({
       material: 'Material', expandMaterial: 'Expand material', collapseMaterial: 'Collapse material',
       myAnswer: 'My answer', notAnswered: 'Not answered', earnedScore: 'Earned', selfGradePrompt: 'Grade against the reference answer: ', regrade: 'Regrade: ',
       unitPoint: 'pts',
-      fullMarks: 'Full marks', saving: 'Saving…', saveScore: 'Save score', referenceAnswer: 'Reference answer'
+      fullMarks: 'Full marks', saving: 'Saving…', saveScore: 'Save score', referenceAnswer: 'Reference answer', selfSaveDone: 'Self-grade saved ({earned} / {score} pts)'
     }
   }
 })
@@ -477,7 +477,7 @@ async function doGradeScore(q) {
   gradingQid.value = q.questionId
   try {
     await selfGradeRecord(q.recordId, earned)
-    ElMessage.success(`自评已保存（${earned} / ${q.score} 分）`)
+    ElMessage.success(t('selfSaveDone', { earned, score: q.score }))
     delete gradeDrafts[q.questionId]
     regradingQid.value = null
     // 重新拉取会话详情刷新分数（报告/明细实时聚合）

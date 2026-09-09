@@ -330,7 +330,16 @@ const { t } = useI18n({
       authorFail: '无法加载作者信息',
       followNeedsLogin: '关注作者需要登录——',
       byAuthor: '的作者',
-      searchResult: '的搜索结果'
+      searchResult: '的搜索结果',
+      msgNoAvailableLink: '该作品没有可用的下载链接',
+      msgNoDownloadLink: '该作品没有下载链接',
+      msgAlreadyImportedText: '「{title}」已导入过（内容一致），未重复创建',
+      msgBranchedImport: '检测到内容修改，已作为分支导入（不覆盖原题库）',
+      msgVersionAddedImport: '已作为新版本导入，与原版本并存',
+      msgImportOk: '导入成功，可前往「题库」开始刷题',
+      msgImportSuccess: '导入成功',
+      msgDirectImportFailed: '未能直接导入（可能是网盘页面链接），已在浏览器打开下载；下载完成后在「题库」页点「导入」选择该文件',
+      msgImportFailed: '导入失败'
     },
     'en-US': {
       pageTitle: 'Discover',
@@ -389,7 +398,16 @@ const { t } = useI18n({
       authorFail: 'Failed to load author info',
       followNeedsLogin: 'Following authors requires login —',
       byAuthor: '\'s banks',
-      searchResult: 'results for'
+      searchResult: 'results for',
+      msgNoAvailableLink: 'This work has no available download link',
+      msgNoDownloadLink: 'This work has no download link',
+      msgAlreadyImportedText: '“{title}” was already imported (identical content) — not created again',
+      msgBranchedImport: 'Content changes detected — imported as a branch (original bank kept)',
+      msgVersionAddedImport: 'Imported as a new version alongside the original',
+      msgImportOk: 'Import succeeded — go to Banks to start practicing',
+      msgImportSuccess: 'Import succeeded',
+      msgDirectImportFailed: 'Could not import directly (it may be a cloud-drive page) — opened in your browser for download; once done, go to Banks and click Import to pick the file',
+      msgImportFailed: 'Import failed'
     }
   }
 })
@@ -479,7 +497,7 @@ function downloadExternal(w) {
   if (w.downloadUrl) {
     openExternal(w.downloadUrl)
   } else {
-    ElMessage.warning('该作品没有可用的下载链接')
+    ElMessage.warning(t('msgNoAvailableLink'))
   }
 }
 
@@ -487,25 +505,25 @@ function downloadExternal(w) {
 async function importExternal(w) {
   if (importingKey.value) return
   if (!w.downloadUrl) {
-    ElMessage.warning('该作品没有下载链接')
+    ElMessage.warning(t('msgNoDownloadLink'))
     return
   }
   importingKey.value = w.packageKey
   try {
     const r = await http.post('/center/import-external', { url: w.downloadUrl })
     const map = {
-      ALREADY_IMPORTED: { type: 'info', text: `「${w.title}」已导入过（内容一致），未重复创建` },
-      BRANCHED: { type: 'warning', text: '检测到内容修改，已作为分支导入（不覆盖原题库）' },
-      VERSION_ADDED: { type: 'success', text: '已作为新版本导入，与原版本并存' },
-      CREATED: { type: 'success', text: '导入成功，可前往「题库」开始刷题' }
+      ALREADY_IMPORTED: { type: 'info', text: t('msgAlreadyImportedText', { title: w.title }) },
+      BRANCHED: { type: 'warning', text: t('msgBranchedImport') },
+      VERSION_ADDED: { type: 'success', text: t('msgVersionAddedImport') },
+      CREATED: { type: 'success', text: t('msgImportOk') }
     }
-    const m = map[r?.result] || { type: 'success', text: '导入成功' }
+    const m = map[r?.result] || { type: 'success', text: t('msgImportSuccess') }
     ElMessage[m.type](m.text)
   } catch (e) {
     const msg = e?.response?.data?.message || e?.message || ''
     // 直链拉取失败（网盘页面/防盗链/格式不符）→ 自动回退浏览器下载
     downloadExternal(w)
-    ElMessage.info('未能直接导入（可能是网盘页面链接），已在浏览器打开下载；下载完成后在「题库」页点「导入」选择该文件')
+    ElMessage.info(t('msgDirectImportFailed'))
     if (msg) console.warn('[discover] import-external failed:', msg)
   } finally {
     importingKey.value = ''
@@ -614,16 +632,16 @@ async function importPack(w) {
       version: w.version
     })
     const map = {
-      ALREADY_IMPORTED: { type: 'info', text: `「${w.title}」已导入过（内容一致），未重复创建` },
-      BRANCHED: { type: 'warning', text: '检测到内容修改，已作为分支导入（不覆盖原题库）' },
-      VERSION_ADDED: { type: 'success', text: '已作为新版本导入，与原版本并存' },
-      CREATED: { type: 'success', text: '导入成功，可前往「题库」开始刷题' }
+      ALREADY_IMPORTED: { type: 'info', text: t('msgAlreadyImportedText', { title: w.title }) },
+      BRANCHED: { type: 'warning', text: t('msgBranchedImport') },
+      VERSION_ADDED: { type: 'success', text: t('msgVersionAddedImport') },
+      CREATED: { type: 'success', text: t('msgImportOk') }
     }
-    const m = map[r?.result] || { type: 'success', text: '导入成功' }
+    const m = map[r?.result] || { type: 'success', text: t('msgImportSuccess') }
     ElMessage[m.type](m.text)
   } catch (e) {
-    const msg = e?.response?.data?.message || e?.message || '导入失败'
-    ElMessage.error(typeof msg === 'string' ? msg : '导入失败')
+    const msg = e?.response?.data?.message || e?.message || t('msgImportFailed')
+    ElMessage.error(typeof msg === 'string' ? msg : t('msgImportFailed'))
   } finally {
     importingKey.value = ''
   }

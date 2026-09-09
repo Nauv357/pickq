@@ -255,7 +255,17 @@ const { t } = useI18n({
         busy: '打包中…',
         restore: '从备份恢复…',
         restoreBusy: '处理中…',
-        tip: '恢复 = 选择备份包 → 自动重启应用并还原数据，无需手动操作'
+        tip: '恢复 = 选择备份包 → 自动重启应用并还原数据，无需手动操作',
+        failEmpty: '备份失败：返回内容为空，请重试',
+        savedPath: '备份包已保存到：{path}（含 AI Key 请妥善保管）',
+        savedDownloaded: '备份包已下载：请妥善保管（含 AI Key）',
+        webNoRestore: '网页版不支持一键恢复，请使用桌面版',
+        restoreAsk: '备份文件校验通过。\n\n恢复会用备份内容替换当前全部数据（题库、刷题记录、图片与 AI 配置），随后应用会自动重启完成恢复，期间请勿关闭应用窗口。确定继续吗？',
+        restoreTitle: '从备份恢复',
+        restoring: '正在恢复数据，应用会自动重启，请稍候…',
+        restoreStartFail: '启动恢复失败：{err}',
+        unknownError: '未知错误',
+        fileFail: '备份文件处理失败'
       },
       appearance: {
         title: '外观与语言',
@@ -268,7 +278,9 @@ const { t } = useI18n({
         langSystem: '跟随系统',
         langSystemNow: '跟随系统（当前：{v}）',
         langZh: '中文',
-        langEn: 'English'
+        langEn: 'English',
+        langSwitched: '已切换为中文',
+        langFollowSystem: '已跟随系统语言'
       },
       records: {
         title: '刷题记录',
@@ -279,7 +291,11 @@ const { t } = useI18n({
         importing: '导入中…',
         ok: '成功导入 {n} 条记录',
         missing: '有 {n} 条记录因找不到对应的题库文件（packageKey + version）被跳过，请先导入对应版本的题库文件',
-        missingQ: '{n} 个题目在当前题库中不存在：'
+        missingQ: '{n} 个题目在当前题库中不存在：',
+        exportPath: '记录文件已保存到：{path}',
+        exportDone: '记录文件已导出',
+        fileEmpty: '文件内容为空',
+        importDone: '导入完成：{n} 条记录'
       },
       ai: {
         title: 'AI 模型配置',
@@ -309,14 +325,20 @@ const { t } = useI18n({
         guideWhat:
           '配置只需填三样：<b>Base URL</b> 与 <b>模型名</b> 选择服务商后会自动填入，你只需拿到并填好 <b>API Key</b>。Key 只在创建页完整显示一次，且只保存在你的本机。',
         close: '关闭',
-        open: '打开 {label} 创建页'
+        open: '打开 {label} 创建页',
+        openGuideOk: '已用系统浏览器打开 {label}，请到浏览器中查看',
+        openGuideFail: '无法打开链接',
+        configSaved: '配置已保存'
       },
       author: {
         title: '作者信息',
         desc: '导出题库文件时自动带入的默认作者展示名（本地记忆）。题库广场上线后，登录账号身份会取代这里的名字；未填写时导出弹窗可手动输入。',
         name: '默认作者名',
         namePh: '例如：小明老师',
-        save: '保存'
+        save: '保存',
+        saved: '默认作者名已保存',
+        cleared: '已清除默认作者名',
+        storageFail: '保存失败（浏览器存储不可用）'
       },
       about: {
         title: '关于',
@@ -328,7 +350,10 @@ const { t } = useI18n({
         download: '下载并安装',
         downloading: '下载中… {p}%',
         installing: '即将安装并自动重启应用，请稍候…',
-        webNoUpdate: '网页版不提供自动更新，请从官网下载桌面版。'
+        webNoUpdate: '网页版不提供自动更新，请从官网下载桌面版。',
+        latestVer: '已是最新版本',
+        downloadedAsk: '新版本 v{v} 已下载完成。\n\n安装过程中应用会自动关闭并重新启动，你的题库与记录不会丢失。是否立即安装？',
+        installTitle: '安装更新'
       }
     },
     'en-US': {
@@ -342,7 +367,17 @@ const { t } = useI18n({
         busy: 'Packing…',
         restore: 'Restore from backup…',
         restoreBusy: 'Working…',
-        tip: 'Restore = pick a backup file; the app restarts itself and restores automatically — no manual steps'
+        tip: 'Restore = pick a backup file; the app restarts itself and restores automatically — no manual steps',
+        failEmpty: 'Backup failed: the server returned nothing, please retry',
+        savedPath: 'Backup saved to: {path} (includes your AI keys — keep it safe)',
+        savedDownloaded: 'Backup downloaded — keep it safe (includes your AI keys)',
+        webNoRestore: 'One-click restore is only available in the desktop app',
+        restoreAsk: 'The backup file passed validation.\n\nRestoring will replace ALL current data (banks, practice records, images and AI config) with the backup contents, then the app will restart itself to finish. Please keep the app window open. Continue?',
+        restoreTitle: 'Restore from backup',
+        restoring: 'Restoring data — the app will restart itself, please wait…',
+        restoreStartFail: 'Failed to start the restore: {err}',
+        unknownError: 'Unknown error',
+        fileFail: 'Failed to process the backup file'
       },
       appearance: {
         title: 'Appearance & Language',
@@ -355,7 +390,9 @@ const { t } = useI18n({
         langSystem: 'System',
         langSystemNow: 'Follows system (currently {v})',
         langZh: '中文',
-        langEn: 'English'
+        langEn: 'English',
+        langSwitched: 'Language switched to English',
+        langFollowSystem: 'Now following the system language'
       },
       records: {
         title: 'Practice Records',
@@ -366,7 +403,11 @@ const { t } = useI18n({
         importing: 'Importing…',
         ok: 'Imported {n} records',
         missing: '{n} records were skipped because their bank file (packageKey + version) was not found. Import the matching bank file first.',
-        missingQ: '{n} questions do not exist in the current bank: '
+        missingQ: '{n} questions do not exist in the current bank: ',
+        exportPath: 'Records file saved to: {path}',
+        exportDone: 'Records file exported',
+        fileEmpty: 'The file is empty',
+        importDone: 'Import finished: {n} records'
       },
       ai: {
         title: 'AI Model Setup',
@@ -396,14 +437,20 @@ const { t } = useI18n({
         guideWhat:
           'You only need three things: <b>Base URL</b> and <b>model name</b> are auto-filled when you pick a provider — you just need an <b>API key</b>. Keys are shown in full only once on the provider page, and are stored only on your machine.',
         close: 'Close',
-        open: 'Open the {label} key page'
+        open: 'Open the {label} key page',
+        openGuideOk: 'Opened {label} in your system browser — check the browser window',
+        openGuideFail: 'Could not open the link',
+        configSaved: 'Config saved'
       },
       author: {
         title: 'Author Info',
         desc: 'Default author display name written into exported bank files (saved locally). Once the plaza account system is live, your account name will take over. Leave empty to type it manually in the export dialog.',
         name: 'Default author name',
         namePh: 'e.g. Ms. Zhang',
-        save: 'Save'
+        save: 'Save',
+        saved: 'Default author name saved',
+        cleared: 'Default author name cleared',
+        storageFail: 'Save failed (browser storage unavailable)'
       },
       about: {
         title: 'About',
@@ -415,7 +462,10 @@ const { t } = useI18n({
         download: 'Download & install',
         downloading: 'Downloading… {p}%',
         installing: 'Installing — the app will restart itself, please wait…',
-        webNoUpdate: 'The web version has no auto-update; download the desktop app from the website.'
+        webNoUpdate: 'The web version has no auto-update; download the desktop app from the website.',
+        latestVer: 'You are up to date',
+        downloadedAsk: 'Version v{v} has been downloaded.\n\nDuring installation the app will close and restart itself — your banks and records are safe. Install now?',
+        installTitle: 'Install update'
       }
     }
   }
@@ -455,7 +505,7 @@ async function doCheckUpdate() {
       return
     }
     updateInfo.value = r.info
-    if (!r.info) ElMessage.success('已是最新版本')
+    if (!r.info) ElMessage.success(t('about.latestVer'))
   } finally {
     checking.value = false
   }
@@ -478,8 +528,8 @@ async function doDownload() {
   // 下载完成：询问是否安装（安装会关闭并重启应用）
   try {
     await ElMessageBox.confirm(
-      `新版本 v${info.version} 已下载完成。\n\n安装过程中应用会自动关闭并重新启动，你的题库与记录不会丢失。是否立即安装？`,
-      '安装更新',
+      t('about.downloadedAsk', { v: info.version }),
+      t('about.installTitle'),
       { confirmButtonText: '立即安装', cancelButtonText: '稍后再说', type: 'info', closeOnClickModal: false }
     )
   } catch {
@@ -509,15 +559,15 @@ async function doBackup() {
   try {
     const blob = await downloadBackup()
     if (!blob || blob.size === 0) {
-      ElMessage.error('备份失败：返回内容为空，请重试')
+      ElMessage.error(t('backup.failEmpty'))
       return
     }
     const res = await saveBlob(blob, backupFilename())
     if (res && !res.saved) return //用户取消另存为
     ElMessage.success(
       res?.path
-        ? `备份包已保存到：${res.path}（含 AI Key 请妥善保管）`
-        : '备份包已下载：请妥善保管（含 AI Key）'
+        ? t('backup.savedPath', { path: res.path })
+        : t('backup.savedDownloaded')
     )
   } catch (e) {
     /* 拦截器已提示 */
@@ -531,7 +581,7 @@ const restoring = ref(false)
 
 async function doRestore() {
   if (!isDesktopEnv.value) {
-    ElMessage.warning('网页版不支持一键恢复，请使用桌面版')
+    ElMessage.warning(t('backup.webNoRestore'))
     return
   }
   let file
@@ -550,8 +600,8 @@ async function doRestore() {
     }
     try {
       await ElMessageBox.confirm(
-        '备份文件校验通过。\n\n恢复会用备份内容替换当前全部数据（题库、刷题记录、图片与 AI 配置），随后应用会自动重启完成恢复，期间请勿关闭应用窗口。确定继续吗？',
-        '从备份恢复',
+        t('backup.restoreAsk'),
+        t('backup.restoreTitle'),
         {
           confirmButtonText: '开始恢复',
           cancelButtonText: '取消',
@@ -562,14 +612,14 @@ async function doRestore() {
     } catch (e) {
       return // 用户取消
     }
-    ElMessage.info('正在恢复数据，应用会自动重启，请稍候…')
+    ElMessage.info(t('backup.restoring'))
     try {
       await invoke('restart_with_restore', { dataDir })
     } catch (e) {
-      ElMessage.error('启动恢复失败：' + String(e?.message || e || '未知错误'))
+      ElMessage.error(t('backup.restoreStartFail', { err: String(e?.message || e || t('backup.unknownError')) }))
     }
   } catch (e) {
-    ElMessage.error(e?.response?.data?.message || e?.message || '备份文件处理失败')
+    ElMessage.error(e?.response?.data?.message || e?.message || t('backup.fileFail'))
   } finally {
     restoring.value = false
   }
@@ -592,7 +642,7 @@ const langPref = ref(getLangPref())
 function onLangChange(v) {
   setLang(v)
   langPref.value = getLangPref()
-  ElMessage.success(v === 'en-US' ? 'Language switched to English' : v === 'system' ? '已跟随系统语言' : '已切换为中文')
+  ElMessage.success(v === 'system' ? t('appearance.langFollowSystem') : t('appearance.langSwitched'))
 }
 
 /* ---------- 作者信息（默认作者名，本地记忆；导出弹窗默认带入） ---------- */
@@ -614,9 +664,9 @@ async function saveAuthor() {
     } else {
       localStorage.removeItem(DEFAULT_AUTHOR_KEY)
     }
-    ElMessage.success(name ? '默认作者名已保存' : '已清除默认作者名')
+    ElMessage.success(name ? t('author.saved') : t('author.cleared'))
   } catch (e) {
-    ElMessage.error('保存失败（浏览器存储不可用）')
+    ElMessage.error(t('author.storageFail'))
   } finally {
     savingAuthor.value = false
   }
@@ -764,9 +814,9 @@ function openKeyGuide() {
 async function openGuideUrl() {
   const ok = await openExternal(guideFor.value.url)
   if (ok) {
-    ElMessage.success(`已用系统浏览器打开 ${guideFor.value.label}，请到浏览器中查看`)
+    ElMessage.success(t('ai.openGuideOk', { label: guideFor.value.label }))
   } else {
-    ElMessage.warning('无法打开链接')
+    ElMessage.warning(t('ai.openGuideFail'))
   }
 }
 
@@ -805,7 +855,7 @@ async function doSave() {
       visionModel: aiForm.value.visionModel.trim() || null,
       mineruKey: aiForm.value.mineruKey.trim() || null // 空 = 保留旧 Key
     })
-    ElMessage.success('配置已保存')
+    ElMessage.success(t('ai.configSaved'))
     aiForm.value.apiKey = ''
     aiForm.value.mineruKey = ''
     await loadAiSettings()
@@ -854,7 +904,7 @@ async function doExport() {
     const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`
     const res = await saveJsonFile(data, `tiku-study-records-${stamp}.json`)
     if (res && !res.saved) return //用户取消另存为
-    ElMessage.success(res?.path ? `记录文件已保存到：${res.path}` : '记录文件已导出')
+    ElMessage.success(res?.path ? t('records.exportPath', { path: res.path }) : t('records.exportDone'))
   } catch (e) {
     /* 拦截器已提示 */
   } finally {
@@ -874,12 +924,12 @@ async function doImport() {
   try {
     const text = await readTextFile(file)
     if (!text.trim()) {
-      ElMessage.warning('文件内容为空')
+      ElMessage.warning(t('records.fileEmpty'))
       return
     }
     const res = await importStudyRecords(text)
     importResult.value = res
-    ElMessage.success(`导入完成：${res.imported} 条记录`)
+    ElMessage.success(t('records.importDone', { n: res.imported }))
   } catch (e) {
     /* 400（文件格式错误等）由拦截器提示 */
   } finally {

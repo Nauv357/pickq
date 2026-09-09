@@ -107,14 +107,14 @@ const { t } = useI18n({
       answerArea: '答案区', questionsOnly: '纯题目', withAnswers: '带答案 + 解析', printBtn: '打印 / 另存为 PDF',
       printTip: '打印对话框可选「另存为 PDF」生成 PDF 文件；纯题目版适合学生作答，带答案版适合教师核对；范围与分类筛选即时生效。',
       generating: '正在生成试卷（导出数据较大时需数秒）…', material: '材料', referenceAnswer: '参考答案', answer: '答案', none: '（无）',
-      origAnswer: '原文答案', aiAnswer: 'AI 补充', unitPoint: '分',
+      origAnswer: '原文答案', aiAnswer: 'AI 补充', unitPoint: '分', rangeFallback: '范围筛选暂不可用（后端未支持该参数），已显示全部题目',
     },
     'en-US': {
       backToBank: 'Back to bank', all: 'All', wrong: 'Mistakes', favorite: 'Favorites', undone: 'Undone', category: 'Category',
       answerArea: 'Answers', questionsOnly: 'Questions only', withAnswers: 'With answers + analysis', printBtn: 'Print / Save as PDF',
       printTip: 'The print dialog offers "Save as PDF". Questions-only suits students taking the paper; with-answers suits teachers checking. Scope and category filters apply instantly.',
       generating: 'Generating the paper (may take a few seconds for large exports)…', material: 'Material', referenceAnswer: 'Reference answer', answer: 'Answer', none: '(none)',
-      origAnswer: 'Original answer', aiAnswer: 'AI-filled', unitPoint: 'pts',
+      origAnswer: 'Original answer', aiAnswer: 'AI-filled', unitPoint: 'pts', rangeFallback: 'Range filter is unavailable (the server doesn’t support this parameter) — showing all questions',
     }
   }
 })
@@ -220,7 +220,7 @@ async function load() {
       try {
         const data = await exportBank(id, {})
         fillData(data)
-        ElMessage.warning('范围筛选暂不可用（后端未支持该参数），已显示全部题目')
+        ElMessage.warning(t('rangeFallback'))
       } catch (e2) {
         errorMsg.value = '试卷数据加载失败，请确认后端已启动后重试'
       }

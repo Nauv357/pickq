@@ -356,7 +356,18 @@ const { t } = useI18n({
       unitPoint: '分', sessionModeTip: '做题采用会话制：抽一组题全部作答后，交卷统一判分', allAnsweredTip: '全部作答完成 · 可返回检查修改，点击右上角「交卷」统一判分', multiTip: '可多选 · 作答后交卷统一判分', subjTip: '输入后交卷统一判分，可随时修改',
       statCorrect: '答对 / 总题数', statAccuracy: '正确率', statTime: '总用时', detailTitle: '每题明细（点击展开答案与解析）',
       selfGradeLbl: '自评', earnedScore: '实得', correctAnswer: '正确答案', answerLbl: '答案', analysisLbl: '解析',
-      noAnalysis: '本题没有附加答案文字与解析'
+      noAnalysis: '本题没有附加答案文字与解析',
+      msgUnansweredConfirm: '还有 {n} 道题未作答，交卷后未答题按 0 分计且无法再作答。确定交卷吗？',
+      msgSubmitTitle: '交卷确认',
+      msgSubmitted: '已交卷',
+      msgPendingSelfGrade: '还有 {n} 道主观题待自评，可在成绩页赋分',
+      msgSelfGradeSaved: '自评已保存（{earned} / {total} 分），成绩已更新',
+      msgAllSelfGraded: '全部主观题已自评，本次成绩完整',
+      msgFavorited: '已收藏',
+      msgUnfavorited: '已取消收藏',
+      msgReviewSuspended: '已暂停此题复习',
+      msgReviewResumed: '已恢复此题复习',
+      msgNoQuestionN: '会话中没有第 {n} 题'
     },
     'en-US': {
       notFoundDesc: 'This bank may have been deleted, or the link is wrong', backToBanks: 'Back to banks', backToBank: 'Back to bank',
@@ -367,7 +378,18 @@ const { t } = useI18n({
       unitPoint: 'pts', sessionModeTip: 'Session-based: answer a set, then submit for unified scoring', allAnsweredTip: 'All answered — you can go back to check, then click Submit (top right) for scoring', multiTip: 'Multiple answers allowed · submitted for scoring at the end', subjTip: 'Type your answer; submitted for scoring at the end, editable anytime',
       statCorrect: 'Correct / total', statAccuracy: 'Accuracy', statTime: 'Total time', detailTitle: 'Question details (click to expand answers & analysis)',
       selfGradeLbl: 'Self-grade', earnedScore: 'Earned', correctAnswer: 'Correct answer', answerLbl: 'Answer', analysisLbl: 'Analysis',
-      noAnalysis: 'No extra answer text or analysis for this question'
+      noAnalysis: 'No extra answer text or analysis for this question',
+      msgUnansweredConfirm: '{n} question(s) not answered — after submitting they count as 0 and cannot be answered again. Submit anyway?',
+      msgSubmitTitle: 'Confirm submission',
+      msgSubmitted: 'Submitted',
+      msgPendingSelfGrade: '{n} subjective question(s) await self-grading — you can grade them on the report page',
+      msgSelfGradeSaved: 'Self-grade saved ({earned} / {total} pts) — score updated',
+      msgAllSelfGraded: 'All subjective questions graded — your score for this session is complete',
+      msgFavorited: 'Added to favorites',
+      msgUnfavorited: 'Removed from favorites',
+      msgReviewSuspended: 'Review paused for this question',
+      msgReviewResumed: 'Review resumed for this question',
+      msgNoQuestionN: 'Question {n} is not in this session'
     }
   }
 })
@@ -642,8 +664,8 @@ async function finish() {
   if (unanswered > 0) {
     try {
       await ElMessageBox.confirm(
-        `还有 ${unanswered} 道题未作答，交卷后未答题按 0 分计且无法再作答。确定交卷吗？`,
-        '交卷确认',
+        t('msgUnansweredConfirm', { n: unanswered }),
+        t('msgSubmitTitle'),
         {
           type: 'warning',
           confirmButtonText: '交卷',
@@ -661,13 +683,13 @@ async function finish() {
     //一次性提交全部最终作答（后端事务内原子落库 + 判分），失败整体回滚可安全重试
     await finishSession(sessionId, answers)
     clearDraft() // 交卷成功：清除会话草稿
-    ElMessage.success('已交卷')
+    ElMessage.success(t('msgSubmitted'))
     //拉取报告（含答案与解析）；偶发失败重试一次，避免"已交卷但停在做题界面"再点交卷被 400 拒绝
     for (let attempt = 0; attempt < 2 && !report.value; attempt++) {
       await refreshReport()
     }
     if (pendingSubjective.value.length) {
-      ElMessage.info(`还有 ${pendingSubjective.value.length} 道主观题待自评，可在成绩页赋分`)
+      ElMessage.info(t('msgPendingSelfGrade', { n: pendingSubjective.value.length }))
     }
   } catch (e) {
     /* 拦截器已提示 */
@@ -725,11 +747,11 @@ async function gradePending(q) {
   gradingQid.value = q.questionId
   try {
     await selfGradeRecord(q.recordId, earned)
-    ElMessage.success(`自评已保存（${earned} / ${q.score} 分），成绩已更新`)
+    ElMessage.success(t('msgSelfGradeSaved', { earned, total: q.score }))
     delete gradeDrafts[q.questionId]
     await refreshReport()
     if (!pendingSubjective.value.length) {
-      ElMessage.success('全部主观题已自评，本次成绩完整')
+      ElMessage.success(t('msgAllSelfGraded'))
     }
   } catch (e) {
     /* 拦截器已提示 */
@@ -750,7 +772,7 @@ async function toggleFavorite() {
   try {
     await setFavorite(q.questionId, next)
     q.favorite = next
-    ElMessage.success(next ? '已收藏' : '已取消收藏')
+    ElMessage.success(next ? t('msgFavorited') : t('msgUnfavorited'))
   } catch (e) {
     /* 拦截器已提示 */
   }
@@ -764,7 +786,7 @@ async function toggleSuspend() {
   try {
     await setReviewSuspended(q.questionId, next)
     suspendedMap[q.questionId] = next
-    ElMessage.success(next ? '已暂停此题复习' : '已恢复此题复习')
+    ElMessage.success(next ? t('msgReviewSuspended') : t('msgReviewResumed'))
   } catch (e) {
     /* 拦截器已提示 */
   }
@@ -829,7 +851,7 @@ function execJump() {
   let idx = questions.value.findIndex((q) => q.questionNumber === n)
   if (idx < 0 && n >= 1 && n <= questions.value.length) idx = n - 1
   if (idx < 0) {
-    ElMessage.info(`会话中没有第 ${n} 题`)
+    ElMessage.info(t('msgNoQuestionN', { n }))
     return
   }
   if (idx === currentIndex.value) return

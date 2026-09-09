@@ -189,7 +189,9 @@ const { t } = useI18n({
       formatsTip1: 'txt / md 直接读取；Word、文字版 PDF（可选中文字的）由 AI 看图整理（公式/插图自动归位，最推荐）；',
       formatsTip2: '扫描件 PDF 与图片由多模态模型直读，含图形图表的扫描件可勾选上方「MinerU 增强」；doc 老格式请先另存为 .docx',
       backgroundTip: '可关闭本窗口继续做其他事，任务在后台进行，完成后侧边栏与系统通知都会提醒你',
-      cancel: '取消', submitting: '提交中…', startParse: '开始解析', close: '关闭', closeBg: '关闭（后台继续）'
+      cancel: '取消', submitting: '提交中…', startParse: '开始解析', close: '关闭', closeBg: '关闭（后台继续）',
+      mineruKeyNeeded: '未配置 MinerU 解析 Key，请先到「设置-AI 配置」填写',
+      parseDone: '解析完成，共 {n} 题，进入预览'
     },
     'en-US': {
       titleImport: 'AI Import', titleAppend: 'AI Append',
@@ -209,7 +211,9 @@ const { t } = useI18n({
       formatsTip1: 'txt / md are read directly; Word and text-layer PDFs are organized by AI vision (formulas/images placed back automatically — recommended);',
       formatsTip2: 'Scanned PDFs and images are read by the vision model; for scans with figures/charts enable "MinerU enhance" above; old .doc format: save as .docx first',
       backgroundTip: 'You can close this window — the task keeps running in the background; the sidebar and system notification will remind you when done',
-      cancel: 'Cancel', submitting: 'Submitting…', startParse: 'Start parsing', close: 'Close', closeBg: 'Close (keep running)'
+      cancel: 'Cancel', submitting: 'Submitting…', startParse: 'Start parsing', close: 'Close', closeBg: 'Close (keep running)',
+      mineruKeyNeeded: 'MinerU parse key not configured — add it first in Settings → AI Setup',
+      parseDone: 'Parsing done — {n} questions, opening the preview'
     }
   }
 })
@@ -369,7 +373,7 @@ function removeFile(index) {
 /* MinerU 增强勾选：未配置 Key 时点击提示去设置页 */
 function toggleMineruEnhance() {
   if (!hasMineruKey.value) {
-    ElMessage.warning('未配置 MinerU 解析 Key，请先到「设置-AI 配置」填写')
+    ElMessage.warning(t('mineruKeyNeeded'))
     return
   }
   mineruEnhance.value = !mineruEnhance.value
@@ -447,7 +451,7 @@ function handleSnapshot(jobId, job) {
     cleanup()
     emit('done', jobId)
     visible.value = false
-    ElMessage.success(`解析完成，共 ${job.questions?.length || 0} 题，进入预览`)
+    ElMessage.success(t('parseDone', { n: job.questions?.length || 0 }))
     return
   }
   //进行中：收到实时事件 → 重置 SSE 看门狗（见 watchJob 注释）
