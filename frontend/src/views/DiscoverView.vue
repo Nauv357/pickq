@@ -12,6 +12,17 @@
             <TikuIcon name="link" :size="15" />
             {{ t('browseWeb') }}
           </button>
+
+          <!-- 广场账号区：未登录 → 登录/注册；已登录 → 昵称 + 退出 -->
+          <div v-if="currentUser" class="account-area">
+            <span class="account-name" :title="currentUser.username">{{ accountName }}</span>
+            <button class="account-link" :disabled="loggingOut" @click="doLogout">{{ t('logout') }}</button>
+          </div>
+          <div v-else class="account-area">
+            <button class="account-link" @click="openAuth('login')">{{ t('login') }}</button>
+            <span class="account-sep"></span>
+            <button class="account-link" @click="openAuth('register')">{{ t('register') }}</button>
+          </div>
         </div>
       </header>
 
@@ -129,7 +140,7 @@
           <p class="detail-desc">{{ detail.latest.description || t('noDesc') }}</p>
           <p class="detail-meta">
             {{ t('questionsN', { n: detail.latest.questionsCount ?? '—' }) }}<template v-if="detail.latest.materialsCount"> · {{ t('materialsN', { n: detail.latest.materialsCount }) }}</template>
-            · {{ t('favoritesN', { n: detail.latest.favoritesCount }) }} · {{ t('downloadClicksN', { n: detail.latest.downloadClicks }) }}
+            · {{ t('favoritesN', { n: detail.favoritesCount ?? detail.latest.favoritesCount }) }} · {{ t('downloadClicksN', { n: detail.latest.downloadClicks }) }}
             · {{ t('updatedOn', { d: dateText(detail.latest.updatedAt) }) }}
           </p>
           <p v-if="detail.latest.source" class="detail-source">{{ t('sourceNote', { v: detail.latest.source }) }}</p>
@@ -153,6 +164,17 @@
               >{{ importingKey === detail.latest.packageKey ? t('processing') : t('importHere') }}</button>
               <button class="btn btn-secondary" @click="downloadExternal(detail.latest)">{{ t('downloadFile') }}</button>
             </template>
+            <!-- 收藏：未登录点击会先打开登录框 -->
+            <button
+              class="btn btn-secondary fav-btn"
+              :class="{ on: detail.favorited }"
+              :disabled="favBusy"
+              :title="detail.favorited ? t('favOn') : t('fav')"
+              @click="toggleFavorite"
+            >
+              <span class="fav-star">{{ detail.favorited ? '★' : '☆' }}</span>
+              {{ detail.favorited ? t('favOn') : t('fav') }}
+            </button>
             <button class="btn btn-ghost" @click="openPack(detail.latest)">{{ t('openOnWeb') }}</button>
           </div>
           <p v-if="detail.latest.storageKind !== 'HOSTED'" class="login-tip text-muted">
@@ -195,9 +217,30 @@
           </div>
         </section>
 
-        <!-- 评论区（只读） -->
+        <!-- 评论区（登录后可发表 / 点赞 / 删除自己的评论） -->
         <section class="detail-section">
           <h3 class="section-title">{{ t('comments', { n: comments.length }) }}</h3>
+          <!-- 已登录：发表框；未登录：可点击打开登录框 -->
+          <div v-if="currentUser" class="comment-editor">
+            <el-input
+              v-model="commentDraft"
+              type="textarea"
+              :rows="3"
+              resize="none"
+              :placeholder="t('commentPh')"
+              :disabled="postingComment"
+            />
+            <div class="comment-editor-foot">
+              <button
+                class="btn btn-primary btn-sm"
+                :disabled="!commentDraft.trim() || postingComment"
+                @click="postComment"
+              >{{ postingComment ? t('posting') : t('post') }}</button>
+            </div>
+          </div>
+          <p v-else class="comment-login text-muted">
+            <span class="author-name" @click="openAuth('login')">{{ t('needLoginComment') }}</span>
+          </p>
           <p v-if="commentsLoading" class="text-muted">{{ t('loading') }}</p>
           <p v-else-if="!comments.length" class="text-muted comment-empty">{{ t('noComments') }}</p>
           <div v-for="c in comments" :key="c.id" class="comment-item">
@@ -205,7 +248,18 @@
               <span v-if="c.userId" class="author-name" @click="openAuthor(c.userId, detail.latest.packageKey)">{{ c.authorName }}</span>
               <span v-else>{{ c.authorName }}</span>
               <span class="text-muted comment-date">{{ dateText(c.createdAt) }}</span>
-              <span v-if="c.likesCount > 0" class="comment-like">{{ t('helpful', { n: c.likesCount }) }}</span>
+              <button
+                class="like-btn"
+                :class="{ on: c.likedByMe }"
+                :disabled="likeBusyId === c.id"
+                @click="toggleLike(c)"
+              >{{ c.likedByMe ? t('helpfulOn', { n: c.likesCount }) : t('helpful', { n: c.likesCount }) }}</button>
+              <button
+                v-if="canDeleteComment(c)"
+                class="del-btn"
+                :disabled="delBusyId === c.id"
+                @click="delComment(c)"
+              >{{ t('del') }}</button>
             </p>
             <p class="comment-body">{{ c.content }}</p>
           </div>
@@ -259,6 +313,88 @@
         </div>
       </template>
     </template>
+
+    <!-- 广场账号：登录 / 注册对话框（登录态对收藏与评论生效） -->
+    <el-dialog
+      v-model="authVisible"
+      :title="authMode === 'login' ? t('loginTitle') : t('regTitle')"
+      width="min(92vw, 400px)"
+      align-center
+      :close-on-click-modal="false"
+      @closed="resetAuthForm"
+    >
+      <p v-if="authError" class="auth-error">{{ authError }}</p>
+
+      <el-form v-if="authMode === 'login'" label-position="top" @submit.prevent>
+        <el-form-item :label="t('username')">
+          <el-input
+            v-model="loginForm.username"
+            :placeholder="t('usernamePh')"
+            :disabled="authBusy"
+            autocomplete="username"
+            @keyup.enter="doLogin"
+          />
+        </el-form-item>
+        <el-form-item :label="t('password')">
+          <el-input
+            v-model="loginForm.password"
+            type="password"
+            show-password
+            :placeholder="t('passwordPh')"
+            :disabled="authBusy"
+            autocomplete="current-password"
+            @keyup.enter="doLogin"
+          />
+        </el-form-item>
+      </el-form>
+
+      <el-form v-else label-position="top" @submit.prevent>
+        <el-form-item :label="t('username')">
+          <el-input
+            v-model="regForm.username"
+            :placeholder="t('usernamePh')"
+            :disabled="authBusy"
+            autocomplete="username"
+            @keyup.enter="doRegister"
+          />
+        </el-form-item>
+        <el-form-item :label="t('password')">
+          <el-input
+            v-model="regForm.password"
+            type="password"
+            show-password
+            :placeholder="t('passwordPh')"
+            :disabled="authBusy"
+            autocomplete="new-password"
+            @keyup.enter="doRegister"
+          />
+        </el-form-item>
+        <el-form-item>
+          <template #label>{{ t('nickname') }}（{{ t('optional') }}）</template>
+          <el-input
+            v-model="regForm.nickname"
+            :placeholder="t('nicknamePh')"
+            :disabled="authBusy"
+            autocomplete="nickname"
+            maxlength="20"
+            @keyup.enter="doRegister"
+          />
+        </el-form-item>
+      </el-form>
+
+      <p class="auth-switch text-secondary">
+        <span v-if="authMode === 'login'" class="author-name" @click="switchAuthMode('register')">{{ t('switchToReg') }}</span>
+        <span v-else class="author-name" @click="switchAuthMode('login')">{{ t('switchToLogin') }}</span>
+      </p>
+      <p class="auth-hint text-muted">{{ t('centerLoginHint') }}</p>
+
+      <template #footer>
+        <button class="btn btn-ghost" :disabled="authBusy" @click="authVisible = false">{{ t('cancel') }}</button>
+        <button class="btn btn-primary" :disabled="authBusy" @click="authMode === 'login' ? doLogin() : doRegister()">
+          {{ authBusy ? t('submitting') : authMode === 'login' ? t('login') : t('register') }}
+        </button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -325,7 +461,7 @@ const { t } = useI18n({
       derived: '由此派生的作品',
       comments: '评论（{n}）',
       loading: '加载中…',
-      noComments: '还没有评论。到官网登录后可以发表。',
+      noComments: '还没有评论，来发表第一条吧。',
       helpful: '有帮助 · {n}',
       authorFail: '无法加载作者信息',
       followNeedsLogin: '关注作者需要登录——',
@@ -339,7 +475,44 @@ const { t } = useI18n({
       msgImportOk: '导入成功，可前往「题库」开始刷题',
       msgImportSuccess: '导入成功',
       msgDirectImportFailed: '未能直接导入（可能是网盘页面链接），已在浏览器打开下载；下载完成后在「题库」页点「导入」选择该文件',
-      msgImportFailed: '导入失败'
+      msgImportFailed: '导入失败',
+      /* ---- 广场账号：登录/注册/收藏/评论 ---- */
+      login: '登录',
+      register: '注册',
+      logout: '退出',
+      cancel: '取消',
+      loginTitle: '登录题库广场',
+      regTitle: '注册广场账号',
+      username: '用户名',
+      usernamePh: '2–24 位中英数、下划线或连字符',
+      password: '密码',
+      passwordPh: '至少 6 位',
+      nickname: '昵称',
+      nicknamePh: '最多 20 字',
+      optional: '选填',
+      switchToReg: '没有账号？去注册',
+      switchToLogin: '已有账号？去登录',
+      submitting: '提交中…',
+      centerLoginHint: '题库广场账号用于收藏与评论，桌面端本地数据无需登录即可使用',
+      msgNeedUsername: '请输入用户名',
+      msgNeedPassword: '请输入密码',
+      msgPosted: '评论已发表',
+      msgDelOk: '评论已删除',
+      fav: '收藏',
+      favOn: '已收藏',
+      commentPh: '说说这份题库哪里好用…',
+      post: '发表',
+      posting: '发表中…',
+      needLoginComment: '登录后参与评论',
+      helpfulOn: '已点赞 · {n}',
+      del: '删除',
+      welcome: '欢迎，{name}',
+      loggedOut: '已退出登录',
+      actionNeedLogin: '请先登录后再操作',
+      loginFail: '登录失败，请重试',
+      registerFail: '注册失败，请重试',
+      logoutFail: '退出失败，请稍后重试',
+      opFail: '操作失败，请稍后重试'
     },
     'en-US': {
       pageTitle: 'Discover',
@@ -393,7 +566,7 @@ const { t } = useI18n({
       derived: 'Derived works',
       comments: 'Comments ({n})',
       loading: 'Loading…',
-      noComments: 'No comments yet. Log in on the website to comment.',
+      noComments: 'No comments yet. Be the first to post.',
       helpful: 'Helpful · {n}',
       authorFail: 'Failed to load author info',
       followNeedsLogin: 'Following authors requires login —',
@@ -407,7 +580,43 @@ const { t } = useI18n({
       msgImportOk: 'Import succeeded — go to Banks to start practicing',
       msgImportSuccess: 'Import succeeded',
       msgDirectImportFailed: 'Could not import directly (it may be a cloud-drive page) — opened in your browser for download; once done, go to Banks and click Import to pick the file',
-      msgImportFailed: 'Import failed'
+      msgImportFailed: 'Import failed',
+      login: 'Log in',
+      register: 'Sign up',
+      logout: 'Log out',
+      cancel: 'Cancel',
+      loginTitle: 'Log in to plaza',
+      regTitle: 'Create plaza account',
+      username: 'Username',
+      usernamePh: '2–24 letters/digits/_/-',
+      password: 'Password',
+      passwordPh: 'At least 6 characters',
+      nickname: 'Nickname',
+      nicknamePh: 'Up to 20 characters',
+      optional: 'Optional',
+      switchToReg: 'No account? Sign up',
+      switchToLogin: 'Have an account? Log in',
+      submitting: 'Submitting…',
+      centerLoginHint: 'Plaza accounts are used for favoriting & comments; your local data needs no login',
+      msgNeedUsername: 'Please enter your username',
+      msgNeedPassword: 'Please enter your password',
+      msgPosted: 'Comment posted',
+      msgDelOk: 'Comment deleted',
+      fav: 'Favorite',
+      favOn: 'Favorited',
+      commentPh: 'Share what makes this bank useful…',
+      post: 'Post',
+      posting: 'Posting…',
+      needLoginComment: 'Log in to join the discussion',
+      helpfulOn: 'Liked · {n}',
+      del: 'Delete',
+      welcome: 'Welcome, {name}',
+      loggedOut: 'Logged out',
+      actionNeedLogin: 'Please log in first',
+      loginFail: 'Log in failed, please try again',
+      registerFail: 'Sign-up failed, please try again',
+      logoutFail: 'Log out failed, please try again later',
+      opFail: 'Operation failed, please try again later'
     }
   }
 })
@@ -647,7 +856,232 @@ async function importPack(w) {
   }
 }
 
+/* ---------- 广场账号：登录 / 注册 / 退出 ---------- */
+const currentUser = ref(null)
+const authVisible = ref(false)
+const authMode = ref('login') // login | register
+const authBusy = ref(false)
+const authError = ref('')
+const loggingOut = ref(false)
+const loginForm = ref({ username: '', password: '' })
+const regForm = ref({ username: '', password: '', nickname: '' })
+
+const accountName = computed(() => {
+  const u = currentUser.value
+  return u ? (u.nickname || u.username || '') : ''
+})
+
+function openAuth(mode = 'login') {
+  authError.value = ''
+  authMode.value = mode
+  authVisible.value = true
+}
+function switchAuthMode(mode) {
+  // 登录失败后想直接注册：把已输的用户名/密码带过去
+  if (mode === 'register' && !regForm.value.username && loginForm.value.username) {
+    regForm.value.username = loginForm.value.username
+    regForm.value.password = loginForm.value.password
+  }
+  authMode.value = mode
+  authError.value = ''
+}
+function resetAuthForm() {
+  authBusy.value = false
+  authError.value = ''
+  loginForm.value = { username: '', password: '' }
+  regForm.value = { username: '', password: '', nickname: '' }
+  authMode.value = 'login'
+}
+
+function errText(e, fallback) {
+  const m = e?.response?.data?.message || e?.message
+  return typeof m === 'string' && m.trim() ? m : fallback
+}
+function isAuthGone(e) {
+  return e?.response?.status === 401
+}
+/** 会话已失效（401）：清本地登录态并引导重新登录，返回 true 表示已处理 */
+function openAuthOnExpired(e) {
+  if (!isAuthGone(e)) return false
+  currentUser.value = null
+  openAuth('login')
+  authError.value = t('actionNeedLogin')
+  return true
+}
+
+/** 拉取当前登录态（未登录 / 断网都不打扰用户） */
+async function fetchMe() {
+  try {
+    const r = await http.get('/center/auth/me', { skipErrorMessage: true })
+    // 兼容 data 为 {user:null} 与直接 null 两种返回
+    const u = r && typeof r === 'object' && 'user' in r ? r.user : r
+    currentUser.value = u || null
+  } catch (e) {
+    currentUser.value = null
+  }
+}
+
+async function doLogin(e) {
+  if (e?.isComposing) return
+  if (authBusy.value) return
+  const username = loginForm.value.username.trim()
+  const password = loginForm.value.password
+  if (!username) { authError.value = t('msgNeedUsername'); return }
+  if (!password) { authError.value = t('msgNeedPassword'); return }
+  authBusy.value = true
+  authError.value = ''
+  try {
+    const r = await http.post('/center/auth/login', { username, password }, { skipErrorMessage: true })
+    const u = r?.user || null
+    if (!u) { authError.value = t('loginFail'); return }
+    currentUser.value = u
+    authVisible.value = false
+    ElMessage.success(t('welcome', { name: u.nickname || u.username || username }))
+    refreshDetailAfterAuth()
+  } catch (err) {
+    authError.value = errText(err, t('loginFail'))
+  } finally {
+    authBusy.value = false
+  }
+}
+
+async function doRegister(e) {
+  if (e?.isComposing) return
+  if (authBusy.value) return
+  const username = regForm.value.username.trim()
+  const password = regForm.value.password
+  if (!username) { authError.value = t('msgNeedUsername'); return }
+  if (!password) { authError.value = t('msgNeedPassword'); return }
+  authBusy.value = true
+  authError.value = ''
+  try {
+    const body = { username, password }
+    const nickname = regForm.value.nickname.trim()
+    if (nickname) body.nickname = nickname
+    const r = await http.post('/center/auth/register', body, { skipErrorMessage: true })
+    const u = r?.user || null
+    if (u) currentUser.value = u
+    else await fetchMe() // 注册成功但未自动登录时兜底同步
+    const name = currentUser.value?.nickname || currentUser.value?.username || username
+    authVisible.value = false
+    ElMessage.success(t('welcome', { name }))
+    refreshDetailAfterAuth()
+  } catch (err) {
+    authError.value = errText(err, t('registerFail'))
+  } finally {
+    authBusy.value = false
+  }
+}
+
+async function doLogout() {
+  if (!currentUser.value || loggingOut.value) return
+  loggingOut.value = true
+  try {
+    await http.post('/center/auth/logout', {}, { skipErrorMessage: true })
+    currentUser.value = null
+    ElMessage.info(t('loggedOut'))
+    refreshDetailAfterAuth()
+  } catch (e) {
+    ElMessage.error(errText(e, t('logoutFail')))
+  } finally {
+    loggingOut.value = false
+  }
+}
+
+/** 登录态变化后若停留在详情视图：重拉详情与评论（刷新 favorited / likedByMe） */
+async function refreshDetailAfterAuth() {
+  const key = mode.value === 'detail' ? detail.value?.latest?.packageKey : null
+  if (key) await openDetail(key)
+}
+
+/* ---------- 详情：收藏 ---------- */
+const favBusy = ref(false)
+async function toggleFavorite() {
+  if (favBusy.value) return
+  if (!currentUser.value) {
+    openAuth('login')
+    return
+  }
+  const key = detail.value?.latest?.packageKey
+  if (!key) return
+  const next = !detail.value.favorited
+  favBusy.value = true
+  try {
+    const r = await http.post(`/center/packs/${encodeURIComponent(key)}/favorite`, { favorite: next }, { skipErrorMessage: true })
+    const favored = r && typeof r.favorited === 'boolean' ? r.favorited : next
+    detail.value.favorited = favored
+    if (r && typeof r.count === 'number') detail.value.favoritesCount = r.count
+  } catch (e) {
+    if (!openAuthOnExpired(e)) ElMessage.error(errText(e, t('opFail')))
+  } finally {
+    favBusy.value = false
+  }
+}
+
+/* ---------- 详情：评论发表 / 删除 / 点赞 ---------- */
+const commentDraft = ref('')
+const postingComment = ref(false)
+const likeBusyId = ref('')
+const delBusyId = ref('')
+
+function canDeleteComment(c) {
+  const u = currentUser.value
+  return !!u && !!c?.userId && String(c.userId) === String(u.id)
+}
+
+async function postComment() {
+  const key = detail.value?.latest?.packageKey
+  const content = commentDraft.value.trim()
+  if (!key || !content || postingComment.value) return
+  postingComment.value = true
+  try {
+    await http.post(`/center/packs/${encodeURIComponent(key)}/comments`, { content }, { skipErrorMessage: true })
+    commentDraft.value = ''
+    ElMessage.success(t('msgPosted'))
+    await loadComments(key)
+  } catch (e) {
+    if (!openAuthOnExpired(e)) ElMessage.error(errText(e, t('opFail')))
+  } finally {
+    postingComment.value = false
+  }
+}
+
+async function delComment(c) {
+  const key = detail.value?.latest?.packageKey
+  if (!key || delBusyId.value) return
+  delBusyId.value = c.id
+  try {
+    await http.delete(`/center/packs/${encodeURIComponent(key)}/comments/${c.id}`, { skipErrorMessage: true })
+    comments.value = comments.value.filter((x) => x.id !== c.id)
+    ElMessage.success(t('msgDelOk'))
+  } catch (e) {
+    if (!openAuthOnExpired(e)) ElMessage.error(errText(e, t('opFail')))
+  } finally {
+    delBusyId.value = ''
+  }
+}
+
+async function toggleLike(c) {
+  const key = detail.value?.latest?.packageKey
+  if (!key || likeBusyId.value) return
+  if (!currentUser.value) {
+    openAuth('login')
+    return
+  }
+  likeBusyId.value = c.id
+  try {
+    const r = await http.post(`/center/packs/${encodeURIComponent(key)}/comments/${c.id}/like`, { like: !c.likedByMe }, { skipErrorMessage: true })
+    c.likedByMe = r && typeof r.liked === 'boolean' ? r.liked : !c.likedByMe
+    if (r && typeof r.count === 'number') c.likesCount = r.count
+  } catch (e) {
+    if (!openAuthOnExpired(e)) ElMessage.error(errText(e, t('opFail')))
+  } finally {
+    likeBusyId.value = ''
+  }
+}
+
 onMounted(() => {
+  fetchMe() // 恢复广场账号登录态（不影响未登录浏览）
   // 支持 #pack/{key} 直达详情、#author/{id} 直达作者页
   const hm = location.hash.match(/^#(pack|author)\/(.+)$/)
   if (hm) {
@@ -669,6 +1103,43 @@ onMounted(() => {
 }
 .back-btn {
   margin-bottom: 4px;
+}
+.account-area {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.account-name {
+  margin-right: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.account-sep {
+  width: 1px;
+  height: 14px;
+  margin: 0 6px;
+  background: var(--border-strong);
+}
+.account-link {
+  border: none;
+  background: transparent;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--ease), color var(--ease);
+}
+.account-link:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.account-link:disabled {
+  opacity: var(--disabled-opacity);
+  cursor: default;
 }
 
 .toolbar {
@@ -884,6 +1355,13 @@ onMounted(() => {
   margin-top: 22px;
   flex-wrap: wrap;
 }
+.fav-btn .fav-star {
+  line-height: 1;
+}
+.fav-btn.on {
+  color: var(--accent);
+  border-color: var(--accent);
+}
 .login-tip {
   margin-top: 14px;
   font-size: 12.5px;
@@ -954,14 +1432,78 @@ onMounted(() => {
 .comment-date {
   font-size: 12px;
 }
-.comment-like {
+.like-btn {
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-family: var(--font-sans);
   font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color var(--ease);
+}
+.like-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+.like-btn.on {
   color: var(--success);
+  font-weight: 600;
+}
+.like-btn:disabled {
+  cursor: default;
+  opacity: var(--disabled-opacity);
+}
+.del-btn {
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color var(--ease);
+}
+.del-btn:hover:not(:disabled) {
+  color: var(--danger);
+}
+.del-btn:disabled {
+  cursor: default;
+  opacity: var(--disabled-opacity);
+}
+.comment-editor {
+  margin-bottom: 12px;
+}
+.comment-editor-foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+.comment-login {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  line-height: 1.6;
 }
 .comment-body {
   margin-top: 6px;
   font-size: 13.5px;
   line-height: 1.8;
   white-space: pre-wrap;
+}
+
+/* ---------- 广场账号对话框 ---------- */
+.auth-error {
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--danger);
+}
+.auth-switch {
+  margin: 14px 0 0;
+  font-size: 13px;
+}
+.auth-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.7;
 }
 </style>

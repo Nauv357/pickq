@@ -2,6 +2,7 @@ package com.tiku.controller;
 
 import com.tiku.dto.ApiResponse;
 import com.tiku.dto.ImportResultResponse;
+import com.tiku.service.CenterAuthStore;
 import com.tiku.service.ContentPackageService;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -32,9 +33,19 @@ import java.util.stream.Collectors;
 public class CenterProxyController {
 
     private final ContentPackageService contentPackageService;
+    private final CenterAuthStore authStore;
 
-    public CenterProxyController(ContentPackageService contentPackageService) {
+    public CenterProxyController(ContentPackageService contentPackageService, CenterAuthStore authStore) {
         this.contentPackageService = contentPackageService;
+        this.authStore = authStore;
+    }
+
+    /** 已登录广场则附加 Authorization（收藏/评论等个性化数据随会话返回） */
+    private void attachAuth(HttpURLConnection conn) {
+        String token = authStore == null ? null : authStore.token();
+        if (token != null) {
+            conn.setRequestProperty("Authorization", "Bearer " + token);
+        }
     }
 
     /** 校验中心地址：仅 http/https，禁止带用户信息（官方地址 https://pickq.cn） */
@@ -56,6 +67,7 @@ public class CenterProxyController {
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(8000);
             conn.setReadTimeout(30000);
+            attachAuth(conn);
             conn.setRequestProperty("Accept", "application/json");
             int code = conn.getResponseCode();
             InputStream stream = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
@@ -79,6 +91,7 @@ public class CenterProxyController {
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(8000);
             conn.setReadTimeout(60000);
+            attachAuth(conn);
             int code = conn.getResponseCode();
             if (code >= 400) {
                 InputStream err = conn.getErrorStream();
@@ -197,6 +210,119 @@ public class CenterProxyController {
             throw new IllegalArgumentException("下载链接不合法");
         }
         return ApiResponse.success(importContentBytes(getBytes(url)));
+    }
+
+    /**
+     * 需要登录的写操作通用转发（收藏/评论/点赞/关注等）：POST/DELETE，JSON body 原样透传；
+     * 已登录自动带 Authorization；未登录/会话失效时官网返回 401，错误信息透传给前端。
+     */
+    private String forwardJson(String method, String path, String center, String jsonBody) {
+        String base = checkBase(center);
+        String url = base + path;
+        try {
+            HttpURLConnection conn = (HttpURLConnection) URI.create(url).toURL().openConnection();
+            conn.setRequestMethod(method);
+            conn.setConnectTimeout(8000);
+            conn.setReadTimeout(30000);
+            attachAuth(conn);
+            conn.setRequestProperty("Accept", "application/json");
+            if (jsonBody != null && !jsonBody.isBlank()) {
+                conn.setDoOutput(true);
+                conn.setRequestProperty("Content-Type", "application/json");
+                try (java.io.OutputStream os = conn.getOutputStream()) {
+                    os.write(jsonBody.getBytes(StandardCharsets.UTF_8));
+                }
+            }
+            int code = conn.getResponseCode();
+            InputStream stream = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
+            String body = stream == null ? ""
+                    : new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))
+                            .lines().collect(Collectors.joining("\n"));
+            if (code >= 400) {
+                throw new IllegalStateException(extractRemoteError(body, code));
+            }
+            return body;
+        } catch (IOException e) {
+            throw new IllegalStateException("无法连接题库广场：" + e.getMessage());
+        }
+    }
+
+    /** 从官网错误响应体提取用户可读 message（h3 错误 JSON：顶层 message / data.message / statusMessage） */
+    private String extractRemoteError(String body, int code) {
+        if (body != null && !body.isBlank()) {
+            for (String field : new String[]{"message", "statusMessage"}) {
+                int idx = body.indexOf('"' + field + '"');
+                if (idx >= 0) {
+                    int colon = body.indexOf(':', idx);
+                    int start = body.indexOf('"', colon);
+                    int end = start > 0 ? body.indexOf('"', start + 1) : -1;
+                    if (start > 0 && end > start) {
+                        String msg = body.substring(start + 1, end);
+                        if (!msg.isBlank()) {
+                            return msg;
+                        }
+                    }
+                }
+            }
+        }
+        return "题库广场返回错误（HTTP " + code + "）";
+    }
+
+    private ResponseEntity<String> textJson(String body) {
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(body);
+    }
+
+    /** POST /api/center/packs/{packageKey}/favorite — 收藏/取消收藏（需登录） */
+    @PostMapping("/packs/{packageKey}/favorite")
+    public ResponseEntity<String> setFavorite(
+            @RequestParam(required = false) String center,
+            @PathVariable String packageKey,
+            @RequestBody(required = false) String body) {
+        String path = "/api/packs/" + URLEncoder.encode(packageKey, StandardCharsets.UTF_8) + "/favorite";
+        return textJson(forwardJson("POST", path, center, body));
+    }
+
+    /** POST /api/center/packs/{packageKey}/comments — 发表评论（需登录） */
+    @PostMapping("/packs/{packageKey}/comments")
+    public ResponseEntity<String> postComment(
+            @RequestParam(required = false) String center,
+            @PathVariable String packageKey,
+            @RequestBody(required = false) String body) {
+        String path = "/api/packs/" + URLEncoder.encode(packageKey, StandardCharsets.UTF_8) + "/comments";
+        return textJson(forwardJson("POST", path, center, body));
+    }
+
+    /** DELETE /api/center/packs/{packageKey}/comments/{commentId} — 删除评论（作者或管理员） */
+    @DeleteMapping("/packs/{packageKey}/comments/{commentId}")
+    public ResponseEntity<String> deleteComment(
+            @RequestParam(required = false) String center,
+            @PathVariable String packageKey,
+            @PathVariable long commentId) {
+        String path = "/api/packs/" + URLEncoder.encode(packageKey, StandardCharsets.UTF_8)
+                + "/comments/" + commentId;
+        return textJson(forwardJson("DELETE", path, center, null));
+    }
+
+    /** POST /api/center/packs/{packageKey}/comments/{commentId}/like — 点赞/取消点赞（需登录） */
+    @PostMapping("/packs/{packageKey}/comments/{commentId}/like")
+    public ResponseEntity<String> likeComment(
+            @RequestParam(required = false) String center,
+            @PathVariable String packageKey,
+            @PathVariable long commentId,
+            @RequestBody(required = false) String body) {
+        String path = "/api/packs/" + URLEncoder.encode(packageKey, StandardCharsets.UTF_8)
+                + "/comments/" + commentId + "/like";
+        return textJson(forwardJson("POST", path, center, body));
+    }
+
+    /** POST /api/center/authors/{authorId}/follow — 关注/取关作者（需登录） */
+    @PostMapping("/authors/{authorId}/follow")
+    public ResponseEntity<String> followAuthor(
+            @RequestParam(required = false) String center,
+            @PathVariable long authorId,
+            @RequestBody(required = false) String body) {
+        String path = "/api/authors/" + authorId + "/follow";
+        return textJson(forwardJson("POST", path, center, body));
     }
 
     /** 导入请求体 */
