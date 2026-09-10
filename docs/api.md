@@ -185,6 +185,11 @@
 | `GET /api/backup` | 无 | — | 流式 zip（`tiku-backup-yyyyMMdd-HHmmss.zip`：`database.sql` + `images/` + `ai-config.json` + `恢复说明.txt`） | 500 `备份打包失败`（日志；IO 异常走全局处理） |
 | `POST /api/backup/restore-prepare` | 无 | multipart `file`（备份 zip） | `{"dataDir":"<数据目录>"}`；桌面壳随后带 `--tiku.restore-stage` 重启后端执行恢复 | 400 `请选择备份文件` / `备份包条目过多` / `备份包含非法路径：{name}` / `备份包路径越界：{name}` / `备份包解压后过大` / `备份包缺少 database.sql，不是有效的拾题备份文件` / `备份文件处理失败：{msg}` |
 
+> 实测提醒（2026-09-11）：`GET /api/backup` 是**流式 zip**（无 `Content-Length`、分块传输），
+> 用 PowerShell `Invoke-WebRequest -OutFile` 抓会得到一个**截断的坏 zip**（报 "End of Central Directory record could not be found"）。
+> 想脚本化取备份请用 `curl.exe -o backup.zip http://127.0.0.1:<port>/api/backup`，或直接用应用内「完整备份」按钮。
+> （注意：应用运行时 `tiku.mv.db` 会被 H2 独占锁定，因此**不能用复制文件的方式**做热备份，这也是该接口存在的意义。）
+
 ### 1.3.10 `ExportController` — `/api/exports`（7 个端点，**全部免登录**，见类注释）
 
 | 方法 + 路径 | 鉴权 | 请求 | 响应 `data` | 常见错误 |
