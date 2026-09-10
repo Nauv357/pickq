@@ -47,5 +47,10 @@
 5. **更新官网下载链接**：`web/pages/index.vue` 里的 `/downloads/拾题_<版本>_x64-setup.exe` → 重新打包 `web-src.zip` → 服务器构建部署。
    ⚠️ 替换前先确认旧版本号字符串确实存在（曾出现"替换源不匹配、静默没改动"，导致下载页停留在旧版本、甚至指向已删除的文件而 404）。
 6. **线上验证**（必做）：`latest.json` 版本号、官网首页含新文件名、安装包与便携版链接均返回 200、`https://pickq.cn/` 返回 200。
-7. **（可选）GitHub Release**：安装包/便携版以 ASCII 名上传作为备用渠道（大陆直连不可用，仅供有代理的用户/海外用户；需要走代理上传）。
+7. **GitHub Release（必做，与官网同步发布）**：以 ASCII 名上传安装包与便携版作为备用渠道
+   （大陆直连 GitHub 不可用，仅供有代理的用户/海外用户；上传必须走代理）：
+   - 资产名：`PickQ_<版本>_x64-setup.exe`、`PickQ_<版本>_portable.zip`
+   - tag：`v<版本>`；Release 说明写功能更新 + 两个下载链接
+   - 走 API：`POST /repos/Nauv357/pickq/releases` 建 Release，再用 `uploads.github.com/.../releases/{id}/assets?name=...` 上传（`-x http://127.0.0.1:<代理端口>`）
+   - 上传后确认两个资产出现在 Release 页面
 8. **git 提交推送**：代理端口按用户当前设置（如 `git -c http.proxy=http://127.0.0.1:10808 push`）；`web/`、`deploy/`、`scripts/deploy/` 不入库属预期。
