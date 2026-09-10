@@ -49,13 +49,22 @@
           </p>
         </div>
         <div class="header-actions">
+          <!-- 全局编辑态开关：默认全部渲染态（所见即所得），需要时才整页展开表单 -->
+          <button class="btn btn-secondary btn-sm" :disabled="questions.length === 0" :title="t('expandAllEditTip')" @click="expandAllEdit">
+            <TikuIcon name="list" :size="14" />
+            {{ t('expandAllEdit') }}
+          </button>
+          <button class="btn btn-secondary btn-sm" :disabled="editOpen.size === 0" :title="t('collapseAllTip')" @click="collapseAllEdit">
+            <TikuIcon name="chevron-up" :size="14" />
+            {{ t('collapseAll') }}
+          </button>
           <button class="btn btn-danger" :disabled="canceling" @click="cancel">
             <TikuIcon name="trash" :size="14" />
-            {{ canceling ? '取消中…' : '取消导入' }}
+            {{ canceling ? t('cancelingImport') : t('cancelImport') }}
           </button>
           <button class="btn btn-primary" :disabled="confirming" @click="confirm">
             <TikuIcon name="check" :size="15" />
-            {{ confirming ? '导入中…' : '确认导入' }}
+            {{ confirming ? t('importing') : t('confirmImport') }}
           </button>
         </div>
       </header>
@@ -212,7 +221,11 @@
         <div v-for="(q, qi) in questions" :key="qi" :data-qidx="qi">
           <div
             class="preview-card"
-            :class="{ 'drag-over': dragOverIndex === qi, 'card-flash': flashIdx === qi }"
+            :class="{
+              'drag-over': dragOverIndex === qi,
+              'card-flash': flashIdx === qi,
+              'card-invalid': stemInvalid(q) || optionsInvalid(q)
+            }"
             @dragover.prevent="dragOverIndex = qi"
             @dragleave="dragOverIndex = null"
             @drop="onCardDrop($event, qi)"
@@ -221,7 +234,7 @@
               <span
                 class="drag-handle"
                 draggable="true"
-                title="拖动排序"
+                :title="t('dragSort')"
                 @dragstart="onQuestionDragStart($event, qi)"
               >
                 <TikuIcon name="grip" :size="13" />
@@ -232,86 +245,149 @@
                 v-if="duplicateNums.has(q.questionNumber)"
                 class="q-index mono dup-number"
                 title="该题号在列表中重复，可能是重复导入的题目，请删除或修改题号"
-              >重复题号 {{ q.questionNumber }}</span>
+              >{{ t('dupNumber', { n: q.questionNumber }) }}</span>
               <span v-else-if="q.questionNumber != null" class="q-index mono">#{{ q.questionNumber }}</span>
-              <span v-else class="q-index mono unnumbered" title="后端未能回填题号（公式/跨行/图片转写差异导致），可拖拽归位或提交时自动补号">未编号</span>
-            <!-- 答案来源标记：ORIGINAL=原文答案 / AI_SUPPLEMENT=AI 补充（需重点核对） -->
-            <span v-if="q.answerSource === 'ORIGINAL'" class="src-tag src-original" title="答案来自源文档原文">
-              <TikuIcon name="check" :size="11" />
-              原文答案
-            </span>
-            <span v-else-if="q.answerSource === 'AI_SUPPLEMENT'" class="src-tag src-ai" title="源文档无答案，由 AI 补充，请重点核对">
-              <TikuIcon name="sparkle" :size="11" />
-              AI 补充
-            </span>
-            <!-- 无答案：标红提醒补填（aiSupplement=false 或原文缺失时） -->
-            <span v-else-if="!q.answerKeys.length" class="src-tag src-no-answer" title="本题暂无答案，请补填后导入">
-              <TikuIcon name="x" :size="11" />
-              无答案
-            </span>
-            <!-- 关联材料标识（点击移除） -->
-            <span
-              v-if="q.materialKey"
-              class="src-tag src-material clickable"
-              title="已关联共享材料，点击移除"
-              @click="q.materialKey = null"
-            >
-              <TikuIcon name="file" :size="11" />
-              {{ q.materialKey }}
-              <TikuIcon name="x" :size="10" class="tag-x" />
-            </span>
-            <!-- 图片待补充：文档含图且其他题已配图，而本题题干/选项无任何图片引用（图形题漏配图提示） -->
-            <span
-              v-if="needsImageFlag(q)"
-              class="src-tag src-no-image"
-              title="文档包含图片且其他题已引用图片，本题未引用任何图片。若本题应有图（图形推理等），请从右侧素材区拖入或复制 [图片N] 到题干/选项"
-            >
-              <TikuIcon name="x" :size="11" />
-              图片待补充
-            </span>
-            <div class="type-tabs">
-              <button
-                v-for="t in typeOptions"
-                :key="t.value"
-                class="type-tab"
-                :class="{ active: q.type === t.value }"
-                @click="switchType(q, t.value)"
+              <span v-else class="q-index mono unnumbered" title="后端未能回填题号（公式/跨行/图片转写差异导致），可拖拽归位或提交时自动补号">{{ t('unnumbered') }}</span>
+              <!-- 答案来源标记：ORIGINAL=原文答案 / AI_SUPPLEMENT=AI 补充（需重点核对） -->
+              <span v-if="q.answerSource === 'ORIGINAL'" class="src-tag src-original" title="答案来自源文档原文">
+                <TikuIcon name="check" :size="11" />
+                {{ t('srcOriginal') }}
+              </span>
+              <span v-else-if="q.answerSource === 'AI_SUPPLEMENT'" class="src-tag src-ai" title="源文档无答案，由 AI 补充，请重点核对">
+                <TikuIcon name="sparkle" :size="11" />
+                {{ t('srcAi') }}
+              </span>
+              <!-- 无答案：标红提醒补填（aiSupplement=false 或原文缺失时） -->
+              <span v-else-if="!q.answerKeys.length" class="src-tag src-no-answer" title="本题暂无答案，请补填后导入">
+                <TikuIcon name="x" :size="11" />
+                {{ t('noAnswerTag') }}
+              </span>
+              <!-- 关联材料：渲染态只读展示（材料：M1）；编辑态可点击解除关联 -->
+              <span v-if="q.materialKey && !isEditing(q)" class="src-tag src-material">
+                <TikuIcon name="file" :size="11" />
+                {{ t('materialTag', { k: q.materialKey }) }}
+              </span>
+              <span
+                v-else-if="q.materialKey"
+                class="src-tag src-material clickable"
+                :title="t('materialUnlink')"
+                @click="q.materialKey = null"
               >
-                {{ t.label }}
+                <TikuIcon name="file" :size="11" />
+                {{ q.materialKey }}
+                <TikuIcon name="x" :size="10" class="tag-x" />
+              </span>
+              <!-- 图片待补充：文档含图且其他题已配图，而本题题干/选项无任何图片引用（图形题漏配图提示） -->
+              <span
+                v-if="needsImageFlag(q)"
+                class="src-tag src-no-image"
+                title="文档包含图片且其他题已引用图片，本题未引用任何图片。若本题应有图（图形推理等），请从右侧素材区拖入或复制 [图片N] 到题干/选项"
+              >
+                <TikuIcon name="x" :size="11" />
+                {{ t('needImageTag') }}
+              </span>
+              <!-- 校验提示（与导入前校验同规则）：长列表里可直接看到哪几题待修；不做筛选 -->
+              <span v-if="stemInvalid(q)" class="src-tag src-invalid" :title="t('warnStemEmpty', { pos: qPosText(q, qi) })">
+                <TikuIcon name="x" :size="11" />
+                {{ t('emptyContent') }}
+              </span>
+              <span v-if="optionsInvalid(q)" class="src-tag src-invalid" :title="t('warnOptIncomplete', { pos: qPosText(q, qi) })">
+                <TikuIcon name="x" :size="11" />
+                {{ t('incompleteOptions') }}
+              </span>
+              <!-- 题型：编辑态可点击切换；渲染态只读标签 -->
+              <div v-if="isEditing(q)" class="type-tabs">
+                <button
+                  v-for="tp in typeOptions"
+                  :key="tp.value"
+                  class="type-tab"
+                  :class="{ active: q.type === tp.value }"
+                  @click="switchType(q, tp.value)"
+                >
+                  {{ tp.label }}
+                </button>
+              </div>
+              <span v-else class="type-label">{{ typeLabel(q.type) }}</span>
+              <!-- 分值：编辑态可改；渲染态只读展示 -->
+              <span v-if="isEditing(q)" class="card-score">
+                <el-input-number v-model="q.score" :min="1" :max="100" size="small" controls-position="right" style="width: 110px" />
+              </span>
+              <span v-else class="card-score-text mono">{{ t('scoreTag', { n: q.score }) }}</span>
+              <!-- 单题编辑态开关：渲染态点「编辑」展开表单，编辑态点「完成」收起（自动回到渲染态） -->
+              <button v-if="!isEditing(q)" class="icon-btn" :title="t('editThis')" @click="openEdit(q)">
+                <TikuIcon name="edit" :size="14" />
+              </button>
+              <button v-else class="btn btn-secondary btn-sm" :title="t('doneEdit')" @click="closeEdit(q)">
+                <TikuIcon name="check" :size="14" />
+                {{ t('doneEdit') }}
+              </button>
+              <button class="icon-btn danger" :title="t('deleteThis')" @click="removeQuestion(qi)">
+                <TikuIcon name="trash" :size="14" />
               </button>
             </div>
-            <span class="card-score">
-              <el-input-number v-model="q.score" :min="1" :max="100" size="small" controls-position="right" style="width: 110px" />
-            </span>
-            <button
-              class="icon-btn"
-              :class="{ active: previewOpen.has(qi) }"
-              :title="previewOpen.has(qi) ? '收起渲染预览' : '查看公式/图片渲染效果（确认公式转写是否正确）'"
-              @click="togglePreview(qi)"
-            >
-              <TikuIcon name="eye" :size="14" />
-            </button>
-            <button class="icon-btn danger" title="删除此题" @click="removeQuestion(qi)">
-              <TikuIcon name="trash" :size="14" />
-            </button>
-          </div>
-          <!-- 渲染预览（只读）：公式 KaTeX + [图片N] 任务图 + 表格，供确认公式转写/图片归属是否正确 -->
-          <div v-if="previewOpen.has(qi)" class="preview-block">
-            <div class="preview-title">渲染预览</div>
-            <div class="preview-row" v-html="qPreviewHtml(q.content)"></div>
-            <template v-if="q.type !== 'SUBJECTIVE' && q.type !== 'JUDGE'">
-              <div v-for="opt in q.options" :key="opt.key" class="preview-row preview-option">
+          <!-- 渲染态（默认主视图，只读所见即所得）：题干/选项/答案/解析 全部走 KaTeX 公式 + [图片N] 任务图 + 表格渲染 -->
+          <div v-if="!isEditing(q)" class="render-block">
+            <!-- 题干 -->
+            <div v-if="!stemInvalid(q)" class="render-stem" v-html="qPreviewHtml(q.content)"></div>
+            <div v-else class="render-stem is-empty">{{ t('emptyContent') }}</div>
+
+            <!-- 选项：判断题固定 A.正确 / B.错误；主观题无选项 -->
+            <div v-if="q.type === 'JUDGE'" class="render-judge">
+              <span class="render-judge-item"><span class="opt-key">A</span>{{ t('judgeTrue') }}</span>
+              <span class="render-judge-item"><span class="opt-key">B</span>{{ t('judgeFalse') }}</span>
+            </div>
+            <div v-else-if="q.type !== 'SUBJECTIVE'" class="render-options">
+              <div v-for="opt in q.options" :key="opt.key" class="render-option">
                 <span class="opt-key">{{ opt.key }}</span>
-                <span v-html="qPreviewHtml(opt.text) || `（选项 ${opt.key} 为空）`"></span>
+                <span class="render-option-text" v-html="qPreviewHtml(opt.text) || t('optionEmpty', { k: opt.key })"></span>
               </div>
-            </template>
-            <div v-if="q.type === 'JUDGE'" class="preview-row">A. 正确&nbsp;&nbsp;B. 错误</div>
-            <div v-if="q.type === 'SUBJECTIVE' && q.referenceAnswer" class="preview-row">
-              <span class="preview-label">参考答案：</span><span v-html="qPreviewHtml(q.referenceAnswer)"></span>
+            </div>
+
+            <!-- 答案：客观题 = 正确答案（选项字母 + 答案文字）；主观题 = 参考答案 -->
+            <div class="answer-block" :class="{ 'is-ai': q.answerSource === 'AI_SUPPLEMENT' }">
+              <div class="answer-head">
+                <span class="answer-label">{{ q.type === 'SUBJECTIVE' ? t('refAnswer') : t('answerLabel') }}</span>
+                <!-- AI 补答案标记（醒目 + 底色高亮）：源文档无答案、由 AI 生成，导入前请核对 -->
+                <span v-if="q.answerSource === 'AI_SUPPLEMENT'" class="ai-supp-tag">
+                  <TikuIcon name="sparkle" :size="11" />
+                  {{ t('aiSupplementTag') }}
+                </span>
+              </div>
+              <template v-if="q.type === 'SUBJECTIVE'">
+                <div v-if="q.referenceAnswer" class="answer-body" v-html="qPreviewHtml(q.referenceAnswer)"></div>
+                <div v-else class="answer-empty">{{ t('notProvided') }}</div>
+              </template>
+              <template v-else>
+                <div class="answer-keys">
+                  <span v-if="q.type === 'JUDGE' && q.answerKeys.length" class="answer-key mono">
+                    {{ q.answerKeys[0] === 'A' ? t('judgeTrue') : t('judgeFalse') }}
+                  </span>
+                  <span v-else-if="q.answerKeys.length" class="answer-key mono">{{ q.answerKeys.join(t('answerSep')) }}</span>
+                  <span v-else class="answer-empty">{{ t('noAnswerTag') }}</span>
+                </div>
+                <div v-if="q.answerText" class="answer-body" v-html="qPreviewHtml(q.answerText)"></div>
+              </template>
+            </div>
+
+            <!-- 解析：默认展示；过长（> ~6 行 / ~400 字）折叠，可展开全部 -->
+            <div v-if="q.analysis" class="analysis-block">
+              <div class="analysis-head">
+                <span class="answer-label">{{ t('analysisLabel') }}</span>
+                <button v-if="isLongText(q.analysis)" class="link-btn" @click="toggleAnalysis(q)">
+                  {{ isAnalysisOpen(q) ? t('collapse') : t('expandFull') }}
+                  <TikuIcon :name="isAnalysisOpen(q) ? 'chevron-up' : 'chevron-down'" :size="12" />
+                </button>
+              </div>
+              <div
+                class="analysis-body"
+                :class="{ 'is-collapsed': isLongText(q.analysis) && !isAnalysisOpen(q) }"
+                v-html="qPreviewHtml(q.analysis)"
+              ></div>
             </div>
           </div>
 
-          <div class="card-body">
+          <!-- 编辑态表单（点「编辑」展开，点「完成」收起回到渲染态；表单能力与原来完全一致） -->
+          <div v-else class="card-body">
             <!-- 材料关联（下拉选择或从素材区拖入） -->
             <div v-if="materials.length" class="field">
               <label class="field-label">共享材料（可选）</label>
@@ -455,7 +531,7 @@
           <div class="insert-row">
             <button class="btn btn-ghost btn-sm" @click="insertQuestion(qi + 1)">
               <TikuIcon name="plus" :size="12" />
-              在此插入新题
+              {{ t('insertHere') }}
             </button>
           </div>
         </div>
@@ -465,15 +541,15 @@
       <div class="add-row">
         <button class="btn btn-secondary" @click="addQuestion">
           <TikuIcon name="plus" :size="14" />
-          添加题目
+          {{ t('addQuestion') }}
         </button>
       </div>
 
       <div class="confirm-bar">
-        <span class="text-muted">共 {{ questions.length }} 题</span>
+        <span class="text-muted">{{ t('totalN', { n: questions.length }) }}</span>
         <button class="btn btn-primary" :disabled="confirming" @click="confirm">
           <TikuIcon name="check" :size="15" />
-          {{ confirming ? '导入中…' : '确认导入' }}
+          {{ confirming ? t('importing') : t('confirmImport') }}
         </button>
       </div>
 
@@ -497,7 +573,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, toRaw, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n({
@@ -513,7 +589,22 @@ const { t } = useI18n({
       listPosNum: '列表第 {i} 题（#{n}）', listPosNoNum: '列表第 {i} 题（未编号）',
       warnStemEmpty: '{pos}题干为空', warnOptIncomplete: '{pos}选项不完整（至少 2 个且文本非空）',
       importedN: '已导入 {n} 道题目', cancelAsk: '取消后将删除该任务的整理结果，且无法恢复。确定取消导入吗？',
-      cancelTitle: '取消导入', canceledDone: '已取消导入', taskDeleted: '任务已删除'
+      cancelTitle: '取消导入', canceledDone: '已取消导入', taskDeleted: '任务已删除',
+      // ---- 渲染态 / 编辑态（默认渲染，按需展开编辑） ----
+      editThis: '编辑此题', doneEdit: '完成', expandAllEdit: '全部展开编辑', collapseAll: '全部收起',
+      expandAllEditTip: '把所有题目切换为编辑态（表单）', collapseAllTip: '把所有题目收起为渲染态（只读预览）',
+      dragSort: '拖动排序', unnumbered: '未编号', dupNumber: '重复题号 {n}', deleteThis: '删除此题',
+      insertHere: '在此插入新题', addQuestion: '添加题目', totalN: '共 {n} 题',
+      emptyContent: '题干为空', incompleteOptions: '选项不完整',
+      // ---- 渲染态字段标签 ----
+      answerLabel: '正确答案', refAnswer: '参考答案', analysisLabel: '解析', notProvided: '未提供',
+      materialTag: '材料：{k}', materialUnlink: '已关联共享材料，点击解除关联',
+      aiSupplementTag: 'AI 补答案 · 请核对', expandFull: '展开全部', collapse: '收起',
+      scoreTag: '{n} 分', optionEmpty: '（选项 {k} 为空）', answerSep: '、',
+      judgeTrue: '正确', judgeFalse: '错误',
+      typeSingle: '单选', typeMultiple: '多选', typeJudge: '判断', typeSubjective: '主观',
+      srcOriginal: '原文答案', srcAi: 'AI 补充', noAnswerTag: '无答案', needImageTag: '图片待补充',
+      cancelImport: '取消导入', cancelingImport: '取消中…', confirmImport: '确认导入', importing: '导入中…'
     },
     'en-US': {
       title: 'AI Import Preview', processing: 'Processing the task…', workingTip: 'AI is organizing the questions, please wait',
@@ -526,7 +617,22 @@ const { t } = useI18n({
       listPosNum: '#{n} (item {i} in the list)', listPosNoNum: 'unnumbered item {i} in the list',
       warnStemEmpty: 'Question {pos} has an empty stem', warnOptIncomplete: 'Question {pos} has incomplete options (need at least 2, all with text)',
       importedN: 'Imported {n} questions', cancelAsk: 'Canceling deletes this task’s results and cannot be undone. Cancel the import?',
-      cancelTitle: 'Cancel import', canceledDone: 'Import canceled', taskDeleted: 'Task deleted'
+      cancelTitle: 'Cancel import', canceledDone: 'Import canceled', taskDeleted: 'Task deleted',
+      // ---- rendered / edit mode (rendered by default, edit on demand) ----
+      editThis: 'Edit this question', doneEdit: 'Done', expandAllEdit: 'Edit all', collapseAll: 'Collapse all',
+      expandAllEditTip: 'Switch every question to edit mode (form)', collapseAllTip: 'Collapse every question back to the rendered view',
+      dragSort: 'Drag to reorder', unnumbered: 'Unnumbered', dupNumber: 'Duplicate #{n}', deleteThis: 'Delete this question',
+      insertHere: 'Insert a question here', addQuestion: 'Add question', totalN: '{n} questions in total',
+      emptyContent: 'Empty stem', incompleteOptions: 'Incomplete options',
+      // ---- rendered fields ----
+      answerLabel: 'Correct answer', refAnswer: 'Reference answer', analysisLabel: 'Analysis', notProvided: 'Not provided',
+      materialTag: 'Material: {k}', materialUnlink: 'Linked shared material — click to unlink',
+      aiSupplementTag: 'AI-filled answer · please verify', expandFull: 'Show all', collapse: 'Collapse',
+      scoreTag: '{n} pts', optionEmpty: '(option {k} is empty)', answerSep: ', ',
+      judgeTrue: 'True', judgeFalse: 'False',
+      typeSingle: 'Single', typeMultiple: 'Multiple', typeJudge: 'True/False', typeSubjective: 'Subjective',
+      srcOriginal: 'From source', srcAi: 'AI-filled', noAnswerTag: 'No answer', needImageTag: 'Image missing',
+      cancelImport: 'Cancel import', cancelingImport: 'Canceling…', confirmImport: 'Confirm import', importing: 'Importing…'
     }
   }
 })
@@ -542,21 +648,82 @@ const route = useRoute()
 const router = useRouter()
 const jobId = computed(() => Number(route.params.jobId))
 const targetBankId = route.query.bankId ? Number(route.query.bankId) : null
-// 每题"渲染预览"开关（题干/选项以渲染后的效果展示——公式 KaTeX、[图片N] → 任务图、表格）
-const previewOpen = ref(new Set())
-function togglePreview(qi) {
-  const s = new Set(previewOpen.value)
-  if (s.has(qi)) s.delete(qi)
-  else s.add(qi)
-  previewOpen.value = s
+/* ---------- 渲染态 / 编辑态 ----------
+ * 默认全部为渲染态（所见即所得：公式 KaTeX、[图片N] 任务图、表格），需要时按题展开编辑表单。
+ * editOpen 存"题目对象本身"而非数组下标：拖拽排序/删除题目后不会串题；空集合 = 全部渲染态。
+ * 用 shallowRef（不是 ref）：ref 会把 Set 也包成响应式，而响应式 Set 迭代时会把元素重新包成代理，
+ * 导致 add(toRaw(q)) 与 delete(toRaw(q)) 不对称（删不掉、集合只增不减）。shallowRef 保持原生 Set，
+ * 只要每次整体替换 Set 就能触发重渲染，同时 toRaw 归一化保证代理/原始对象双向都能命中。
+ */
+const editOpen = shallowRef(new Set())
+// 已展开全部的长解析（默认折叠，按需展开）
+const analysisExpanded = shallowRef(new Set())
+function isEditing(q) {
+  return editOpen.value.has(toRaw(q))
+}
+function openEdit(q) {
+  const s = new Set(editOpen.value)
+  s.add(toRaw(q))
+  editOpen.value = s
+}
+function closeEdit(q) {
+  const s = new Set(editOpen.value)
+  s.delete(toRaw(q))
+  editOpen.value = s
+}
+/* 全部展开编辑 / 全部收起（页头全局开关） */
+function expandAllEdit() {
+  editOpen.value = new Set(questions.value.map((q) => toRaw(q)))
+}
+function collapseAllEdit() {
+  editOpen.value = new Set()
+  analysisExpanded.value = new Set() // 一并收起已展开的长解析，彻底回到渲染态
 }
 
-const typeOptions = [
-  { value: 'SINGLE', label: '单选' },
-  { value: 'MULTIPLE', label: '多选' },
-  { value: 'JUDGE', label: '判断' },
-  { value: 'SUBJECTIVE', label: '主观' }
-]
+/* 长文本折叠阈值：超过 ~6 行或 ~400 字才折叠（短解析默认完整展示） */
+const ANALYSIS_COLLAPSE_CHARS = 400
+const ANALYSIS_COLLAPSE_LINES = 6
+function isLongText(text) {
+  const s = String(text || '')
+  return s.length > ANALYSIS_COLLAPSE_CHARS || (s.match(/\n/g) || []).length >= ANALYSIS_COLLAPSE_LINES
+}
+function isAnalysisOpen(q) {
+  return analysisExpanded.value.has(toRaw(q))
+}
+function toggleAnalysis(q) {
+  const s = new Set(analysisExpanded.value)
+  if (s.has(toRaw(q))) s.delete(toRaw(q))
+  else s.add(toRaw(q))
+  analysisExpanded.value = s
+}
+
+/* 校验态（与 confirm() 导入前校验同规则）：渲染态卡片上标出问题题，长列表里可直接定位；不做筛选 */
+function stemInvalid(q) {
+  return !q.content || !q.content.trim()
+}
+function optionsInvalid(q) {
+  if (q.type === 'JUDGE' || q.type === 'SUBJECTIVE') return false
+  return q.options.length < 2 || q.options.some((o) => !o.text.trim())
+}
+
+/* 题目位置文案（校验提示用：题号 + 列表位置，避免与列表位置混淆） */
+function qPosText(q, i) {
+  return q.questionNumber != null
+    ? t('listPosNum', { i: i + 1, n: q.questionNumber })
+    : t('listPosNoNum', { i: i + 1 })
+}
+
+const typeOptions = computed(() => [
+  { value: 'SINGLE', label: t('typeSingle') },
+  { value: 'MULTIPLE', label: t('typeMultiple') },
+  { value: 'JUDGE', label: t('typeJudge') },
+  { value: 'SUBJECTIVE', label: t('typeSubjective') }
+])
+/* 题型只读标签（渲染态展示；编辑态由 type-tabs 切换） */
+function typeLabel(type) {
+  const found = typeOptions.value.find((o) => o.value === type)
+  return found ? found.label : type
+}
 const JUDGE_OPTIONS = [
   { key: 'A', text: '正确' },
   { key: 'B', text: '错误' }
@@ -621,25 +788,37 @@ function toggleMaterialExpand(key) {
   materialExpanded.value = next
 }
 
-/* 富文本渲染预览（题干/选项/材料共用）：表格 HTML → 白名单真实表格，[图片N] → 任务临时图，
- * $...$ LaTeX → KaTeX，其余文本转义（防 XSS）。先公式渲染（输出已转义 + KaTeX HTML），再图，再换行。 */
+/* 富文本渲染（题干/选项/答案/解析/材料共用）：表格 HTML → 白名单真实表格，[图片N] → 任务临时图，
+ * $...$ LaTeX → KaTeX，其余文本转义（防 XSS）。先公式渲染（输出已转义 + KaTeX HTML），再图，再换行。
+ *
+ * 性能：默认全渲染 = 几十上百题同时跑 KaTeX/图片/表格，故对渲染结果做缓存。
+ * key = jobId + 内容字符串：同内容（含材料区复用同一段文本）直接命中；
+ * 编辑后内容字符串变化 → key 变化 → 自然失效重算；切换任务（jobId 变）也不会串用旧结果。 */
+const previewHtmlCache = new Map()
+const PREVIEW_CACHE_MAX = 2000 // 上限兜底（极端批量编辑时整体清空，避免无界增长）
+function renderJobImages(html) {
+  return String(html).replace(/\[图片(\d+)\]/g, (m, n) => {
+    const url = getJobImageUrl(jobId.value, Number(n))
+    return `<img class="snip-img" src="${url}" alt="${m}" loading="lazy">`
+  })
+}
 function qPreviewHtml(content) {
   if (!content) return ''
-  const renderImgs = (html) =>
-    String(html).replace(/\[图片(\d+)\]/g, (m, n) => {
-      const url = getJobImageUrl(jobId.value, Number(n))
-      return `<img class="snip-img" src="${url}" alt="${m}" loading="lazy">`
-    })
+  const key = `${jobId.value}\u0000${content}`
+  const cached = previewHtmlCache.get(key)
+  if (cached !== undefined) return cached
   const segments = String(content).split(/(<table[\s>][\s\S]*?<\/table>)/gi)
   let html = ''
   for (const seg of segments) {
     if (!seg) continue
     if (/^<table[\s>]/i.test(seg)) {
-      html += `<div class="rich-table-wrap">${renderImgs(sanitizeTableHtml(seg))}</div>`
+      html += `<div class="rich-table-wrap">${renderJobImages(sanitizeTableHtml(seg))}</div>`
     } else {
-      html += renderImgs(latexOnlyHtml(seg))
+      html += renderJobImages(latexOnlyHtml(seg))
     }
   }
+  if (previewHtmlCache.size >= PREVIEW_CACHE_MAX) previewHtmlCache.clear()
+  previewHtmlCache.set(key, html)
   return html
 }
 
@@ -681,9 +860,11 @@ function moveQuestion(from, to) {
   arr.splice(to, 0, item)
 }
 
-/* 插入新题（中间插入；提交时后端按新顺序补题号） */
+/* 插入新题（中间插入；提交时后端按新顺序补题号）。新题为空白，直接展开编辑态（渲染态下没有内容可看） */
 function insertQuestion(index) {
-  questions.value.splice(index, 0, emptyQuestion())
+  const q = emptyQuestion()
+  questions.value.splice(index, 0, q)
+  openEdit(q)
 }
 
 /* 材料关联弹窗 */
@@ -975,7 +1156,9 @@ function removeMaterial(index) {
 }
 
 function addQuestion() {
-  questions.value.push(emptyQuestion())
+  const q = emptyQuestion()
+  questions.value.push(q)
+  openEdit(q) // 新题为空白：直接展开编辑态，省一次点击
 }
 
 async function confirm() {
@@ -984,20 +1167,18 @@ async function confirm() {
     return
   }
   // 校验（失败即滚动高亮到该题卡片；提示同时带题号，避免与列表位置混淆）
-  const qPos = (q, i) => (q.questionNumber != null ? t('listPosNum', { i: i + 1, n: q.questionNumber }) : t('listPosNoNum', { i: i + 1 }))
+  // 规则与渲染态卡片上的「题干为空 / 选项不完整」标签共用 stemInvalid / optionsInvalid，避免两处漂移
   for (let i = 0; i < questions.value.length; i++) {
     const q = questions.value[i]
-    if (!q.content.trim()) {
-      ElMessage.warning(t('warnStemEmpty', { pos: qPos(q, i) }))
+    if (stemInvalid(q)) {
+      ElMessage.warning(t('warnStemEmpty', { pos: qPosText(q, i) }))
       focusCard(i)
       return
     }
-    if (q.type !== 'JUDGE' && q.type !== 'SUBJECTIVE') {
-      if (q.options.length < 2 || q.options.some((o) => !o.text.trim())) {
-        ElMessage.warning(t('warnOptIncomplete', { pos: qPos(q, i) }))
-        focusCard(i)
-        return
-      }
+    if (optionsInvalid(q)) {
+      ElMessage.warning(t('warnOptIncomplete', { pos: qPosText(q, i) }))
+      focusCard(i)
+      return
     }
     //答案不强制：无答案题可先导入（做题时无法判对错、不污染统计），之后在题库编辑页补配（红色圆钮会提示）
   }
@@ -1135,6 +1316,10 @@ watch(
     questions.value = []
     materials.value = []
     jobImages.value = []
+    // 新任务回到全渲染态；渲染缓存按 jobId 分键，这里一并清掉避免跨任务驻留
+    editOpen.value = new Set()
+    analysisExpanded.value = new Set()
+    previewHtmlCache.clear()
     loadJob()
   }
 )
@@ -1147,6 +1332,13 @@ watch(
   justify-content: space-between;
   gap: 20px;
   margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+/* 页头操作区（全局编辑态开关 + 取消/确认导入） */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   flex-wrap: wrap;
 }
 .back-link {
@@ -1236,6 +1428,12 @@ watch(
   background: var(--warning-soft);
   border: 1px dashed var(--warning);
 }
+/* 校验态标签（题干为空 / 选项不完整）：与导入前校验同规则，便于长列表定位 */
+.src-invalid {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border: 1px dashed var(--danger);
+}
 
 /* 预览材料编辑区 */
 .preview-materials {
@@ -1291,6 +1489,10 @@ watch(
 .card-flash {
   box-shadow: inset 0 0 0 2px var(--accent);
 }
+/* 存在校验问题（题干为空 / 选项不完整）的卡片：描边提醒，便于一眼扫到 */
+.preview-card.card-invalid {
+  border-color: var(--danger);
+}
 .card-head {
   display: flex;
   align-items: center;
@@ -1321,6 +1523,21 @@ watch(
 }
 .card-score {
   margin-left: auto;
+}
+/* 渲染态分值/题型（只读） */
+.card-score-text {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.type-label {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 10px;
 }
 .icon-btn {
   display: inline-flex;
@@ -1964,50 +2181,149 @@ watch(
   white-space: nowrap;
   color: var(--text-secondary);
 }
-/* 渲染预览（公式 KaTeX + 图 + 表格） */
-.preview-block {
-  margin: 4px 14px 8px;
-  padding: 10px 12px;
-  background: var(--bg-elev);
-  border: 1px dashed var(--border-color, #d9d9d9);
-  border-radius: 8px;
+/* ---------- 渲染态（默认主视图，所见即所得：KaTeX 公式 + 图片 + 表格） ---------- */
+.render-block {
+  padding: 14px 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   font-size: 13.5px;
   line-height: 1.7;
 }
-.preview-title {
-  font-size: 11px;
-  color: var(--text-muted);
-  letter-spacing: 1px;
-  margin-bottom: 6px;
-  text-transform: uppercase;
-}
-.preview-row {
+.render-stem {
+  color: var(--text-primary);
   word-break: break-word;
 }
-.preview-row + .preview-row {
-  margin-top: 4px;
+.render-stem.is-empty {
+  color: var(--text-muted);
+  font-style: italic;
 }
-.preview-option {
+.render-judge {
+  display: flex;
+  gap: 14px;
+}
+.render-judge-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+}
+.render-options {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.render-option {
   display: flex;
   align-items: flex-start;
+  gap: 9px;
+}
+.render-option-text {
+  min-width: 0;
+  color: var(--text-secondary);
+  word-break: break-word;
+}
+/* 答案区（客观题=正确答案 / 主观题=参考答案）；AI 补答案时整块高亮提醒核对 */
+.answer-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+.answer-block.is-ai {
+  background: var(--warning-soft);
+  border-color: var(--warning);
+}
+.answer-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.answer-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+}
+.ai-supp-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--warning);
+  background: var(--warning-soft);
+  border: 1px dashed var(--warning);
+  border-radius: 999px;
+  padding: 1px 9px;
+}
+.answer-key {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 10px;
+  border-radius: 7px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  color: var(--accent-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.answer-body {
+  color: var(--text-primary);
+  word-break: break-word;
+}
+.answer-empty {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+/* 解析：默认展示；过长折叠 + 「展开全部 / 收起」 */
+.analysis-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+.analysis-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
 }
-.preview-label {
-  color: var(--text-muted);
-  font-size: 12px;
+.analysis-body {
+  color: var(--text-secondary);
+  word-break: break-word;
 }
-.preview-block img.snip-img,
-.preview-block img.rich-img {
-  max-width: 260px;
-  max-height: 220px;
+.analysis-body.is-collapsed {
+  max-height: calc(1.7em * 6); /* ≈ 6 行（与 isLongText 阈值呼应） */
+  overflow: hidden;
+}
+.link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--accent-text);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  cursor: pointer;
+}
+.link-btn:hover {
+  text-decoration: underline;
+}
+.render-block img.snip-img,
+.render-block img.rich-img {
+  max-width: min(100%, 420px);
+  max-height: 300px;
   object-fit: contain;
-  border: 1px solid var(--border-color, #eee);
+  border: 1px solid var(--border);
   border-radius: 6px;
   margin: 4px 0;
   background: #fff;
-}
-.icon-btn.active {
-  color: var(--accent, #409eff);
-  background: color-mix(in srgb, var(--accent, #409eff) 12%, transparent);
 }
 </style>
