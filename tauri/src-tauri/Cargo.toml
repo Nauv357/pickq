@@ -1,6 +1,6 @@
 [package]
 name = "tiku-desktop"
-version = "0.1.9"
+version = "0.1.10"
 description = "拾题 · 自建题库刷题应用（桌面壳：托管本地 Spring Boot 后端）"
 authors = ["tiku"]
 edition = "2021"

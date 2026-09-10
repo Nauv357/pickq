@@ -326,10 +326,10 @@
       <p v-if="authError" class="auth-error">{{ authError }}</p>
 
       <el-form v-if="authMode === 'login'" label-position="top" @submit.prevent>
-        <el-form-item :label="t('username')">
+        <el-form-item :label="t('account')">
           <el-input
             v-model="loginForm.username"
-            :placeholder="t('usernamePh')"
+            :placeholder="t('accountPh')"
             :disabled="authBusy"
             autocomplete="username"
             @keyup.enter="doLogin"
@@ -489,6 +489,9 @@ const { t } = useI18n({
       loginTitle: '登录题库广场',
       regTitle: '注册广场账号',
       username: '用户名',
+    account: '用户名或邮箱',
+    accountPh: '用户名或注册邮箱',
+    msgNeedAccount: '请输入用户名或邮箱',
       usernamePh: '2–24 位中英数、下划线或连字符',
       password: '密码',
       passwordPh: '至少 6 位',
@@ -593,6 +596,9 @@ const { t } = useI18n({
       loginTitle: 'Log in to plaza',
       regTitle: 'Create plaza account',
       username: 'Username',
+    account: 'Username or email',
+    accountPh: 'Username or registered email',
+    msgNeedAccount: 'Please enter your username or email',
       usernamePh: '2–24 letters/digits/_/-',
       password: 'Password',
       passwordPh: 'At least 6 characters',
@@ -933,7 +939,7 @@ async function doLogin(e) {
   if (authBusy.value) return
   const username = loginForm.value.username.trim()
   const password = loginForm.value.password
-  if (!username) { authError.value = t('msgNeedUsername'); return }
+  if (!username) { authError.value = t('msgNeedAccount'); return }
   if (!password) { authError.value = t('msgNeedPassword'); return }
   authBusy.value = true
   authError.value = ''
