@@ -450,7 +450,8 @@ async fn download_update(
             if UPDATE_CANCEL.load(Ordering::SeqCst) {
                 if let Some(mut c) = UPDATE_CHILD.lock().unwrap().take() {
                     let _ = c.kill();
-                    let _ = c.wait();
+                    // 不阻塞等待：kill 后进程可能已被 cancel_update 回收
+                    let _ = c.try_wait();
                 }
                 return Err("下载已取消".to_string());
             }
@@ -479,6 +480,10 @@ async fn download_update(
             );
             std::thread::sleep(Duration::from_millis(250));
         }
+    }
+    // 下载结束（或已有完整文件）后仍可能收到取消请求：直接返回，不进入校验/安装阶段
+    if UPDATE_CANCEL.load(Ordering::SeqCst) {
+        return Err("下载已取消".to_string());
     }
     let _ = app.emit(
         "shiti://update-progress",
@@ -512,7 +517,13 @@ async fn download_update(
 /// 取消进行中的下载（保留已下载部分，下次下载自动续传）
 #[tauri::command]
 fn cancel_update() {
+    // 置标志 + 立即结束 curl：download_update 最迟在下一个轮询周期（250ms）返回「下载已取消」；
+    // 前端另有"立即关闭对话框"的乐观路径，二者互补，保证取消永远能退出。
     UPDATE_CANCEL.store(true, Ordering::SeqCst);
+    if let Some(mut c) = UPDATE_CHILD.lock().unwrap().take() {
+        let _ = c.kill();
+        let _ = c.try_wait();
+    }
 }
 
 /// 安装更新：写等待脚本（等自身退出 → NSIS /S 装回当前 exe 目录 → 重启）并退出进程。

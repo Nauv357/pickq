@@ -30,7 +30,7 @@
 
     <!-- 自动更新下载：点「立即更新」后直接下载安装（进度 + 停止下载） -->
     <Teleport to="body">
-      <div v-if="updOpen" class="upd-mask">
+      <div v-if="updOpen" class="upd-mask" @click.self="cancelFlow">
         <div class="upd-card">
           <p class="upd-title">
             {{ updState === 'install' ? t('updInstalling') : t('updDownloading', { v: updVer }) }}
@@ -70,7 +70,8 @@ const { t } = useI18n({
       updIgnored: '已忽略 v{v}，出现更新版本时会再提醒；也可随时在「设置」手动更新',
       updDownloading: '正在下载 v{v}…', updInstalling: '下载完成，正在安装…', updInstallTip: '安装完成后应用将自动重启，请稍候',
       updStop: '停止下载', updRetry: '重试', updClose: '关闭',
-      updCanceled: '已取消下载；已下载部分已保留，下次会从断点继续'
+      updCanceled: '已取消下载；已下载部分已保留，下次会从断点继续',
+      updCanceledButReady: '下载已完成，可在「设置」中手动更新'
     },
     'en-US': {
       lbFit: 'Fit to screen', lbOriginal: 'Original size', lbClose: 'Close', lbAlt: 'Zoom in', lbHint: 'In original size you can scroll / zoom with the wheel · click outside to close',
@@ -79,7 +80,8 @@ const { t } = useI18n({
       updIgnored: 'Ignored v{v}; you will be reminded when a newer version appears. You can also update manually in Settings anytime',
       updDownloading: 'Downloading v{v}…', updInstalling: 'Downloaded — installing…', updInstallTip: 'The app will restart automatically once the update is installed',
       updStop: 'Stop download', updRetry: 'Retry', updClose: 'Close',
-      updCanceled: 'Download stopped; the partial file is kept and the next download resumes from where it left off'
+      updCanceled: 'Download stopped; the partial file is kept and the next download resumes from where it left off',
+      updCanceledButReady: 'Download finished — you can update manually in Settings'
     }
   }
 })
@@ -177,6 +179,8 @@ const updState = ref('download') // download | install | error
 const updErr = ref('')
 const updCanceling = ref(false)
 let updInfo = null
+// 用户是否已主动取消并关闭对话框（取消后即使下载恰好完成也不自动安装）
+let updAborted = false
 
 function getSkippedVersion() {
   try {
@@ -202,9 +206,15 @@ async function startDirectUpdate(info) {
   updState.value = 'download'
   updErr.value = ''
   updOpen.value = true
+  updAborted = false
   const res = await downloadUpdate(info, (p) => {
     updPct.value = p
   })
+  // 用户已取消并关闭对话框：不再改动界面（若下载恰好已完成也不自动安装）
+  if (updAborted) {
+    if (res.ok) ElMessage.info(t('updCanceledButReady'))
+    return
+  }
   if (!res.ok) {
     if (String(res.error || '').includes('取消')) {
       // 用户停止下载：保留断点，关闭对话框
@@ -230,11 +240,18 @@ async function startDirectUpdate(info) {
 async function cancelFlow() {
   if (updCanceling.value) return
   updCanceling.value = true
-  await cancelUpdate()
-  // downloadUpdate 将以「下载已取消」返回，由其关闭对话框；这里只做防双击
+  updAborted = true
+  // 立即关闭对话框：不依赖后端返回（后端取消若延迟/失败，界面也不会卡死）
+  updOpen.value = false
+  ElMessage.info(t('updCanceled'))
+  try {
+    await cancelUpdate()
+  } catch {
+    /* 忽略：后端取消失败也不影响界面退出（已下载部分会保留） */
+  }
   setTimeout(() => {
     updCanceling.value = false
-  }, 1000)
+  }, 1500)
 }
 
 function closeUpdDialog() {
