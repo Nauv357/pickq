@@ -171,11 +171,53 @@
             <span v-if="pubFile" class="file-name ellipsis">{{ t('pubFileChosen', { name: pubFile.name, size: formatBytes(pubFile.size) }) }}</span>
             <span v-else class="text-muted file-hint">{{ t('pubFileHint') }}</span>
           </div>
+
+          <!-- 选中文件后立刻本地体检（后端只解析元数据、不转发）：不合格就不必跨境传 200MB -->
+          <p v-if="pubInspecting" class="inspect-line text-muted">
+            <span class="inspect-spinner" />
+            {{ t('inspecting') }}
+          </p>
+          <template v-else-if="pubInspectError">
+            <p class="inspect-fail">{{ t('inspectFail') }}</p>
+            <p class="inspect-fail inspect-detail">{{ pubInspectError }}</p>
+            <p class="field-tip text-muted">{{ t('inspectFailTip') }}</p>
+          </template>
+          <div v-else-if="pubInspect" class="inspect-box">
+            <p class="inspect-head">
+              <TikuIcon name="check" :size="14" />
+              {{ t('inspectResultTitle') }}
+            </p>
+            <p class="inspect-row">
+              <span class="inspect-label">{{ t('inspectTitleLabel') }}</span>
+              <span class="inspect-value" :title="pubInspect.title">{{ pubInspect.title }}</span>
+            </p>
+            <p class="inspect-row">
+              <span class="inspect-label">{{ t('inspectQuestionsLabel') }}</span>
+              <span class="inspect-value">
+                {{ t('questionsCount', { n: pubInspect.questionsCount ?? 0 }) }}
+                <template v-if="Number(pubInspect.materialsCount || 0) > 0"> · {{ t('materialsCount', { n: pubInspect.materialsCount }) }}</template>
+              </span>
+            </p>
+            <p class="inspect-row">
+              <span class="inspect-label">{{ t('inspectVersionLabel') }}</span>
+              <span class="inspect-value mono">{{ pubInspect.version }}</span>
+            </p>
+            <p class="inspect-row">
+              <span class="inspect-label">{{ t('inspectKeyLabel') }}</span>
+              <span class="inspect-value mono" :title="pubInspect.packageKey">{{ pubInspect.packageKey }}</span>
+            </p>
+          </div>
         </el-form-item>
 
         <el-form-item>
           <template #label>{{ t('pubTitleLabel') }}</template>
-          <el-input v-model="pubForm.title" maxlength="200" :disabled="pubBusy" :placeholder="t('pubTitlePh')" />
+          <el-input
+            v-model="pubForm.title"
+            maxlength="200"
+            :disabled="pubBusy"
+            :placeholder="t('pubTitlePh')"
+            @input="onPubTitleInput"
+          />
           <p class="field-tip text-muted">{{ t('pubTitleHint') }}</p>
         </el-form-item>
 
@@ -238,7 +280,13 @@
       <template #footer>
         <button class="btn btn-ghost" :disabled="pubBusy" @click="publishVisible = false">{{ t('cancel') }}</button>
         <button v-if="pubBusy" class="btn btn-danger" @click="cancelPublish">{{ t('cancelUpload') }}</button>
-        <button v-else class="btn btn-primary" @click="doPublish">{{ t('doPublish') }}</button>
+        <button
+          v-else
+          class="btn btn-primary"
+          :disabled="!pubReady"
+          :title="pubReady ? '' : t('pubBlockedTip')"
+          @click="doPublish"
+        >{{ t('doPublish') }}</button>
       </template>
     </el-dialog>
 
@@ -424,11 +472,25 @@ const { t } = useI18n({
       pubFileLabel: '题库文件',
       pubChooseFile: '选择题库文件',
       pubChooseAgain: '重新选择文件',
-      pubFileHint: '支持 .tiku 与 .json，单个文件不超过 200MB',
+      pubFileHint: '支持 .tiku 与 .json 两种题库文件，单个文件不超过 200MB',
       pubFileChosen: '已选择：{name}（{size}）',
+      /* 选中文件后本地体检（后端只解析元数据，不合格就不用跨境上传） */
+      inspecting: '正在检查题库文件…',
+      inspectResultTitle: '已识别',
+      inspectFail: '题库文件检查未通过',
+      inspectFailTip: '该文件无法发布，请重新选择题库文件（支持 .tiku 与 .json 两种格式）',
+      inspectTitleLabel: '标题',
+      inspectQuestionsLabel: '题目',
+      inspectVersionLabel: '版本',
+      inspectKeyLabel: '标识',
+      questionsCount: '{n} 题',
+      materialsCount: '{n} 份材料',
       pubTitleLabel: '标题（选填）',
       pubTitlePh: '默认使用题库文件内的标题',
-      pubTitleHint: '留空则使用题库文件内的标题',
+      pubTitleHint: '标题来自题库文件，可在此修改；留空则沿用文件内的标题',
+      pubBlockedTip: '请选择题库文件并等待检查通过后再发布',
+      msgNeedInspect: '题库文件尚未通过本地检查，请重新选择文件',
+      msgInspecting: '正在检查题库文件，请稍候',
       pubDescLabel: '描述（选填）',
       pubDescPh: '介绍一下这份题库，方便别人了解',
       pubSourceLabel: '来源声明（选填）',
@@ -526,11 +588,24 @@ const { t } = useI18n({
       pubFileLabel: 'Bank file',
       pubChooseFile: 'Choose a bank file',
       pubChooseAgain: 'Choose another file',
-      pubFileHint: '.tiku and .json are supported, up to 200MB',
+      pubFileHint: 'Both .tiku and .json bank files are supported, up to 200MB',
       pubFileChosen: 'Selected: {name} ({size})',
+      inspecting: 'Checking the bank file…',
+      inspectResultTitle: 'Detected',
+      inspectFail: 'The bank file did not pass the check',
+      inspectFailTip: 'This file cannot be published — choose another bank file (both .tiku and .json are supported)',
+      inspectTitleLabel: 'Title',
+      inspectQuestionsLabel: 'Questions',
+      inspectVersionLabel: 'Version',
+      inspectKeyLabel: 'ID',
+      questionsCount: '{n} questions',
+      materialsCount: '{n} materials',
       pubTitleLabel: 'Title (optional)',
       pubTitlePh: 'Uses the title inside the bank file by default',
-      pubTitleHint: 'Leave empty to use the title inside the bank file',
+      pubTitleHint: 'The title comes from the bank file and can be changed here; leave empty to keep the one inside the file',
+      pubBlockedTip: 'Choose a bank file and wait for the check to pass before publishing',
+      msgNeedInspect: 'The bank file has not passed the local check yet — choose the file again',
+      msgInspecting: 'Checking the bank file, please wait',
       pubDescLabel: 'Description (optional)',
       pubDescPh: 'Describe this bank so others can understand it',
       pubSourceLabel: 'Source note (optional)',
@@ -586,6 +661,8 @@ const { t } = useI18n({
 
 /* 上传类请求不能沿用 http 实例的 15s 超时（大文件可能上百 MB），单独放宽到 30 分钟 */
 const UPLOAD_TIMEOUT_MS = 30 * 60 * 1000
+/* 体检请求（本地后端只解析元数据）：定 2 分钟超时，避免请求悬挂 */
+const INSPECT_TIMEOUT_MS = 2 * 60 * 1000
 
 /* ---------- 登录态 ---------- */
 const currentUser = ref(null)
@@ -727,6 +804,27 @@ let pubController = null
 // 离开页面时中断上传：不再弹"已取消上传"（用户已看不到本页）
 let leaving = false
 
+/* ---------- 发布前本地体检（POST /center/publish/inspect：后端只解析元数据、不转发） ---------- */
+const pubInspecting = ref(false)
+/** 体检结果：{ packageKey, version, title, description, source, schemaVersion, questionsCount, materialsCount } */
+const pubInspect = ref(null)
+const pubInspectError = ref('')
+let pubInspectController = null
+// 用户手工改过标题后，不再用题库文件内的标题覆盖
+let pubTitleTouched = false
+
+/** 体检通过才允许提交：未选文件 / 正在检查 / 检查未通过都禁用「发布」 */
+const pubReady = computed(() => !!pubFile.value && !!pubInspect.value && !pubInspecting.value)
+
+/** 中断未完成的体检并清空其结果（换文件、文件不合法、关闭弹窗时复用） */
+function clearPubInspect() {
+  pubInspectController?.abort()
+  pubInspectController = null
+  pubInspecting.value = false
+  pubInspect.value = null
+  pubInspectError.value = ''
+}
+
 const pubIndeterminate = computed(() => pubBusy.value && pubTotal.value <= 0)
 
 function openPublish() {
@@ -749,6 +847,8 @@ function resetPubForm() {
   pubPct.value = 0
   pubTotal.value = 0
   pubServerBusy.value = false
+  clearPubInspect()
+  pubTitleTouched = false
   if (pubInput.value) pubInput.value.value = ''
 }
 
@@ -762,16 +862,21 @@ function beforePublishClose(done) {
   done()
 }
 
+/** 用户手工编辑过标题（程序化赋值不触发 input 事件，故不会误标为已修改） */
+function onPubTitleInput() {
+  pubTitleTouched = true
+}
+
 function onPickPublishFile(e) {
   const f = e?.target?.files?.[0] || null
   // 同一文件重选也要触发 change
   if (e?.target) e.target.value = ''
   if (!f) return
-  if (!/\.(tiku|json)$/i.test(f.name)) {
-    pubError.value = t('msgBadFileType')
-    return
-  }
+  // 不按扩展名拦截：.tiku（v2 zip 容器）与 .json（v1 纯 JSON）由后端按魔数/内容判定，
+  // 用户选错扩展名（如把 .tiku 存成 .json）也要能正确识别；格式不对由体检返回可读 message
   if (f.size > 200 * 1024 * 1024) {
+    pubFile.value = null
+    clearPubInspect()
     pubError.value = t('msgFileTooBig')
     return
   }
@@ -779,12 +884,62 @@ function onPickPublishFile(e) {
   pubFile.value = f
   pubPct.value = 0
   pubServerBusy.value = false
+  // 选中文件立刻本地体检：不合格就不必跨境上传 200MB
+  inspectPublishFile(f)
+}
+
+/**
+ * 本地体检：把文件交给本地后端只解析元数据（不导入、不转发给公网）。
+ * 成功：弹窗内回显标题/题数/版本/标识，并把标题输入框填成文件内标题（用户改过则不覆盖）；
+ * 失败：弹窗内红字显示后端 message，提交按钮保持禁用，用户可重新选文件。
+ */
+async function inspectPublishFile(f) {
+  const controller = new AbortController()
+  clearPubInspect() // 连续换文件时只保留最新一次检查结果
+  pubInspectController = controller
+  pubInspecting.value = true
+  const fd = new FormData()
+  fd.append('file', f)
+  try {
+    const r = await http.post('/center/publish/inspect', fd, {
+      skipErrorMessage: true, // 由弹窗自行展示，避免全局弹窗重复提示
+      timeout: INSPECT_TIMEOUT_MS,
+      signal: controller.signal
+    })
+    // 期间用户又换了文件/清空了选择：本次结果作废
+    if (pubInspectController !== controller || pubFile.value !== f) return
+    pubInspect.value = r || null
+    const fileTitle = typeof r?.title === 'string' ? r.title.trim() : ''
+    if (fileTitle && !pubTitleTouched) pubForm.title = fileTitle
+  } catch (e) {
+    if (pubInspectController !== controller || pubFile.value !== f) return
+    if (isCanceled(e)) return
+    if (syncLoginState(e)) {
+      publishVisible.value = false
+      return
+    }
+    pubInspectError.value = errText(e, t('inspectFailTip'))
+  } finally {
+    if (pubInspectController === controller) {
+      pubInspecting.value = false
+      pubInspectController = null
+    }
+  }
 }
 
 async function doPublish() {
   if (pubBusy.value) return
   if (!pubFile.value) {
     pubError.value = t('msgNeedFile')
+    return
+  }
+  if (pubInspecting.value) {
+    pubError.value = t('msgInspecting')
+    return
+  }
+  // 必须已通过本地体检；提交时不再重复体检，直接走原有发布路径
+  if (!pubInspect.value) {
+    pubError.value = t('msgNeedInspect')
     return
   }
   const kind = pubForm.storageKind
@@ -813,7 +968,9 @@ async function doPublish() {
   if (description) fd.append('description', description)
   if (source) fd.append('source', source)
 
-  const publishedTitle = title || pubFile.value.name.replace(/\.(tiku|json)$/i, '')
+  // 成功提示里的作品名：用户填的标题 → 题库文件内标题 → 文件名兜底
+  const publishedTitle = title || (pubInspect.value?.title || '').trim()
+    || pubFile.value.name.replace(/\.(tiku|json)$/i, '')
   pubError.value = ''
   pubBusy.value = true
   pubPct.value = 0
@@ -1093,9 +1250,10 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  // 离开页面时中断未完成的上传，避免悬挂请求
+  // 离开页面时中断未完成的上传/体检，避免悬挂请求
   leaving = true
   pubController?.abort()
+  pubInspectController?.abort()
   fileController?.abort()
 })
 </script>
@@ -1353,6 +1511,71 @@ onBeforeUnmount(() => {
 }
 .file-hint {
   font-size: 12px;
+}
+/* 发布前本地体检：检查中 / 未通过 / 结果预览 */
+.inspect-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  font-size: 12.5px;
+}
+.inspect-spinner {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent-text);
+  border-radius: 50%;
+  animation: inspect-spin 0.8s linear infinite;
+}
+@keyframes inspect-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.inspect-fail {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--danger);
+}
+.inspect-detail {
+  margin-top: 3px;
+  font-weight: 400;
+}
+.inspect-box {
+  margin-top: 8px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card-2);
+  font-size: 12.5px;
+}
+.inspect-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 0 4px;
+  color: var(--success);
+}
+.inspect-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 3px 0 0;
+}
+.inspect-label {
+  width: 62px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.inspect-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
 }
 .progress-box {
   margin-top: 14px;

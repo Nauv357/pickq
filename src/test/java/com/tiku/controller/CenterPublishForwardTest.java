@@ -3,6 +3,7 @@ package com.tiku.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import com.tiku.service.CenterAuthStore;
+import com.tiku.util.PackageContainer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -16,6 +17,8 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -137,8 +140,14 @@ class CenterPublishForwardTest {
 
     @Test
     void publishLargeFileSpoolsToTempFileAndKeepsBytes() throws Exception {
-        byte[] big = new byte[5 * 1024 * 1024 + 12345];
-        new Random(7).nextBytes(big);
+        // 大文件必须是合法的 .tiku 容器：发布前会先做本地体检（元数据校验），随机字节会被本地拒绝
+        byte[] blob = new byte[5 * 1024 * 1024 + 12345];
+        new Random(7).nextBytes(blob);
+        Map<String, byte[]> media = new LinkedHashMap<>();
+        media.put("260829/big.bin", blob);
+        byte[] big = PackageContainer.pack(
+                "{\"schemaVersion\":2,\"packageKey\":\"k\",\"version\":\"1.0\",\"title\":\"t\",\"questions\":[{}]}"
+                        .getBytes(StandardCharsets.UTF_8), media);
         MockMultipartFile file = new MockMultipartFile("file", "bank_v2.tiku", null, big);
 
         new CenterPublishController(authStore)
@@ -191,7 +200,10 @@ class CenterPublishForwardTest {
 
     @Test
     void uploadFileUsesPutMultipart() throws Exception {
-        byte[] pkg = new byte[]{9, 8, 7, 6};
+        // 补传也走体检：夹具必须是合法内容包，且 packageKey/version 与登记（mykey / 1.0）一致
+        byte[] pkg = PackageContainer.pack(
+                "{\"schemaVersion\":2,\"packageKey\":\"mykey\",\"version\":\"1.0\",\"title\":\"t\",\"questions\":[{}]}"
+                        .getBytes(StandardCharsets.UTF_8), null);
         ResponseEntity<String> resp = new CenterPublishController(authStore).uploadPackFile(center, "mykey", "1.0",
                 new MockMultipartFile("file", "x.tiku", "application/zip", pkg));
         assertEquals(200, resp.getStatusCode().value());
@@ -200,5 +212,35 @@ class CenterPublishForwardTest {
         String boundary = boundaryOf(captured.contentType());
         assertArrayEquals(pkg, partBytes(captured.body(), boundary, "file"));
         assertNotNull(captured.body());
+    }
+
+    /** 补传：格式不合法 = 零公网请求（与 publish 同一套体检） */
+    @Test
+    void uploadFileRejectsInvalidPackageWithoutRemoteRequest() {
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> new CenterPublishController(authStore).uploadPackFile(center, "mykey", "1.0",
+                        new MockMultipartFile("file", "x.tiku", null, "not a package".getBytes(StandardCharsets.UTF_8))));
+        assertEquals("题库文件解析失败：不是有效的题库文件（既不是 .tiku 也不是 v1 JSON）", e.getMessage());
+        assertEquals(0, hits.get(), "补传校验不通过不得发出任何公网请求");
+    }
+
+    /** 补传：文件内 packageKey/version 与登记不一致 = 零公网请求（官网 file.put.ts 同样会拒绝） */
+    @Test
+    void uploadFileRejectsMismatchedIdentityWithoutRemoteRequest() throws Exception {
+        byte[] other = PackageContainer.pack(
+                "{\"schemaVersion\":2,\"packageKey\":\"otherkey\",\"version\":\"9.9\",\"title\":\"t\",\"questions\":[{}]}"
+                        .getBytes(StandardCharsets.UTF_8), null);
+        CenterPublishController controller = new CenterPublishController(authStore);
+        assertEquals("文件内 packageKey 与登记不一致（文件 otherkey，登记 mykey）",
+                assertThrows(IllegalArgumentException.class, () -> controller.uploadPackFile(center, "mykey", "1.0",
+                        new MockMultipartFile("file", "x.tiku", null, other))).getMessage());
+
+        byte[] sameKeyWrongVersion = PackageContainer.pack(
+                "{\"schemaVersion\":2,\"packageKey\":\"mykey\",\"version\":\"2.0\",\"title\":\"t\",\"questions\":[{}]}"
+                        .getBytes(StandardCharsets.UTF_8), null);
+        assertEquals("文件内 version 与登记不一致（文件 2.0，登记 1.0）",
+                assertThrows(IllegalArgumentException.class, () -> controller.uploadPackFile(center, "mykey", "1.0",
+                        new MockMultipartFile("file", "x.tiku", null, sameKeyWrongVersion))).getMessage());
+        assertEquals(0, hits.get());
     }
 }

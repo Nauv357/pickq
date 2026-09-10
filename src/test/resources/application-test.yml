@@ -1,0 +1,17 @@
+# 测试专用配置（TikuApplicationTests 上 @ActiveProfiles("test") 激活）。
+#
+# 目的：让测试与开发机上的真实数据解耦——
+# 桌面端正在运行时会独占 ~/.tiku/tiku.mv.db（H2 文件锁），
+# 若测试连同一个文件，`mvn test` 会以 "Database may be already in use" 失败，
+# 且测试也不该读写用户真实的题库/配置。这里把数据目录指到系统临时目录、数据库换成内存库，
+# 于是 `mvn test` 任何时候都可重复运行（Flyway 迁移照常在内存库上执行）。
+tiku:
+  data-dir: ${java.io.tmpdir}/tiku-test-data
+
+spring:
+  datasource:
+    # 内存 H2（MODE=MySQL 与生产一致）；DB_CLOSE_DELAY=-1 保证连接池回收连接后库不消失
+    url: jdbc:h2:mem:tiku-test;MODE=MySQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password: ""
+    driver-class-name: org.h2.Driver

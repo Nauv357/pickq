@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tiku.dto.ApiResponse;
 import com.tiku.service.CenterAuthStore;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.web.context.WebServerApplicationContext;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -49,16 +50,22 @@ public class CenterAuthController {
 
     private final CenterAuthStore authStore;
     private final ObjectMapper objectMapper;
-    private final WebServerApplicationContext webContext;
+    /**
+     * 本地 web 服务器上下文：**延迟获取**（ObjectProvider）。
+     * 生产运行（真实内嵌服务器）一定拿得到；@SpringBootTest 默认 MOCK 环境下没有该 bean，
+     * 若构造期强依赖会让整个应用上下文加载失败（测试无法启动）。这里改成只在 /github/start
+     * 真正需要端口时解析，拿不到时仍走原来的可读错误。
+     */
+    private final ObjectProvider<WebServerApplicationContext> webContextProvider;
     /** 桌面 GitHub 登录 state → 过期时间戳（毫秒）。校验后立即移除（单次使用）；启动时随机端口由 webContext 取 */
     private final Map<String, Long> desktopStates = new ConcurrentHashMap<>();
     private final SecureRandom secureRandom = new SecureRandom();
 
     public CenterAuthController(CenterAuthStore authStore, ObjectMapper objectMapper,
-            WebServerApplicationContext webContext) {
+            ObjectProvider<WebServerApplicationContext> webContextProvider) {
         this.authStore = authStore;
         this.objectMapper = objectMapper;
-        this.webContext = webContext;
+        this.webContextProvider = webContextProvider;
     }
 
     /** 校验中心地址：仅 http/https，禁止带用户信息（官方地址 https://pickq.cn） */
@@ -244,15 +251,22 @@ public class CenterAuthController {
 
     // ---------- GitHub 登录（RFC 8252：系统浏览器授权 + 本地回环回调） ----------
 
-    /** 本地服务端口：桌面版以 --server.port=0 随机端口启动，前端窗口地址即该端口 */
+    /**
+     * 本地服务端口：桌面版以 --server.port=0 随机端口启动，前端窗口地址即该端口。
+     * 延迟解析（见 {@link #webContextProvider}）：真实内嵌服务器一定存在；MOCK 环境/单元测试下
+     * 拿不到上下文时给出可读错误，而不是让应用上下文启动失败。
+     */
     private int localPort() {
-        try {
-            int port = webContext.getWebServer().getPort();
-            if (port > 0) {
-                return port;
+        WebServerApplicationContext webContext = webContextProvider.getIfAvailable();
+        if (webContext != null) {
+            try {
+                int port = webContext.getWebServer().getPort();
+                if (port > 0) {
+                    return port;
+                }
+            } catch (RuntimeException e) {
+                /* 落到下面的可读错误 */
             }
-        } catch (RuntimeException e) {
-            /* 落到下面的可读错误 */
         }
         throw new IllegalStateException("无法获取本地服务端口，请重启拾题后重试");
     }
