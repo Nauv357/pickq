@@ -16,7 +16,8 @@
             <h1 class="page-title">{{ bank?.name || t('loading') }}</h1>
             <span v-if="bank?.version" class="version-tag">v{{ bank.version }}</span>
           </div>
-          <p v-if="bank?.description" class="page-desc">{{ bankDescText(bank) }}</p>
+          <!-- 无描述时走 noDesc 回退（原先 v-if 只判断 description，回退分支永远不可达） -->
+          <p v-if="bank" class="page-desc">{{ bankDescText(bank) }}</p>
           <div class="page-meta text-muted">
             <span v-if="bank?.authorName">{{ t('authorBy', { v: bank.authorName }) }}</span>
             <span v-if="bank?.authorName" class="dot"></span>
@@ -790,7 +791,7 @@ const { t } = useI18n({
       authorBy: '作者：{v}', sourceFrom: '来源：{v}', createdOn: '创建于 {d}', questionsN: '共 {n} 题',
       history: '练习历史', edit: '编辑', exportBank: '导出题库文件', printPaper: '打印试卷', delete: '删除', startPractice: '开始做题',
       answeredOf: '已做 / 共 {n} 题', accuracyOf: '正确率（作答 {n} 次）', progressPct: '完成度',
-      noRecordsYet: '还没有做题记录', firstRoundHint: '刷第一轮',
+      noDesc: '暂无描述',
       noRecordHint: '还没有做题记录，点击「{act}」刷第一轮', favStartTip: '一键开刷全部收藏题（收藏模式）', noFavTip: '还没有收藏题',
       reviewPlan: '复习计划', dueTodayN: '今日待复习 {n} 题', reviewOffTip: '关闭时进度照记、错题照收，只是不提醒到期复习；重新开启后到期题会回到队列',
       wrongTab0: '错题', favTab0: '收藏',
@@ -850,13 +851,21 @@ const { t } = useI18n({
       msgDeleteQuestionConfirm: '确定删除第 {num} 题吗？此操作不可恢复。',
       msgDeleteQuestionTitle: '删除题目',
       msgQuestionDeleted: '题目已删除',
+      // 模型失效自愈（AI 解析 / AI 补答案命中「模型不存在·已下线」类错误时）
+      modelRecoverToast: '看起来是模型已下线或不存在，建议重新获取可用模型',
+      modelRecoverTitle: '模型可能已下线',
+      modelRecoverAsk: '当前模型可能已下线或不存在。是否现在前往设置页重新获取可用模型？',
+      modelRecoverConfirm: '获取可用模型',
+      modelRecoverCancel: '暂不',
+      modelSuggest: '建议改用 {model}（{note}）',
+      modelSuggestPlain: '建议改用 {model}',
     },
     'en-US': {
       notFoundDesc: 'This bank may have been deleted, or the link is wrong', backToBanks: 'Back to banks', loading: 'Loading…',
       authorBy: 'Author: {v}', sourceFrom: 'Source: {v}', createdOn: 'Created {d}', questionsN: '{n} questions',
       history: 'History', edit: 'Edit', exportBank: 'Export bank file', printPaper: 'Print paper', delete: 'Delete', startPractice: 'Start practice',
       answeredOf: '{n} answered / total', accuracyOf: 'Accuracy ({n} attempts)', progressPct: 'Progress',
-      noRecordsYet: 'No practice records yet', firstRoundHint: 'for your first round',
+      noDesc: 'No description',
       noRecordHint: 'No practice records yet — click “{act}” for your first round', favStartTip: 'Practice all favorites in one go (favorites mode)', noFavTip: 'No favorites yet',
       reviewPlan: 'Review plan', dueTodayN: '{n} due today', reviewOffTip: 'Progress and mistakes are still recorded while off — only due reminders stop; due questions return when re-enabled',
       wrongTab0: 'Mistakes', favTab0: 'Favorites',
@@ -916,6 +925,14 @@ const { t } = useI18n({
       msgDeleteQuestionConfirm: 'Delete question {num}? This cannot be undone.',
       msgDeleteQuestionTitle: 'Delete question',
       msgQuestionDeleted: 'Question deleted',
+      // Model self-heal (AI analysis / AI fill answers hitting a retired or missing model)
+      modelRecoverToast: 'Looks like this model is retired or no longer exists — fetch the available models',
+      modelRecoverTitle: 'Model may be retired',
+      modelRecoverAsk: 'The current model may be retired or no longer exist. Open Settings and fetch the available models now?',
+      modelRecoverConfirm: 'Fetch available models',
+      modelRecoverCancel: 'Not now',
+      modelSuggest: 'Suggested replacement: {model} ({note})',
+      modelSuggestPlain: 'Suggested replacement: {model}',
     }
   }
 })
@@ -927,6 +944,7 @@ import { getBankProgress, getReviewDue, getReviewSummary, getWrongQuestions, res
 import { createSession, getBankCategories } from '../api/sessions'
 import { formatDate, formatScore } from '../utils/format'
 import { richTextToHtml } from '../utils/richText'
+import { isModelError, offerModelRecovery } from '../utils/aiModelHelp'
 import { createMaterial, deleteMaterial, listMaterials, updateMaterial, uploadImage } from '../api/materials'
 import { pickFile, readTextFile, saveBlob, saveJsonFile } from '../utils/files'
 import TikuIcon from '../components/TikuIcon.vue'
@@ -1925,6 +1943,28 @@ const fillBusy = ref(false)
 const fillType = ref('') // '' = 全部客观题
 const fillWithAnalysis = ref(false)
 
+/**
+ * 模型失效自愈：错误信息命中「模型不存在/已下线」类时补一条操作指引，
+ * 并询问是否去设置页获取可用模型（普通失败不弹窗，不打断）。
+ */
+async function handleModelError(msg) {
+  if (!isModelError(msg)) return false
+  ElMessage.warning(t('modelRecoverToast'))
+  return offerModelRecovery(msg, {
+    router,
+    texts: {
+      ask: t('modelRecoverAsk'),
+      title: t('modelRecoverTitle'),
+      confirm: t('modelRecoverConfirm'),
+      cancel: t('modelRecoverCancel')
+    },
+    describe: (hit) =>
+      hit.note
+        ? t('modelSuggest', { model: hit.replacement, note: hit.note })
+        : t('modelSuggestPlain', { model: hit.replacement })
+  })
+}
+
 function openAiFill() {
   fillType.value = ''
   fillWithAnalysis.value = false
@@ -1959,6 +1999,8 @@ async function submitAiFill() {
     /* 网络/服务中断：拦截器已提示；后端可能已写入部分批次，刷新列表可见 */
     loadQuestions()
     loadQuestionNav()
+    // 模型失效（已下线/不存在）→ 提示 + 询问是否去设置页获取可用模型
+    handleModelError(e?.response?.data?.message || e?.message || '')
   } finally {
     fillBusy.value = false
   }

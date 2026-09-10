@@ -307,6 +307,9 @@ const { t } = useI18n({
       multiPick2: '多选题请至少选择 2 个正确答案', scorePositive: '分值必须大于 0',
       savedContinue: '第 {n} 题已保存，继续录入下一题', savedDone: '第 {n} 题已保存', updatedStay: '题目已更新，可继续编辑或切换题目',
       aiBusyNav: 'AI 解析生成中，稍候再切换题目', aiBusyJump: 'AI 解析生成中，稍候再跳转', aiBusyClose: 'AI 解析生成中，稍候再关闭',
+      modelRecoverToast: '看起来是模型已下线或不存在，建议重新获取可用模型', modelRecoverTitle: '模型可能已下线',
+      modelRecoverAsk: '当前模型可能已下线或不存在。是否现在前往设置页重新获取可用模型？', modelRecoverConfirm: '获取可用模型', modelRecoverCancel: '暂不',
+      modelSuggest: '建议改用 {model}（{note}）', modelSuggestPlain: '建议改用 {model}',
       closeAskMsg: '当前题目还有未保存的修改，先保存吗？选择「放弃修改」将丢失这些改动。', closePanelTitle: '关闭编辑面板',
       leaveAskMsg: '当前题目还有未保存的修改，离开前要保存吗？选择「放弃修改」将丢失这些改动。', leavePageTitle: '离开当前页面'
     },
@@ -319,17 +322,21 @@ const { t } = useI18n({
       multiPick2: 'For multiple choice, select at least 2 correct answers', scorePositive: 'The score must be greater than 0',
       savedContinue: 'Question #{n} saved — continue with the next one', savedDone: 'Question #{n} saved', updatedStay: 'Question updated — keep editing or switch questions',
       aiBusyNav: 'AI analysis is generating; wait a moment before switching questions', aiBusyJump: 'AI analysis is generating; wait a moment before jumping', aiBusyClose: 'AI analysis is generating; wait a moment before closing',
+      modelRecoverToast: 'Looks like this model is retired or no longer exists — fetch the available models', modelRecoverTitle: 'Model may be retired',
+      modelRecoverAsk: 'The current model may be retired or no longer exist. Open Settings and fetch the available models now?', modelRecoverConfirm: 'Fetch available models', modelRecoverCancel: 'Not now',
+      modelSuggest: 'Suggested replacement: {model} ({note})', modelSuggestPlain: 'Suggested replacement: {model}',
       closeAskMsg: 'This question has unsaved changes. Save first? Choosing “Discard changes” will lose them.', closePanelTitle: 'Close edit panel',
       leaveAskMsg: 'This question has unsaved changes. Save before leaving? Choosing “Discard changes” will lose them.', leavePageTitle: 'Leave this page'
     }
   }
 })
-import { onBeforeRouteLeave } from 'vue-router'
+import { onBeforeRouteLeave, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { createQuestion, updateQuestion, aiAnalysisDraft } from '../api/questions'
 import { listMaterials, uploadImage } from '../api/materials'
 import { imageMarker } from '../api/materials'
 import { richTextToHtml } from '../utils/richText'
+import { isModelError, offerModelRecovery } from '../utils/aiModelHelp'
 import TikuIcon from './TikuIcon.vue'
 
 const props = defineProps({
@@ -436,6 +443,30 @@ const materialLabel = (m) => {
 
 /* ---------- AI 解析（基于当前表单内容生成草稿，填入解析字段） ---------- */
 const aiGenerating = ref(false)
+const router = useRouter()
+
+/**
+ * 模型失效自愈：AI 解析失败且命中「模型不存在/已下线」时才提示并询问是否去设置页
+ * 获取可用模型（其它失败保持原有静默，仅由拦截器提示）。
+ */
+async function handleModelError(msg) {
+  if (!isModelError(msg)) return false
+  ElMessage.warning(t('modelRecoverToast'))
+  return offerModelRecovery(msg, {
+    router,
+    texts: {
+      ask: t('modelRecoverAsk'),
+      title: t('modelRecoverTitle'),
+      confirm: t('modelRecoverConfirm'),
+      cancel: t('modelRecoverCancel')
+    },
+    describe: (hit) =>
+      hit.note
+        ? t('modelSuggest', { model: hit.replacement, note: hit.note })
+        : t('modelSuggestPlain', { model: hit.replacement })
+  })
+}
+
 async function aiGenerateAnalysis() {
   if (aiGenerating.value) return
   if (!form.content || !form.content.trim()) {
@@ -473,6 +504,8 @@ async function aiGenerateAnalysis() {
     ElMessage.success(t('aiFilled'))
   } catch (e) {
     /* 拦截器已提示 */
+    // 模型失效 → 追一条带操作指引的提示（普通错误不打扰）
+    handleModelError(e?.response?.data?.message || e?.message || '')
   } finally {
     aiGenerating.value = false
   }

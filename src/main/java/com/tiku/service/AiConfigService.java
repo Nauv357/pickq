@@ -2,6 +2,7 @@ package com.tiku.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tiku.config.AiSettings;
+import com.tiku.util.NetAddress;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -45,9 +46,19 @@ public class AiConfigService {
         }
     }
 
+    /**
+     * 配置是否可用（能否发起 AI 调用）：baseUrl 与 model 必填，apiKey 仅在<b>公网地址</b>上必填。
+     * <p>
+     * 本机/局域网服务（Ollama / vLLM / LM Studio 等）不校验 Key，允许留空——否则本地用户被迫
+     * 填一个占位串才能用（判定口径见 {@link NetAddress}，与地址校验、"是否发鉴权头"共用一套）。
+     * AI 导入建任务、测试连接等入口都用本方法把关，故这里放开即整条链路放开。
+     */
     public boolean isConfigured() {
         AiSettings s = load();
-        return notBlank(s.getBaseUrl()) && notBlank(s.getApiKey()) && notBlank(s.getModel());
+        if (!notBlank(s.getBaseUrl()) || !notBlank(s.getModel())) {
+            return false;
+        }
+        return notBlank(s.getApiKey()) || NetAddress.isLocalOrPrivate(s.getBaseUrl());
     }
 
     /** 脱敏：sk-abc123def → sk-***def */
@@ -80,16 +91,28 @@ public class AiConfigService {
         return notBlank(load().getMineruKey());
     }
 
-    /** 仅允许 https（或 localhost，便于本地 Ollama 调试） */
+    /**
+     * 地址规则：https 一律允许；http 仅允许本机与局域网（私网）地址。
+     * <p>
+     * 放开私网 http 的原因：自建推理服务（Ollama / vLLM / LM Studio 等）通常没有证书，
+     * http 是常态，且"Ollama 跑在另一台机器"（如 http://192.168.1.50:11434/v1）是很实际的用法；
+     * 公网 http 仍然拒绝（明文传输 Key 与题目内容，风险不可接受）。
+     * 本机/私网判定与"是否需要 API Key"共用 {@link NetAddress}，避免两处口径不一致。
+     */
     public void validateBaseUrl(String baseUrl) {
         if (baseUrl == null || baseUrl.isBlank()) {
             throw new IllegalArgumentException("baseUrl 不能为空");
         }
-        boolean https = baseUrl.startsWith("https://");
-        boolean localhost = baseUrl.startsWith("http://localhost") || baseUrl.startsWith("http://127.0.0.1");
-        if (!https && !localhost) {
-            throw new IllegalArgumentException("baseUrl 必须使用 https（本地 Ollama 可用 http://localhost）");
+        if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
+            throw new IllegalArgumentException("baseUrl 必须使用 http(s) 链接");
         }
+        if (baseUrl.startsWith("https://")) {
+            return;
+        }
+        if (NetAddress.isLocalOrPrivate(baseUrl)) {
+            return;
+        }
+        throw new IllegalArgumentException("http 仅支持本机或局域网地址（如 192.168.x.x），公网请使用 https");
     }
 
     private boolean notBlank(String s) {

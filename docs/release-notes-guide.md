@@ -54,3 +54,20 @@
    - 走 API：`POST /repos/Nauv357/pickq/releases` 建 Release，再用 `uploads.github.com/.../releases/{id}/assets?name=...` 上传（`-x http://127.0.0.1:<代理端口>`）
    - 上传后确认两个资产出现在 Release 页面
 8. **git 提交推送**：代理端口按用户当前设置（如 `git -c http.proxy=http://127.0.0.1:10808 push`）；`web/`、`deploy/`、`scripts/deploy/` 不入库属预期。
+
+---
+
+# 服务器上的"远端配置目录"（`/opt/pickq/config/`）
+
+用于放**客户端运行时会拉取的远端配置**，与站点部署解耦——改文件立即生效，**不需要重新部署网站、更不需要发版**。
+
+- 对外地址：`https://pickq.cn/config/<file>`（nginx `location /config/` → `alias /opt/pickq/config/`，见 `scripts/deploy/pickq-nginx.conf`）
+- 当前内容：
+  - `ai-presets.json`：AI 模型预设目录（客户端 `GET /api/ai/presets` 拉取，后端内存缓存 1 小时）
+    - 结构：`{ updatedAt, note, presets[], deprecated[] }`
+    - `presets[]`：`name / label / desc / baseUrl / model / visionModel / keyUrl / verifiedAt / hint`
+      —— **模型名易变，只对长期稳定的写默认值**（如 `deepseek-chat`、`glm-4.6`、`mistral-large-latest`），其余留空字符串，客户端引导用户点「获取可用模型」按自己的 Key 拉取真实列表；
+    - `deprecated[]`：`{ model, replacement, note }`，用于客户端在"模型不存在"报错时给出替代建议。
+- 源文件版本记录在仓库 `scripts/deploy/ai-presets.json`（该目录不入 git，属本地部署资产）。
+- 更新方式：改本地文件 → `scp -i ~/.ssh/id_ed25519_pickq` 上传到 `/opt/pickq/config/`（或直接改服务器上的文件）→ 客户端下次拉取（最长 1 小时缓存，用户也可在设置页点「刷新预设」立刻生效）。
+- ⚠️ nginx `reload` 是平滑异步的：改完 nginx 配置后**等 1-2 秒**再验证，否则可能命中的仍是旧配置而误判为失败。

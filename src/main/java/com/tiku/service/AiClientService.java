@@ -21,7 +21,7 @@ import java.util.List;
  * OpenAI 兼容大模型客户端（DeepSeek / 通义 / Kimi / OpenAI / 本地 Ollama）。
  * - 文本对话与多模态（图片 base64 data URL）
  * - response_format json_object（模型不支持时降级为 prompt 约束）
- * - Key 仅放 Authorization 头，日志不打印
+ * - Key 仅放 Authorization 头（Key 为空则完全不发该头，供本机/局域网 Ollama 无 Key 使用），日志不打印
  * - thinking=false（默认）时请求带 {"thinking":{"type":"disabled"}} 关闭推理思考（速度约快一倍；
  *   实测 deepseek-v4-flash-vision-exp 默认思考会占用大量输出 token 与耗时）；端点不支持时自动降级重试
  */
@@ -154,12 +154,24 @@ public class AiClientService {
         return body;
     }
 
+    /**
+     * 发送对话请求。
+     * 鉴权头按需附加：apiKey 非空 → {@code Authorization: Bearer <key>}（行为不变）；
+     * apiKey 为空 → <b>不带鉴权头</b>（本机/局域网 Ollama 等不校验 Key，无需任何占位值；
+     * 过去会发出 {@code Bearer null} / {@code Bearer } 这类空头，部分网关会直接拒绝）。
+     * 注：Anthropic 的 x-api-key 协议只用于"列出模型"（{@link AiModelCatalogService}），
+     * 本类的对话请求走 OpenAI 兼容协议，不涉及该分支（Key 为空时同样不带任何鉴权头）。
+     */
     private HttpResponse<String> send(AiSettings settings, ObjectNode body) throws Exception {
-        HttpRequest request = HttpRequest.newBuilder()
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create(settings.getBaseUrl().replaceAll("/+$", "") + "/chat/completions"))
                 .timeout(Duration.ofMinutes(5))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + settings.getApiKey())
+                .header("Content-Type", "application/json");
+        String apiKey = settings.getApiKey();
+        if (apiKey != null && !apiKey.isBlank()) {
+            builder.header("Authorization", "Bearer " + apiKey);
+        }
+        HttpRequest request = builder
                 .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body), StandardCharsets.UTF_8))
                 .build();
         return httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));

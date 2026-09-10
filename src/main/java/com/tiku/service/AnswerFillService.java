@@ -67,8 +67,9 @@ public class AnswerFillService {
             throw new NoSuchElementException("题库不存在：" + bankId);
         }
         AiSettings settings = aiConfigService.load();
-        if (settings.getApiKey() == null || settings.getApiKey().isBlank()) {
-            throw new IllegalArgumentException("未配置 AI 模型 Key，请先到「设置-AI 模型配置」填写");
+        // 是否可用由 AiConfigService 统一判定：本机/局域网端点（Ollama 等）无 Key 也算已配置
+        if (!aiConfigService.isConfigured()) {
+            throw new IllegalArgumentException("未配置 AI 模型，请先到「设置-AI 模型配置」填写");
         }
         //目标：本库无答案的客观题（可按题型过滤）
         LambdaQueryWrapper<Question> wrapper = new LambdaQueryWrapper<Question>()

@@ -5,6 +5,7 @@ import com.tiku.dto.*;
 import com.tiku.service.AiClientService;
 import com.tiku.service.AiConfigService;
 import com.tiku.service.AiImportService;
+import com.tiku.util.NetAddress;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -130,7 +131,7 @@ public class AiImportController {
                 aiConfigService.maskKey(s.getMineruKey())));
     }
 
-    //保存 AI 配置（apiKey 为空 = 保留旧 Key）
+    //保存 AI 配置（apiKey 为空 = 保留旧 Key；本机/局域网地址允许 Key 留空）
     @PostMapping("/ai/settings")
     public ApiResponse<Void> saveSettings(@RequestBody AiSettingsRequest request) {
         if (request.baseUrl() != null) {
@@ -139,14 +140,18 @@ public class AiImportController {
         AiSettings merged = aiConfigService.merge(aiConfigService.load(),
                 request.baseUrl(), request.apiKey(), request.model(), request.visionModel(), request.thinking(),
                 request.mineruKey());
-        if (!aiConfigService.isConfigured() && merged.getApiKey() == null) {
+        //Key 必填性针对"合并后的最终 baseUrl"判定：用户可能只改地址不改 Key（或反之），也可能本次没传 Key
+        //而沿用旧地址与旧 Key。本机/局域网服务（Ollama 等）不校验 Key → 允许留空（彻底免占位串）；
+        //公网地址仍必须填（否则请求必然 401），错误文案保持原样
+        String mergedKey = merged.getApiKey();
+        if ((mergedKey == null || mergedKey.isBlank()) && !NetAddress.isLocalOrPrivate(merged.getBaseUrl())) {
             throw new IllegalArgumentException("请填写 apiKey");
         }
         aiConfigService.save(merged);
         return ApiResponse.success(null);
     }
 
-    //测试连接（最小请求验证配置）
+    //测试连接（最小请求验证配置；本机/局域网地址无 Key 也可测，isConfigured 已按地址放行）
     @PostMapping("/ai/settings/test")
     public ApiResponse<AiClientService.TestResult> testConnection() {
         AiSettings s = aiConfigService.load();

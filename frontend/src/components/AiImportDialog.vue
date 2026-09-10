@@ -10,6 +10,7 @@
     <div v-if="!configOk && !configLoading" class="no-config">
       <TikuIcon name="info" :size="34" />
       <p class="text-secondary">{{ t('noModelTip') }}</p>
+      <p class="text-muted no-config-local">{{ t('noModelLocalTip') }}</p>
       <button class="btn btn-primary btn-sm" @click="goSettings">{{ t('goSettings') }}</button>
     </div>
 
@@ -175,6 +176,7 @@ const { t } = useI18n({
     'zh-CN': {
       titleImport: 'AI 导入', titleAppend: 'AI 追加题目',
       noModelTip: '还没有配置 AI 模型，AI 导入需要模型 Key（BYOK）', goSettings: '去设置页配置',
+      noModelLocalTip: '本机/局域网服务（Ollama 等）无需 API Key：在设置页填好 Base URL 与模型名即可',
       pickDocs: '选择文档（可多选）', filesChosen: '{n} 个文件已选择', pickHint: '点击选择文件（txt / md / docx / pdf / 图片）',
       multiFileTip: '题目和答案分文件时一起选上，后端自动拼接', repick: '重新选择', remove: '移除',
       target: '导入目标',
@@ -191,11 +193,20 @@ const { t } = useI18n({
       backgroundTip: '可关闭本窗口继续做其他事，任务在后台进行，完成后侧边栏与系统通知都会提醒你',
       cancel: '取消', submitting: '提交中…', startParse: '开始解析', close: '关闭', closeBg: '关闭（后台继续）',
       mineruKeyNeeded: '未配置 MinerU 解析 Key，请先到「设置-AI 配置」填写',
-      parseDone: '解析完成，共 {n} 题，进入预览'
+      parseDone: '解析完成，共 {n} 题，进入预览',
+      // 模型失效自愈（仅在命中「模型不存在/已下线」类错误时出现）
+      modelRecoverToast: '看起来是模型已下线或不存在，建议重新获取可用模型',
+      modelRecoverTitle: '模型可能已下线',
+      modelRecoverAsk: '当前模型可能已下线或不存在。是否现在前往设置页重新获取可用模型？',
+      modelRecoverConfirm: '获取可用模型',
+      modelRecoverCancel: '暂不',
+      modelSuggest: '建议改用 {model}（{note}）',
+      modelSuggestPlain: '建议改用 {model}'
     },
     'en-US': {
       titleImport: 'AI Import', titleAppend: 'AI Append',
       noModelTip: 'No AI model configured — AI Import needs your own model key', goSettings: 'Set up in Settings',
+      noModelLocalTip: 'Local/LAN services (Ollama etc.) need no API key: just set the Base URL and model in Settings',
       pickDocs: 'Choose documents (multiple allowed)', filesChosen: '{n} files selected', pickHint: 'Click to choose files (txt / md / docx / pdf / images)',
       multiFileTip: 'If questions and answers are in separate files, select them together — they will be combined automatically',
       repick: 'Re-choose', remove: 'Remove',
@@ -213,7 +224,15 @@ const { t } = useI18n({
       backgroundTip: 'You can close this window — the task keeps running in the background; the sidebar and system notification will remind you when done',
       cancel: 'Cancel', submitting: 'Submitting…', startParse: 'Start parsing', close: 'Close', closeBg: 'Close (keep running)',
       mineruKeyNeeded: 'MinerU parse key not configured — add it first in Settings → AI Setup',
-      parseDone: 'Parsing done — {n} questions, opening the preview'
+      parseDone: 'Parsing done — {n} questions, opening the preview',
+      // Model self-heal (only when the error looks like a retired / missing model)
+      modelRecoverToast: 'Looks like this model is retired or no longer exists — fetch the available models',
+      modelRecoverTitle: 'Model may be retired',
+      modelRecoverAsk: 'The current model may be retired or no longer exist. Open Settings and fetch the available models now?',
+      modelRecoverConfirm: 'Fetch available models',
+      modelRecoverCancel: 'Not now',
+      modelSuggest: 'Suggested replacement: {model} ({note})',
+      modelSuggestPlain: 'Suggested replacement: {model}'
     }
   }
 })
@@ -221,6 +240,8 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { createAiImportJob, getAiImportJob, getAiSettings, subscribeAiJobStream } from '../api/aiImport'
 import { getBanks } from '../api/banks'
+import { isModelError, offerModelRecovery } from '../utils/aiModelHelp'
+import { isLocalOrPrivate } from '../utils/netAddress'
 import TikuIcon from './TikuIcon.vue'
 
 const props = defineProps({
@@ -297,6 +318,8 @@ const fileCount = ref(0)
 const currentFileIndex = ref(null)
 let eventSource = null
 let timer = null
+// 模型失效自愈只提示一次（避免失败任务重复弹窗打断）
+let modelRecoveryAsked = false
 
 const STAGE_TEXT = {
   PARSING: '解析文档中…',
@@ -318,7 +341,9 @@ async function checkConfig() {
   configLoading.value = true
   try {
     const s = await getAiSettings()
-    configOk.value = !!s.hasKey
+    // 可用性判断：有 Key 即可用；本机/局域网服务（Ollama 等）后端不校验 Key，配好 Base URL 即为可用
+    // （与后端 isConfigured() 口径一致，见 frontend/src/utils/netAddress.js）
+    configOk.value = !!s.hasKey || isLocalOrPrivate(s.baseUrl)
     hasMineruKey.value = !!s.hasMineruKey
   } catch (e) {
     configOk.value = false
@@ -341,8 +366,32 @@ function open() {
   progress.value = 0
   stageText.value = ''
   errorMsg.value = ''
+  modelRecoveryAsked = false
   checkConfig()
   if (!lockedBankId.value && !banks.value.length) loadBanks()
+}
+
+/**
+ * 模型失效自愈：失败信息命中「模型不存在/已下线」类错误时，补一条带操作指引的提示，
+ * 并询问是否现在去设置页获取可用模型（普通失败不打扰）。同一任务只问一次。
+ */
+async function handleModelError(msg) {
+  if (modelRecoveryAsked || !isModelError(msg)) return false
+  modelRecoveryAsked = true
+  ElMessage.warning(t('modelRecoverToast'))
+  return offerModelRecovery(msg, {
+    router,
+    texts: {
+      ask: t('modelRecoverAsk'),
+      title: t('modelRecoverTitle'),
+      confirm: t('modelRecoverConfirm'),
+      cancel: t('modelRecoverCancel')
+    },
+    describe: (hit) =>
+      hit.note
+        ? t('modelSuggest', { model: hit.replacement, note: hit.note })
+        : t('modelSuggestPlain', { model: hit.replacement })
+  })
 }
 
 async function loadBanks() {
@@ -396,6 +445,8 @@ async function submit() {
   } catch (e) {
     submitting.value = false
     /* 400（未配置模型等）由拦截器提示 */
+    // 模型名失效同样给自愈入口（例如刚下线的模型）
+    handleModelError(e?.response?.data?.message || e?.message || '')
   }
 }
 
@@ -443,6 +494,8 @@ function handleSnapshot(jobId, job) {
     stageText.value = '处理失败'
     errorMsg.value = job.error || '未知错误'
     cleanup()
+    // 命中模型失效 → 提示 + 询问是否去设置页获取可用模型（其余失败保持静默）
+    handleModelError(errorMsg.value)
     return
   }
   stageText.value = buildStageText(job)
@@ -511,6 +564,11 @@ defineExpose({ open })
 }
 .no-config .btn {
   margin-top: 8px;
+}
+.no-config-local {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .ai-form {
