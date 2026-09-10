@@ -49,14 +49,16 @@
           </p>
         </div>
         <div class="header-actions">
-          <!-- 全局编辑态开关：默认全部渲染态（所见即所得），需要时才整页展开表单 -->
-          <button class="btn btn-secondary btn-sm" :disabled="questions.length === 0" :title="t('expandAllEditTip')" @click="expandAllEdit">
-            <TikuIcon name="list" :size="14" />
-            {{ t('expandAllEdit') }}
-          </button>
-          <button class="btn btn-secondary btn-sm" :disabled="editOpen.size === 0" :title="t('collapseAllTip')" @click="collapseAllEdit">
-            <TikuIcon name="chevron-up" :size="14" />
-            {{ t('collapseAll') }}
+          <!-- 全局编辑态开关（合并为一个切换按钮）：全部已展开 → 「全部收起」；有任意一题未展开 → 「全部展开编辑」
+               题目列表为空时不显示（空列表时整页走上面的空结果分支，这里只是防御性判断） -->
+          <button
+            v-if="questions.length > 0"
+            class="btn btn-secondary btn-sm"
+            :title="allEditing ? t('collapseAllTip') : t('expandAllEditTip')"
+            @click="toggleAllEdit"
+          >
+            <TikuIcon :name="allEditing ? 'chevron-up' : 'list'" :size="14" />
+            {{ allEditing ? t('collapseAll') : t('expandAllEdit') }}
           </button>
           <button class="btn btn-danger" :disabled="canceling" @click="cancel">
             <TikuIcon name="trash" :size="14" />
@@ -671,13 +673,23 @@ function closeEdit(q) {
   s.delete(toRaw(q))
   editOpen.value = s
 }
-/* 全部展开编辑 / 全部收起（页头全局开关） */
+/* 全部展开编辑 / 全部收起（页头合并后的单按钮切换开关） */
 function expandAllEdit() {
   editOpen.value = new Set(questions.value.map((q) => toRaw(q)))
 }
 function collapseAllEdit() {
   editOpen.value = new Set()
   analysisExpanded.value = new Set() // 一并收起已展开的长解析，彻底回到渲染态
+}
+/* 是否"所有题目都处于编辑态"：用于切换按钮的图标 / 文案 / 点击方向
+   （有任意一题未展开 → 显示「全部展开编辑」） */
+const allEditing = computed(
+  () => questions.value.length > 0 && questions.value.every((q) => isEditing(q))
+)
+/* 页头切换按钮：非"全部展开"状态 → 全部展开；已"全部展开" → 全部收起 */
+function toggleAllEdit() {
+  if (allEditing.value) collapseAllEdit()
+  else expandAllEdit()
 }
 
 /* 长文本折叠阈值：超过 ~6 行或 ~400 字才折叠（短解析默认完整展示） */

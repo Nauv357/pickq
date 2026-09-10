@@ -391,9 +391,11 @@ const form = reactive(defaultForm())
 const submitting = ref(false)
 const materials = ref([])
 
-/* ---------- 编辑模式回填 ---------- */
-if (props.mode === 'edit' && props.initial) {
-  const d = props.initial
+/* ---------- 编辑模式回填（fillFormFromInitial） ---------- */
+const isEdit = computed(() => props.mode === 'edit')
+// 是否已经用题目详情回填过表单：用于「详情异步返回」时延迟记基线（见下方 watch）
+let initialFilled = false
+function fillFormFromInitial(d) {
   form.volume = d.volume ?? 1
   form.questionType = d.questionType || 'SINGLE'
   form.questionNumber = d.questionNumber ?? props.nextNumber
@@ -408,24 +410,96 @@ if (props.mode === 'edit' && props.initial) {
   form.analysis = d.analysis || ''
   form.materialId = d.materialId ?? null
   form.referenceAnswer = d.referenceAnswer || ''
+  initialFilled = true
+}
+if (props.mode === 'edit' && props.initial) fillFormFromInitial(props.initial)
+
+/* ---------- 未保存修改检测（保存 / 切换 / 关闭 / 路由离开前判定） ----------
+ * 为什么必须先"归一化"再比较（否则"未修改也会弹保存确认"）：
+ * 1) 同一份数据有多种等价写法：接口可能给 null / 缺字段，而表单控件会把它显示成 ''；
+ *    数字字段可能是数字也可能是字符串（'5' 与 5）。直接 JSON.stringify(form) 会把这种等价表示
+ *    误判成用户改动 → 一进面板就变"脏"。
+ * 2) 文本字段用户只是多打了个首尾空格，比较时按 trim 后的内容判断（但不改动 form 里的实际值，
+ *    保存仍然写原值）。
+ * 3) 数组（选项 / 答案）顺序敏感：选项增删、换序都算真实改动，所以数组本身不排序，
+ *    只对每个元素做字段级归一化。
+ * 4) 嵌套对象（选项）用固定键顺序重建、每个字段单独归一化，避免键顺序 / 多余字段（如 sortOrder）
+ *    造成"看起来一模一样却被判成改动"。
+ * 归一化只用于快照比较，绝不写回 form，因此不影响保存 / 校验 / AI 逻辑。
+ */
+function normText(v) {
+  if (v === null || v === undefined) return ''
+  return String(v).trim()
+}
+/** 数字字段：'' / null / undefined 一律视为"空"（null），'5' 与 5 归一为同一个数字 5 */
+function normNum(v) {
+  if (v === null || v === undefined || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) ? n : null
+}
+/**
+ * 生成"可比较快照"：字段顺序固定、逐字段归一化，JSON.stringify 结果可直接做字符串相等判断。
+ * 纳入比较的用户可编辑字段（与模板里 v-model 一一对应）：
+ * volume 册数、questionType 题型、questionNumber 题号、content 题干、
+ * options 选项数组（key/text，顺序敏感）、answerKeys 答案键、score 分值、
+ * topic 主题、category 分类、answerText 答案文字、analysis 解析、
+ * materialId 关联材料、referenceAnswer 主观题参考答案。
+ */
+function normalizedForm(src) {
+  const options = Array.isArray(src.options) ? src.options : []
+  const answerKeys = Array.isArray(src.answerKeys) ? src.answerKeys : []
+  return JSON.stringify({
+    volume: normNum(src.volume),
+    questionType: normText(src.questionType),
+    questionNumber: normNum(src.questionNumber),
+    content: normText(src.content),
+    options: options.map((o) => [normText(o && o.key), normText(o && o.text)]),
+    answerKeys: answerKeys.map((k) => normText(k)),
+    score: normNum(src.score),
+    topic: normText(src.topic),
+    category: normText(src.category),
+    answerText: normText(src.answerText),
+    analysis: normText(src.analysis),
+    // 关联材料 id：'' / null / undefined 统一为空，'5' 与 5 视为相同
+    materialId: normNum(src.materialId),
+    referenceAnswer: normText(src.referenceAnswer)
+  })
 }
 
-/* ---------- 未保存修改检测（编辑模式：保存 / 切换 / 关闭前询问） ---------- */
-const isEdit = computed(() => props.mode === 'edit')
 // 头部标题用的题号（此前模板引用了未定义的 questionNumber，恒显示"—"）
 const questionNumber = computed(() => form.questionNumber)
 const baseline = ref('')
 const dirty = ref(false)
+// 基线是否已就绪：详情还没返回时（异步加载中）不参与判定，避免"刚打开就被判成有修改"
+const baselineReady = ref(false)
+
+/** 把当前表单值记为"已保存基线"：打开面板回填完成后、每次保存成功后都要调用 */
+function markBaseline() {
+  baseline.value = normalizedForm(form)
+  baselineReady.value = true
+  dirty.value = false
+}
+
 // watch 的 getter 深度访问整个表单（含选项 / 答案数组），任何字段变化都会触发重算。
 // 注意：注册于回填之后，回填期间的修改不会被当成"未保存"。
 watch(
-  () => JSON.stringify(form),
+  () => normalizedForm(form),
   (s) => {
-    if (isEdit.value) dirty.value = s !== baseline.value
+    if (!baselineReady.value) return
+    dirty.value = s !== baseline.value
   }
 )
-// 打开面板（编辑回填完成）后的初始状态即"已保存"基准
-baseline.value = JSON.stringify(form)
+
+// 边界：父组件先挂载面板、题目详情后到达（异步加载）时，等详情填充完成再记基线，
+// 这样"回填"本身不会被当成用户改动。
+watch(
+  () => props.initial,
+  (d) => {
+    if (!isEdit.value || initialFilled || !d) return
+    fillFormFromInitial(d)
+    markBaseline()
+  }
+)
 
 /* ---------- 材料列表（关联下拉） ---------- */
 async function loadMaterials() {
@@ -696,6 +770,8 @@ async function submit() {
       Object.assign(form, defaultForm())
       form.questionType = keepType
       form.questionNumber = (savedNumber ?? 0) + 1
+      // 新建模式：保存后表单回到"空白表单"，基线同步刷新为这份空白值
+      markBaseline()
       emit('saved', { questionNumber: savedNumber })
     } catch (e) {
       /* 错误提示由拦截器统一处理 */
@@ -715,7 +791,9 @@ async function saveCurrent(silent = false) {
   submitting.value = true
   try {
     await doSave()
-    baseline.value = JSON.stringify(form)
+    // 保存成功即把当前值记为新的"已保存基线"（归一化后），
+    // 避免"保存成功后没再改，离开却又提示未保存"
+    markBaseline()
     if (!silent) ElMessage.success(t('updatedStay'))
     emit('saved', { questionNumber: form.questionNumber })
     return true
@@ -848,6 +926,10 @@ async function submitAndFinish() {
 
 onMounted(() => {
   loadMaterials()
+  // 记基线的正确时机：此刻题目详情已回填完成、子控件（el-input-number / el-select 等）
+  // 也已完成首次渲染归一（子组件 mounted 先于父组件 mounted）。
+  // 若编辑模式下详情还没到（initialFilled=false），先不记基线，等 watch(props.initial) 填充后再记。
+  if (!isEdit.value || initialFilled) markBaseline()
   window.addEventListener('beforeunload', handleBeforeUnload)
 })
 onUnmounted(() => {
