@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.tiku.dto.*;
+import com.tiku.mapper.AiImportJobMapper;
 import com.tiku.mapper.MaterialMapper;
 import com.tiku.mapper.PracticeSessionMapper;
 import com.tiku.mapper.PracticeSessionQuestionMapper;
@@ -37,6 +38,7 @@ public class QuestionBankService {
     private final PracticeSessionMapper sessionMapper;
     private final PracticeSessionQuestionMapper sessionQuestionMapper;
     private final MaterialMapper materialMapper;
+    private final AiImportJobMapper aiImportJobMapper;
 
     public QuestionBankService(QuestionBankMapper questionBankMapper,
                                QuestionMapper questionMapper,
@@ -44,7 +46,8 @@ public class QuestionBankService {
                                ReviewStateMapper reviewStateMapper,
                                PracticeSessionMapper sessionMapper,
                                PracticeSessionQuestionMapper sessionQuestionMapper,
-                               MaterialMapper materialMapper) {
+                               MaterialMapper materialMapper,
+                               AiImportJobMapper aiImportJobMapper) {
         this.questionBankMapper = questionBankMapper;
         this.questionMapper = questionMapper;
         this.studyRecordMapper = studyRecordMapper;
@@ -52,6 +55,7 @@ public class QuestionBankService {
         this.sessionMapper = sessionMapper;
         this.sessionQuestionMapper = sessionQuestionMapper;
         this.materialMapper = materialMapper;
+        this.aiImportJobMapper = aiImportJobMapper;
     }
 
     public Long createQuestionBank(QuestionBankCreateRequest request) {
@@ -210,20 +214,23 @@ public class QuestionBankService {
         questionBankMapper.updateById(questionBank);
     }
 
-    //删除题库：物理删除题库 + 级联逻辑删除题目 + 物理删除刷题记录/复习状态/会话/材料（一个事务，原子完成）
-    //返回删除的题目数与受影响的记录数，前端据此提示（产品原则第 9 条）
+    //删除题库：题库与题目都物理删除，并级联物理删除刷题记录/复习状态/会话/材料（一个事务，原子完成）
+    //题目必须物理删除（与 V1 表注释一致）：留软删除行会产生指向已删题库的孤儿行，
+    //且唯一键 uk_question_bank_external_id_deleted 仍被占用——该 bank_id 复用时同 questionKey 再入库会直接报错。
+    //刷题记录一并删除（产品原则第 9 条：删除前提示影响记录数）。
     @Transactional
     public DeleteBankResult deleteQuestionBank(Long id){
         findByIdOrThrow(id);
         sessionQuestionMapper.deleteByBankId(id);
         sessionMapper.delete(new LambdaQueryWrapper<PracticeSession>().eq(PracticeSession::getBankId, id));
         reviewStateMapper.delete(new LambdaQueryWrapper<ReviewState>().eq(ReviewState::getBankId, id));
-        questionBankMapper.deleteById(id);
-        // MyBatis-Plus @TableLogic 自动转为 UPDATE question SET deleted=1 WHERE bank_id=? AND deleted=0
-        long deletedQuestions = questionMapper.delete(new LambdaQueryWrapper<Question>().eq(Question::getBankId, id));
         long affectedRecords = studyRecordMapper.delete(new LambdaQueryWrapper<StudyRecord>().eq(StudyRecord::getBankId, id));
         //共享材料随题库级联清理（物理删除）
         materialMapper.delete(new LambdaQueryWrapper<Material>().eq(Material::getBankId, id));
+        long deletedQuestions = questionMapper.deletePhysicallyByBankId(id);
+        //AI 导入任务的 bank_id 是软引用：解引用而不是删任务（历史记录仍要能查看）
+        aiImportJobMapper.clearBankId(id);
+        questionBankMapper.deleteById(id);
         return new DeleteBankResult(deletedQuestions, affectedRecords);
     }
 

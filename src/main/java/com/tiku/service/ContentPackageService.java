@@ -13,6 +13,7 @@ import com.tiku.mapper.StudyRecordMapper;
 import com.tiku.model.*;
 import com.tiku.model.enums.QuestionType;
 import com.tiku.util.PackageContainer;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,6 +29,7 @@ import java.io.IOException;
  * 导入：内容包 JSON → 题库 + 题目（冲突检测：全新 / 已导入 / 版本并存 / 分支导入）。
  * 导出：题库 + 题目 → 内容包 JSON（自建题库生成新身份；内容被修改默认分支）。
  */
+@Slf4j
 @Service
 public class ContentPackageService {
 
@@ -438,6 +440,7 @@ public class ContentPackageService {
 
     public int importQuestionsToBank(Long bankId, List<ContentPackageQuestion> questions, Map<String, Long> materialIdByKey) {
         int count = 0;
+        int skipped = 0;
         //题号兜底：AI 导入的题目通常没有题号（null），按插入顺序从当前最大题号+1 递增，
         //保证列表/做题/跳转定位顺序统一（SEQUENCE 按 questionNumber,id 排序，null 会排最前导致顺序错乱）
         Integer nextNumber = null;
@@ -451,12 +454,20 @@ public class ContentPackageService {
         for (ContentPackageQuestion q : questions) {
             Question question = new Question();
             //external_id NOT NULL：预览编辑后提交的题目可能丢 questionKey（前端对象重建）→ 自动生成兜底
+            String externalId;
             if (q.getQuestionKey() == null || q.getQuestionKey().isBlank()) {
-                question.setExternalId("AI_" + java.util.UUID.randomUUID().toString()
-                        .replace("-", "").substring(0, 12).toUpperCase());
+                externalId = "AI_" + java.util.UUID.randomUUID().toString()
+                        .replace("-", "").substring(0, 12).toUpperCase();
             } else {
-                question.setExternalId(q.getQuestionKey());
+                externalId = q.getQuestionKey();
             }
+            // 幂等去重：同一题库内同 questionKey 已存在（重复确认同一导入任务、同一份文件导入两次）
+            // 直接跳过。否则插入会撞唯一键 uk_question_bank_external_id_deleted 报 500。
+            if (questionMapper.selectActiveIdByBankAndExternalId(bankId, externalId) != null) {
+                skipped++;
+                continue;
+            }
+            question.setExternalId(externalId);
             question.setVolume(q.getVolume() == null ? 0 : q.getVolume());
             question.setQuestionType(QuestionType.valueOf(q.getType()));
             question.setContent(q.getContent());
@@ -487,6 +498,9 @@ public class ContentPackageService {
             question.setBankId(bankId);
             questionMapper.insert(question);
             count++;
+        }
+        if (skipped > 0) {
+            log.warn("导入去重：题库 {} 中已存在同 questionKey 的题目，跳过 {} 道（实际新增 {} 道）", bankId, skipped, count);
         }
         return count;
     }
