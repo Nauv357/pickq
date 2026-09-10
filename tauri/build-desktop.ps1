@@ -9,6 +9,17 @@ param(
   [switch]$AllowStaleFrontend   # 允许 dist 比 src 旧（仅调试用，正式发版不要用）
 )
 $ErrorActionPreference = 'Stop'
+
+# 原生命令（npm / mvn / jlink / node）会把正常日志写进 stderr，在 $ErrorActionPreference='Stop'
+# 下 PowerShell 会把它当成错误直接中断脚本（历史坑：tauri CLI、npm 都因此被误判为失败）。
+# 统一用这个包装调用：临时切到 Continue、输出原样打到控制台，只按退出码判断成败。
+function Invoke-Native {
+  param([scriptblock]$Body)
+  $prev = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try { & $Body 2>&1 | ForEach-Object { Write-Host $_ } } finally { $ErrorActionPreference = $prev }
+  return $LASTEXITCODE
+}
 $root = Split-Path -Parent $PSScriptRoot   # 仓库根
 $tauri = Join-Path $root 'tauri'
 $srcTauri = Join-Path $tauri 'src-tauri'
@@ -26,8 +37,7 @@ if ($SkipFrontend) {
   Write-Host '    已跳过（-SkipFrontend）'
 } else {
   Push-Location $fe
-  & npm run build
-  $feCode = $LASTEXITCODE
+  $feCode = Invoke-Native { npm run build }
   Pop-Location
   if ($feCode -ne 0) { Write-Host '前端构建失败，已中止打包' -ForegroundColor Red; exit 1 }
 }
@@ -47,17 +57,17 @@ if (-not $AllowStaleFrontend) {
 
 Write-Host '== 2/6 后端打包 =='
 Push-Location $root
-& $mvn -nsu -q -DskipTests package
-if ($LASTEXITCODE -ne 0) { Pop-Location; exit 1 }
+$mvnCode = Invoke-Native { & $mvn -nsu -q -DskipTests package }
 Pop-Location
+if ($mvnCode -ne 0) { exit 1 }
 $jar = Join-Path $root 'target\Tiku-0.0.1-SNAPSHOT.jar'
 
 Write-Host '== 3/6 jlink 裁剪 JRE（未生成时） =='
 $jre = Join-Path $root 'target\jre'
 if (-not (Test-Path (Join-Path $jre 'bin\java.exe'))) {
   $mods = 'java.base,java.compiler,java.desktop,java.instrument,java.logging,java.management,java.naming,java.net.http,java.prefs,java.rmi,java.scripting,java.security.jgss,java.security.sasl,java.sql,java.transaction.xa,java.xml,java.xml.crypto,jdk.charsets,jdk.crypto.ec,jdk.jfr,jdk.management,jdk.nio.mapmode,jdk.unsupported,jdk.localedata,jdk.zipfs'
-  & (Join-Path $jdk 'bin\jlink.exe') --add-modules $mods --output $jre --strip-debug --no-header-files --no-man-pages --compress=zip-6
-  if ($LASTEXITCODE -ne 0) { exit 1 }
+  $jlinkCode = Invoke-Native { & (Join-Path $jdk 'bin\jlink.exe') --add-modules $mods --output $jre --strip-debug --no-header-files --no-man-pages --compress=zip-6 }
+  if ($jlinkCode -ne 0) { exit 1 }
 }
 
 Write-Host '== 4/6 复制资源到 src-tauri 根（tauri.conf bundle.resources: jre/、app.jar） =='
@@ -68,8 +78,7 @@ Write-Host ('    jre=' + [Math]::Round((Get-ChildItem (Join-Path $srcTauri 'jre'
 
 Write-Host '== 5/6 tauri build（NSIS 安装包） =='
 Push-Location $srcTauri
-node (Join-Path $root 'frontend\node_modules\@tauri-apps\cli\tauri.js') build --bundles nsis
-$code = $LASTEXITCODE
+$code = Invoke-Native { node (Join-Path $root 'frontend\node_modules\@tauri-apps\cli\tauri.js') build --bundles nsis }
 Pop-Location
 if ($code -ne 0) { exit 1 }
 Write-Host '完成：安装包见 src-tauri/target/release/bundle/nsis/'
