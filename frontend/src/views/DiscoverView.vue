@@ -348,7 +348,27 @@
         </el-form-item>
       </el-form>
 
-      <el-form v-else label-position="top" @submit.prevent>
+      <!-- GitHub 登录：浏览器授权 + 本地回环回调，桌面端轮询本地登录态自动完成 -->
+      <template v-if="authMode === 'login'">
+        <div class="auth-divider"></div>
+        <button
+          class="btn btn-secondary gh-btn"
+          type="button"
+          :disabled="authBusy || ghWaiting"
+          @click="doGithubLogin"
+        >
+          <TikuIcon name="link" :size="14" />
+          {{ t('ghLogin') }}
+        </button>
+        <template v-if="ghWaiting">
+          <p class="gh-hint text-muted">{{ t('ghWaiting') }}</p>
+          <button class="btn btn-ghost btn-sm gh-cancel" type="button" @click="cancelGithubLogin">
+            {{ t('ghCancel') }}
+          </button>
+        </template>
+      </template>
+
+      <el-form v-if="authMode === 'register'" label-position="top" @submit.prevent>
         <el-form-item :label="t('username')">
           <el-input
             v-model="regForm.username"
@@ -404,7 +424,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import TikuIcon from '../components/TikuIcon.vue'
 import { centerPacksUrl, getCenterUrl } from '../utils/center'
@@ -520,7 +540,13 @@ const { t } = useI18n({
       loginFail: '登录失败，请重试',
       registerFail: '注册失败，请重试', verifyNeeded: '请先完成人机验证', verifyLoadFail: '人机验证加载失败：请检查网络后重试，或到官网 pickq.cn 注册后回到应用登录',
       logoutFail: '退出失败，请稍后重试',
-      opFail: '操作失败，请稍后重试'
+      opFail: '操作失败，请稍后重试',
+      /* ---- GitHub 登录（浏览器授权 + 本地回环回调） ---- */
+      ghLogin: '使用 GitHub 登录',
+      ghWaiting: '已在浏览器中打开授权页，完成后将自动登录…',
+      ghCancel: '取消',
+      ghTimeout: '等待超时，请重试',
+      ghOpenFail: '无法打开浏览器，请重试'
     },
     'en-US': {
       pageTitle: 'Discover',
@@ -627,7 +653,12 @@ const { t } = useI18n({
       loginFail: 'Log in failed, please try again',
       registerFail: 'Sign-up failed, please try again', verifyNeeded: 'Please complete the human verification first', verifyLoadFail: 'Human verification failed to load — check your network and retry, or sign up at pickq.cn and log in here',
       logoutFail: 'Log out failed, please try again later',
-      opFail: 'Operation failed, please try again later'
+      opFail: 'Operation failed, please try again later',
+      ghLogin: 'Continue with GitHub',
+      ghWaiting: 'Authorization page opened in your browser — you will be signed in automatically…',
+      ghCancel: 'Cancel',
+      ghTimeout: 'Timed out waiting for sign-in, please try again',
+      ghOpenFail: 'Could not open the browser, please try again'
     }
   }
 })
@@ -904,6 +935,7 @@ function resetAuthForm() {
   loginForm.value = { username: '', password: '' }
   regForm.value = { username: '', password: '', nickname: '' }
   authMode.value = 'login'
+  stopGithubPolling() // 关闭对话框即停止等待 GitHub 登录
 }
 
 function errText(e, fallback) {
@@ -956,6 +988,80 @@ async function doLogin(e) {
   } finally {
     authBusy.value = false
   }
+}
+
+/* ---------- GitHub 登录：系统浏览器授权 + 本地回环回调 ----------
+   桌面后端 POST /center/auth/github/start 拿官网授权地址 → openExternal 用系统浏览器打开
+   → 用户在浏览器完成授权 → 官网 302 回本机回调换 token → 这里轮询 /center/auth/status
+   发现已登录后刷新用户、关闭面板（超时 3 分钟）。 */
+const ghWaiting = ref(false)
+let ghTimer = null
+
+/** 停止轮询（登录成功 / 用户取消 / 关闭面板 / 组件卸载） */
+function stopGithubPolling() {
+  if (ghTimer) {
+    clearTimeout(ghTimer)
+    ghTimer = null
+  }
+  ghWaiting.value = false
+}
+
+/** 轮询本地登录态：每 2 秒一次，最多 90 次（≈3 分钟） */
+function startGithubPolling() {
+  stopGithubPolling()
+  ghWaiting.value = true
+  let tries = 0
+  const tick = async () => {
+    if (!ghWaiting.value) return
+    tries += 1
+    if (tries > 90) {
+      stopGithubPolling()
+      authError.value = t('ghTimeout')
+      return
+    }
+    try {
+      const r = await http.get('/center/auth/status', { skipErrorMessage: true })
+      if (r?.loggedIn) {
+        // 本地已保存 token：再拉一次用户确认会话可用（官网会话失效时 /me 会清掉本地 token）
+        await fetchMe()
+        if (currentUser.value) {
+          stopGithubPolling()
+          const name = currentUser.value.nickname || currentUser.value.username || 'GitHub'
+          authVisible.value = false
+          ElMessage.success(t('welcome', { name }))
+          refreshDetailAfterAuth()
+          return
+        }
+      }
+    } catch {
+      /* 单次请求失败（如后端重启）：忽略，下一轮继续 */
+    }
+    if (ghWaiting.value) ghTimer = setTimeout(tick, 2000)
+  }
+  ghTimer = setTimeout(tick, 2000)
+}
+
+async function doGithubLogin() {
+  if (authBusy.value || ghWaiting.value) return
+  authBusy.value = true
+  authError.value = ''
+  try {
+    const r = await http.post('/center/auth/github/start', {}, { skipErrorMessage: true })
+    const url = typeof r?.url === 'string' ? r.url : ''
+    if (!url || !(await openExternal(url))) {
+      authError.value = t('ghOpenFail')
+      return
+    }
+    startGithubPolling()
+  } catch (err) {
+    authError.value = errText(err, t('ghOpenFail'))
+  } finally {
+    authBusy.value = false
+  }
+}
+
+function cancelGithubLogin() {
+  stopGithubPolling()
 }
 
 /* ---------- 注册人机验证（Cloudflare Turnstile；site key 为公开值） ---------- */
@@ -1177,6 +1283,9 @@ onMounted(() => {
   }
   load()
 })
+
+// 离开页面时停止 GitHub 登录轮询（避免游离定时器继续请求）
+onBeforeUnmount(stopGithubPolling)
 </script>
 
 <style scoped>
@@ -1589,6 +1698,24 @@ onMounted(() => {
   margin: 8px 0 0;
   font-size: 12px;
   line-height: 1.7;
+}
+
+/* GitHub 登录：账号表单下方的分隔线与按钮（等待授权时的提示 + 取消） */
+.auth-divider {
+  height: 1px;
+  margin: 16px 0;
+  background: var(--border);
+}
+.gh-btn {
+  width: 100%;
+}
+.gh-hint {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.gh-cancel {
+  margin-top: 8px;
 }
 
 /* 人机验证（Turnstile）容器与错误提示 */

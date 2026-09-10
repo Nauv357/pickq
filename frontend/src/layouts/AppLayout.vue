@@ -38,6 +38,15 @@
           <span>{{ t('nav.discover') }}</span>
         </RouterLink>
         <RouterLink
+          to="/my-works"
+          class="nav-item"
+          :class="{ active: route.name === 'my-works' }"
+          :title="sidebarCollapsed ? t('nav.myWorks') : undefined"
+        >
+          <TikuIcon name="upload" :size="16" />
+          <span>{{ t('nav.myWorks') }}</span>
+        </RouterLink>
+        <RouterLink
           to="/settings"
           class="nav-item"
           :class="{ active: route.name === 'settings' }"
@@ -140,7 +149,7 @@ const { t } = useI18n({
     'zh-CN': {
       brandSub: '自建题库',
       viewAiTip: '点击查看 AI 导入任务', aiWorkingN: 'AI 整理中（{n}）', recentAi: '最近 AI 导入', viewAllAi: '查看全部 AI 任务', allTasks: '全部任务', backToTask: '回到任务', aiPending: 'AI 导入待确认', aiFailed: 'AI 导入失败', aiWorking: 'AI 整理中', deleteTask: '删除任务', qUnit: '题', aiWorkingView: 'AI 整理中，点击查看',
-      nav: { banks: '题库', stats: '统计', discover: '发现题库', settings: '设置', aiJobs: 'AI 任务' },
+      nav: { banks: '题库', stats: '统计', discover: '发现题库', myWorks: '我的作品', settings: '设置', aiJobs: 'AI 任务' },
       offlineNote: '离线优先 · 数据在本机',
       theme: { label: '主题', light: '白天', dark: '黑夜' },
       themeToggleTitle: '点击切换主题(当前: {v})',
@@ -154,7 +163,7 @@ const { t } = useI18n({
     'en-US': {
       brandSub: 'Your Question Banks',
       viewAiTip: 'View AI import tasks', aiWorkingN: 'AI working ({n})', recentAi: 'Recent AI imports', viewAllAi: 'View all AI tasks', allTasks: 'All tasks', backToTask: 'Back to task', aiPending: 'AI import pending', aiFailed: 'AI import failed', aiWorking: 'AI working', deleteTask: 'Delete task', qUnit: 'q', aiWorkingView: 'AI working — click to view',
-      nav: { banks: 'Banks', stats: 'Stats', discover: 'Discover', settings: 'Settings', aiJobs: 'AI Jobs' },
+      nav: { banks: 'Banks', stats: 'Stats', discover: 'Discover', myWorks: 'My works', settings: 'Settings', aiJobs: 'AI Jobs' },
       offlineNote: 'Offline-first · data stays on this device',
       theme: { label: 'Theme', light: 'Light', dark: 'Dark' },
       themeToggleTitle: 'Toggle theme (current: {v})',

@@ -55,6 +55,12 @@ const routes = [
         meta: { title: '发现题库' }
       },
       {
+        path: 'my-works',
+        name: 'my-works',
+        component: () => import('../views/MyWorksView.vue'),
+        meta: { title: '我的作品' }
+      },
+      {
         path: 'settings',
         name: 'settings',
         component: () => import('../views/SettingsView.vue'),
