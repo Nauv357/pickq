@@ -30,6 +30,8 @@
 - [Getting started](#getting-started)
 - [Architecture](#architecture)
 - [Repository layout](#repository-layout)
+- [Documentation](#documentation)
+- [Contributing](#contributing)
 - [FAQ](#faq)
 - [License](#license)
 
@@ -133,10 +135,32 @@ tiku-desktop.exe (Tauri 2 / Rust shell)
 src/          Backend (Spring Boot)
 frontend/     Frontend SPA
 tauri/        Desktop shell & packaging scripts
-docs/         Logo & screenshots
+docs/         Documentation (architecture, format spec, API, conventions, screenshots)
 ```
 
-> The website (Nuxt3), deployment scripts and design docs are internal assets and are not part of this repository.
+> The website (Nuxt3) and its deployment scripts are internal assets and are not part of this repository.
+
+## Documentation
+
+The full index is in [`docs/README.md`](docs/README.md) (written in Chinese). Key documents:
+
+| Document | Contents |
+| --- | --- |
+| [`docs/features.md`](docs/features.md) | Feature list and business rules (scoring, mistake definition, spaced repetition) |
+| [`docs/package-format.md`](docs/package-format.md) | `.tiku` question-bank file format (cross-platform contract) |
+| [`docs/architecture.md`](docs/architecture.md) | Architecture, desktop startup chain, technology trade-offs |
+| [`docs/api.md`](docs/api.md) | Local backend API and community-plaza API contracts |
+| [`docs/data-model.md`](docs/data-model.md) | Database schema and data-directory layout |
+| [`docs/code-map.md`](docs/code-map.md) | Feature → code location map |
+| [`docs/conventions.md`](docs/conventions.md) | Coding and cross-platform conventions |
+| [`docs/design-mobile.md`](docs/design-mobile.md) | Android client design (planned) |
+
+If you would like English translations of any document, open an issue — contributions are welcome.
+
+## Contributing
+
+Issues and pull requests are welcome. Environment setup, build, test and commit conventions are in [`CONTRIBUTING.md`](CONTRIBUTING.md);
+coding conventions are in [`docs/conventions.md`](docs/conventions.md). To report a security issue, follow [`SECURITY.md`](SECURITY.md) — please do not disclose details in a public issue.
 
 ## FAQ
 

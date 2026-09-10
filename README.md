@@ -42,6 +42,8 @@
 - [快速开始](#快速开始)
 - [技术架构](#技术架构)
 - [仓库结构](#仓库结构)
+- [文档索引](#文档索引)
+- [参与贡献](#参与贡献)
 - [常见问题](#常见问题)
 - [License](#license)
 
@@ -147,10 +149,31 @@ tiku-desktop.exe（Tauri 2 / Rust 壳）
 src/          后端（Spring Boot）
 frontend/     前端 SPA
 tauri/        桌面壳与打包脚本
-docs/         Logo 与界面截图
+docs/         文档（架构、格式契约、API、约定、截图）
 ```
 
-> 官网（Nuxt3）、部署脚本与设计文档为内部资产，不在本仓库。
+> 官网（Nuxt3）与其部署脚本为内部资产，不在本仓库。
+
+## 文档索引
+
+完整索引见 [`docs/README.md`](docs/README.md)。常用的几份：
+
+| 文档 | 内容 |
+| --- | --- |
+| [`docs/features.md`](docs/features.md) | 功能清单与业务规则（判分口径、错题口径、复习算法） |
+| [`docs/package-format.md`](docs/package-format.md) | `.tiku` / 题库文件格式规范（跨端契约） |
+| [`docs/architecture.md`](docs/architecture.md) | 整体架构、桌面端启动链路、技术选型取舍 |
+| [`docs/api.md`](docs/api.md) | 本地后端 API 与广场 API 契约 |
+| [`docs/data-model.md`](docs/data-model.md) | 数据库表结构与数据目录布局 |
+| [`docs/code-map.md`](docs/code-map.md) | 功能 → 代码位置对照表 |
+| [`docs/conventions.md`](docs/conventions.md) | 编码与跨端约定 |
+| [`docs/design-mobile.md`](docs/design-mobile.md) | Android 端设计方案（规划中） |
+| [`docs/release-notes-guide.md`](docs/release-notes-guide.md) | 发版规范与发布检查清单 |
+
+## 参与贡献
+
+欢迎提交 Issue 与 PR：环境搭建、构建、测试与提交规范见 [`CONTRIBUTING.md`](CONTRIBUTING.md)；
+编码约定见 [`docs/conventions.md`](docs/conventions.md)。安全问题的上报方式见 [`SECURITY.md`](SECURITY.md)（请勿在公开 Issue 中披露细节）。
 
 ## 常见问题
 

@@ -27,11 +27,15 @@
 发布时两条命令链：
 
 1. `tauri/build-desktop.ps1` 产出安装包；
-2. `deploy/publish-update.ps1 -Notes "..."`（注意：脚本使用密码登录，服务器已禁用密码登录，
-   现在改用密钥上传：`scp -i ~/.ssh/id_ed25519_pickq` 上传安装包与 `latest.json` 到
-   `/opt/pickq/updates/`，并同步 `-AlsoFullDownload` 对应的 `/opt/pickq/downloads/`）。
+2. `deploy/publish-update.ps1 -Notes "..."` 完成上传（已改用 **OpenSSH 私钥**认证：`scp -i` / `ssh -i`，
+   服务器已禁用密码登录，旧的 `pscp -pw` 方式已不可用；服务器地址与私钥可用 `-Server` / `-Key`
+   或环境变量 `SHITI_SRV_HOST` / `SHITI_SSH_KEY` 覆盖）。
+   脚本会顺带把包上传到 `/opt/pickq/updates/`、生成 `latest.json`，并在 `/opt/pickq/updates/` 里
+   **只保留最新的两份频道安装包**（当前版本 + 上一个可回滚版本）。
 
 若公告写错需要更正，直接改服务器上的 `latest.json`（用户端下次检查更新即拉取新内容）。
+
+> 版本变化同时记进仓库的 [`CHANGELOG.md`](../CHANGELOG.md)（面向用户，措辞与本节一致）。
 
 ---
 
@@ -41,9 +45,10 @@
 2. **构建**：`frontend` 与 `web`（如官网有改动）分别 `npm run build`；后端 `mvn -q -DskipTests package`（先设 `JAVA_HOME` 为 JDK 21）。
 3. **打包**：`tauri build --bundles nsis`（注意 `tauri/build-desktop.ps1` 会因 node 的 stderr 输出被误判为失败，必要时手动执行 tauri CLI）；再打便携版 zip。
 4. **上传**：
-   - 更新频道（脚本生成或手写 manifest）：`shiti-<版本>-x64-setup.exe` + `latest.json` → `/opt/pickq/updates/`
-   - 全量下载：`拾题_<版本>_x64-setup.exe` + `拾题-便携版.zip` → `/opt/pickq/downloads/`；**删除上一版安装包**
-   - 服务器已禁用密码登录，上传用 `scp -i ~/.ssh/id_ed25519_pickq`（`publish-update.ps1` 的 pscp 密码方式已失效）
+   - 更新频道：`shiti-<版本>-x64-setup.exe` + `latest.json` → `/opt/pickq/updates/`（`publish-update.ps1` 自动完成）
+   - 全量下载：`拾题_<版本>_x64-setup.exe` + `拾题-便携版.zip` → `/opt/pickq/downloads/`（`-AlsoFullDownload`）；**删除上一版安装包**
+   - 上传一律用私钥：`scp -i ~/.ssh/id_ed25519_pickq`，登录用户为 **`ubuntu`**（需要 root 目录时先传到 home 再 `sudo mv`）
+   - 频道安装包由脚本保留最新两份（便于把 `latest.json` 回指上一版做紧急回滚），更旧的会自动删除
 5. **更新官网下载链接**：`web/pages/index.vue` 里的 `/downloads/拾题_<版本>_x64-setup.exe` → 重新打包 `web-src.zip` → 服务器构建部署。
    ⚠️ 替换前先确认旧版本号字符串确实存在（曾出现"替换源不匹配、静默没改动"，导致下载页停留在旧版本、甚至指向已删除的文件而 404）。
 6. **线上验证**（必做）：`latest.json` 版本号、官网首页含新文件名、安装包与便携版链接均返回 200、`https://pickq.cn/` 返回 200。
