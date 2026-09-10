@@ -155,7 +155,7 @@ public class CenterAuthController {
         return ApiResponse.success(Collections.singletonMap("user", data.path("user")));
     }
 
-    /** POST /api/center/auth/register { center?, username, password, nickname? } — 注册并登录 */
+    /** POST /api/center/auth/register { center?, username, password, nickname?, turnstileToken? } — 注册并登录 */
     @PostMapping("/register")
     public ApiResponse<Map<String, Object>> register(@RequestBody AuthReq req) {
         if (req.username() == null || req.username().isBlank() || req.password() == null || req.password().isEmpty()) {
@@ -167,6 +167,10 @@ public class CenterAuthController {
         fields.put("password", req.password());
         if (req.nickname() != null && !req.nickname().isBlank()) {
             fields.put("nickname", req.nickname().trim());
+        }
+        // 人机验证 token（官网配置 TURNSTILE_SECRET 时必填；未配置时官网忽略）
+        if (req.turnstileToken() != null && !req.turnstileToken().isBlank()) {
+            fields.put("turnstileToken", req.turnstileToken().trim());
         }
         String body = request("POST", base + "/api/auth/register", jsonOf(fields), true);
         JsonNode data = parseData(body);
@@ -215,6 +219,6 @@ public class CenterAuthController {
     }
 
     /** 登录/注册请求体 */
-    public record AuthReq(String center, String username, String password, String nickname) {
+    public record AuthReq(String center, String username, String password, String nickname, String turnstileToken) {
     }
 }

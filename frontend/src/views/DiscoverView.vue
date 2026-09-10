@@ -380,6 +380,11 @@
             @keyup.enter="doRegister"
           />
         </el-form-item>
+        <!-- 人机验证（Cloudflare Turnstile）：加载失败时提示改用官网注册（登录不需要验证） -->
+        <el-form-item v-if="tsSiteKey">
+          <div ref="tsEl" class="ts-widget"></div>
+          <p v-if="tsError" class="ts-error">{{ tsError }}</p>
+        </el-form-item>
       </el-form>
 
       <p class="auth-switch text-secondary">
@@ -510,7 +515,7 @@ const { t } = useI18n({
       loggedOut: '已退出登录',
       actionNeedLogin: '请先登录后再操作',
       loginFail: '登录失败，请重试',
-      registerFail: '注册失败，请重试',
+      registerFail: '注册失败，请重试', verifyNeeded: '请先完成人机验证', verifyLoadFail: '人机验证加载失败：请检查网络后重试，或到官网 pickq.cn 注册后回到应用登录',
       logoutFail: '退出失败，请稍后重试',
       opFail: '操作失败，请稍后重试'
     },
@@ -614,7 +619,7 @@ const { t } = useI18n({
       loggedOut: 'Logged out',
       actionNeedLogin: 'Please log in first',
       loginFail: 'Log in failed, please try again',
-      registerFail: 'Sign-up failed, please try again',
+      registerFail: 'Sign-up failed, please try again', verifyNeeded: 'Please complete the human verification first', verifyLoadFail: 'Human verification failed to load — check your network and retry, or sign up at pickq.cn and log in here',
       logoutFail: 'Log out failed, please try again later',
       opFail: 'Operation failed, please try again later'
     }
@@ -875,6 +880,7 @@ function openAuth(mode = 'login') {
   authError.value = ''
   authMode.value = mode
   authVisible.value = true
+  if (mode === 'register') ensureTurnstileScript()
 }
 function switchAuthMode(mode) {
   // 登录失败后想直接注册：把已输的用户名/密码带过去
@@ -884,6 +890,7 @@ function switchAuthMode(mode) {
   }
   authMode.value = mode
   authError.value = ''
+  if (mode === 'register') ensureTurnstileScript()
 }
 function resetAuthForm() {
   authBusy.value = false
@@ -945,6 +952,64 @@ async function doLogin(e) {
   }
 }
 
+/* ---------- 注册人机验证（Cloudflare Turnstile；site key 为公开值） ---------- */
+const tsSiteKey = '0x4AAAAAAEuzUlsERjDfesaw'
+const tsEl = ref(null)
+const tsToken = ref('')
+const tsError = ref('')
+let tsTimeout = null
+
+function renderTurnstile() {
+  const w = window
+  if (!w.turnstile || !tsEl.value) {
+    tsError.value = t('verifyLoadFail')
+    return
+  }
+  try {
+    w.turnstile.render(tsEl.value, {
+      sitekey: tsSiteKey,
+      callback: (token) => {
+        tsToken.value = token
+        tsError.value = ''
+      },
+      'expired-callback': () => {
+        tsToken.value = ''
+      },
+      'error-callback': () => {
+        tsToken.value = ''
+        tsError.value = t('verifyLoadFail')
+      }
+    })
+  } catch {
+    tsError.value = t('verifyLoadFail')
+  }
+}
+
+function ensureTurnstileScript() {
+  if (!tsSiteKey) return
+  const w = window
+  if (w.turnstile) {
+    renderTurnstile()
+    return
+  }
+  const existing = document.querySelector('script[data-turnstile]')
+  if (existing) return
+  const s = document.createElement('script')
+  s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
+  s.async = true
+  s.defer = true
+  s.dataset.turnstile = '1'
+  s.onload = () => renderTurnstile()
+  s.onerror = () => {
+    tsError.value = t('verifyLoadFail')
+  }
+  document.head.appendChild(s)
+  // 国内网络下挑战脚本可能加载缓慢：8 秒未就绪给出提示
+  tsTimeout = setTimeout(() => {
+    if (!tsToken.value && !tsError.value) tsError.value = t('verifyLoadFail')
+  }, 8000)
+}
+
 async function doRegister(e) {
   if (e?.isComposing) return
   if (authBusy.value) return
@@ -952,10 +1017,14 @@ async function doRegister(e) {
   const password = regForm.value.password
   if (!username) { authError.value = t('msgNeedUsername'); return }
   if (!password) { authError.value = t('msgNeedPassword'); return }
+  if (!tsToken.value) {
+    authError.value = tsError.value || t('verifyNeeded')
+    return
+  }
   authBusy.value = true
   authError.value = ''
   try {
-    const body = { username, password }
+    const body = { username, password, turnstileToken: tsToken.value }
     const nickname = regForm.value.nickname.trim()
     if (nickname) body.nickname = nickname
     const r = await http.post('/center/auth/register', body, { skipErrorMessage: true })
@@ -968,6 +1037,15 @@ async function doRegister(e) {
     refreshDetailAfterAuth()
   } catch (err) {
     authError.value = errText(err, t('registerFail'))
+    // token 一次性：失败后重置验证组件
+    try {
+      if (window.turnstile && tsEl.value) {
+        window.turnstile.reset(tsEl.value)
+        tsToken.value = ''
+      }
+    } catch {
+      /* 忽略 */
+    }
   } finally {
     authBusy.value = false
   }
@@ -1506,4 +1584,14 @@ onMounted(() => {
   font-size: 12px;
   line-height: 1.7;
 }
-</style>
+
+/* 人机验证（Turnstile）容器与错误提示 */
+.ts-widget {
+  min-height: 62px;
+}
+.ts-error {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--danger, #c0392b);
+  line-height: 1.6;
+}</style>
