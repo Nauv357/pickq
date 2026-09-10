@@ -292,12 +292,31 @@ public class ContentPackageService {
     }
 
     /**
-     * v2 .tiku 容器导出（zip：package.json + media/ 图片二进制）。
+     * .tiku 导出结果：容器字节 + 容器内身份（本地发布中心落导出记录、按版本命名文件用）。
+     * bytes 即 .tiku 文件内容，packageKey/version/title 是写入 package.json 的实际值。
+     */
+    public record TikuExport(byte[] bytes, String packageKey, String version, String title, int questionsCount) {
+    }
+
+    public byte[] exportTikuPackage(Long bankId, ExportRequest request) {
+        return exportTikuPackageWithMeta(bankId, request, null).bytes();
+    }
+
+    /**
+     * v2 .tiku 容器导出（zip：package.json + media/ 图片二进制），同时回传容器内身份。
      * 身份/版本/指纹决策全部复用 v1 导出（exportContentPackage 内部完成）；
      * 图片从 base64 解码为二进制写入 media/，package.json 不含 images 与 checksum。
+     * <p>
+     * versionOverride 非空时在打包前改写 package.json 的 version 字段（本地发布中心"以新版本发布"）：
+     * 只动 version，schemaVersion / packageKey / title / 题目等其余字段保持导出决策的结果不变。
      */
-    public byte[] exportTikuPackage(Long bankId, ExportRequest request) {
+    public TikuExport exportTikuPackageWithMeta(Long bankId, ExportRequest request, String versionOverride) {
         ContentPackageFile file = exportContentPackage(bankId, request);
+        if (versionOverride != null && !versionOverride.isBlank()) {
+            file.setVersion(versionOverride.trim());
+        }
+        String version = file.getVersion();
+        int questionsCount = file.getQuestions() == null ? 0 : file.getQuestions().size();
         Map<String, byte[]> media = new LinkedHashMap<>();
         if (file.getImages() != null) {
             for (Map.Entry<String, String> e : file.getImages().entrySet()) {
@@ -314,7 +333,8 @@ public class ContentPackageService {
         file.setSchemaVersion(PackageContainer.SCHEMA_V2);
         try {
             byte[] pkgJson = objectMapper.writeValueAsBytes(file);
-            return PackageContainer.pack(pkgJson, media);
+            return new TikuExport(PackageContainer.pack(pkgJson, media),
+                    file.getPackageKey(), version, file.getTitle(), questionsCount);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("内容包序列化失败", e);
         } catch (IOException e) {

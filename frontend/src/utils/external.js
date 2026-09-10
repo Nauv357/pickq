@@ -27,4 +27,18 @@ export async function openExternal(url) {
   return true
 }
 
+/**
+ * 打开本地文件夹（导出记录的「打开所在文件夹」）。
+ * 桌面版走 Rust open_directory（ShellExecuteW "open"，资源管理器打开该目录）；
+ * 浏览器版无本地文件系统访问能力 → 返回 false（调用方据此提示用户）。
+ * 路径以 JSON 字符串经 IPC 传递，不经 cmd/shell，中文与空格无需转义。
+ */
+export async function openLocalFolder(path) {
+  const p = String(path || '').trim()
+  if (!p) return false
+  if (!isDesktop()) return false
+  await invoke('open_directory', { path: p })
+  return true
+}
+
 export { isDesktop }

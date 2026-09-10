@@ -1,0 +1,12 @@
+# 应用自定义命令权限：文件夹选择 / 打开所在文件夹（均为手写 Win32，无第三方 crate）
+# 远程页面（本地后端 http://127.0.0.1）导出题库文件时经 IPC 调用
+
+[[permission]]
+identifier = "allow-folder-picker"
+description = "允许调用 pick_directory：弹出系统「选择文件夹」对话框并返回用户所选目录"
+commands = { allow = ["pick_directory"] }
+
+[[permission]]
+identifier = "allow-open-directory"
+description = "允许调用 open_directory：用系统资源管理器打开本地文件所在文件夹"
+commands = { allow = ["open_directory"] }

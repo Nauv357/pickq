@@ -50,6 +50,23 @@ function base64FromArrayBuffer(buf) {
 }
 
 /**
+ * 桌面版「选择文件夹」系统对话框（Rust 命令 pick_directory，手写 Win32 / 零新依赖）。
+ * 返回所选目录的绝对路径；用户取消或浏览器版返回 null（浏览器无法选择本地目录）。
+ * 路径以 JSON 字符串经 IPC 传给 Rust，中文/空格无需转义。
+ */
+export async function pickDirectory({ title, defaultDir } = {}) {
+  //桌面壳：Tauri v2 远程页面经 __TAURI_INTERNALS__.invoke 调 Rust 命令（无全局 __TAURI__）
+  const invoke = window.__TAURI_INTERNALS__?.invoke
+  if (typeof invoke !== 'function') return null
+  //Option<String> 参数：显式传 null 表示"未指定"（缺键也可，null 更明确）
+  const path = await invoke('pick_directory', {
+    title: title ?? null,
+    defaultDir: defaultDir ?? null
+  })
+  return path || null
+}
+
+/**
  * 读取文件文本（UTF-8）
  */
 export function readTextFile(file) {

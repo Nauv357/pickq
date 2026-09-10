@@ -297,6 +297,220 @@ fn save_dialog_file(filename: String, data_base64: String) -> Result<Option<Stri
     Ok(Some(path.to_string_lossy().to_string()))
 }
 
+// ==================== 选择文件夹 / 打开所在文件夹（免依赖 Win32） ====================
+// rfd 只有文件对话框（save_file/pick_file*），没有"选择文件夹"；这里照 single_instance
+// 的风格手写 shell32 调用，零新依赖：
+// - SHBrowseForFolderW 用 BIF_NEWDIALOGSTYLE（可调整大小、可新建文件夹的新式对话框），
+//   初始目录经 BFFM_SETSELECTIONW 回调"预选"，而不用 pidlRoot——pidlRoot 会把用户
+//   锁在该目录子树里（无法切到别的盘），预选则可自由导航；
+// - PIDL 必须用 CoTaskMemFree 释放；
+// - COM 需按 STA 初始化（SHBrowseForFolder 的新式对话框要求），见 ComGuard。
+mod win_folder {
+    use std::os::raw::c_void;
+
+    /// shell32!BROWSEINFOW（字段顺序/宽度严格照 Win32 头，repr(C) 负责对齐）
+    #[repr(C)]
+    struct BrowseInfoW {
+        hwnd_owner: *mut c_void,
+        pidl_root: *mut c_void,
+        psz_display_name: *mut u16,
+        lpsz_title: *const u16,
+        ul_flags: u32,
+        lpfn: BrowseCallbackProc,
+        l_param: isize,
+        i_image: i32,
+    }
+
+    /// BFFCALLBACK（可为空的函数指针）
+    type BrowseCallbackProc = Option<unsafe extern "system" fn(*mut c_void, u32, isize, isize) -> i32>;
+
+    extern "system" {
+        fn CoInitializeEx(reserved: *mut c_void, coinit: u32) -> i32;
+        fn CoUninitialize();
+        fn CoTaskMemFree(pv: *mut c_void);
+        fn SHBrowseForFolderW(bi: *const BrowseInfoW) -> *mut c_void;
+        fn SHGetPathFromIDListW(pidl: *const c_void, path: *mut u16) -> i32;
+        fn SendMessageW(hwnd: *mut c_void, msg: u32, wparam: usize, lparam: isize) -> isize;
+        fn ShellExecuteW(
+            hwnd: *mut c_void,
+            op: *const u16,
+            file: *const u16,
+            params: *const u16,
+            dir: *const u16,
+            show: i32,
+        ) -> *mut c_void;
+    }
+
+    const COINIT_APARTMENTTHREADED: u32 = 0x2;
+    const S_OK: i32 = 0;
+    const S_FALSE: i32 = 1;
+    /// 本线程已按其它并发模型初始化过 COM：不是失败，继续用即可（但不可再 CoUninitialize）
+    const RPC_E_CHANGED_MODE: i32 = 0x8001_0106u32 as i32;
+
+    const BIF_RETURNONLYFSDIRS: u32 = 0x0000_0001;
+    const BIF_EDITBOX: u32 = 0x0000_0010;
+    const BIF_NEWDIALOGSTYLE: u32 = 0x0000_0040;
+
+    const BFFM_INITIALIZED: u32 = 1;
+    /// BFFM_SETSELECTIONW = WM_USER + 103（lParam 传宽字符串指针即可预选目录）
+    const BFFM_SETSELECTIONW: u32 = 0x0400 + 103;
+    const MAX_PATH: usize = 260;
+    const SW_SHOWNORMAL: i32 = 1;
+
+    fn wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    /// 对话框初始化回调：把默认目录预选中（lpData = BROWSEINFOW.l_param 里递进来的路径指针）
+    unsafe extern "system" fn on_browse(hwnd: *mut c_void, msg: u32, _lp: isize, data: isize) -> i32 {
+        if msg == BFFM_INITIALIZED && data != 0 {
+            SendMessageW(hwnd, BFFM_SETSELECTIONW, 1, data);
+        }
+        0
+    }
+
+    /// COM 初始化守卫：S_OK 与 S_FALSE 都算成功（S_FALSE = 本线程已初始化过），
+    /// 两者都要成对 CoUninitialize；只有 RPC_E_CHANGED_MODE 这种"别人已初始化"的场景
+    /// 继续执行但不接管释放，其余 HRESULT 失败才报错。
+    struct ComGuard(bool);
+
+    impl ComGuard {
+        fn new() -> Result<Self, String> {
+            let hr = unsafe { CoInitializeEx(std::ptr::null_mut(), COINIT_APARTMENTTHREADED) };
+            if hr == S_OK || hr == S_FALSE {
+                return Ok(ComGuard(true));
+            }
+            if hr == RPC_E_CHANGED_MODE {
+                return Ok(ComGuard(false));
+            }
+            Err(format!(
+                "初始化系统对话框组件失败（HRESULT 0x{:08X}）",
+                hr as u32
+            ))
+        }
+    }
+
+    impl Drop for ComGuard {
+        fn drop(&mut self) {
+            if self.0 {
+                unsafe { CoUninitialize() };
+            }
+        }
+    }
+
+    /// 弹出「选择文件夹」对话框。Ok(Some(路径)) = 用户选中；Ok(None) = 用户取消。
+    pub fn pick(title: Option<&str>, default_dir: Option<&str>) -> Result<Option<String>, String> {
+        let _com = ComGuard::new()?;
+        let title_w = wide(title.unwrap_or("请选择文件夹"));
+        // 预选目录要活到对话框关闭（l_param 只存裸指针），故在此持有所有权
+        let dir_w: Option<Vec<u16>> = default_dir.map(wide);
+        let mut name_buf = [0u16; MAX_PATH]; // pszDisplayName：长度至少 MAX_PATH
+        let bi = BrowseInfoW {
+            hwnd_owner: std::ptr::null_mut(),
+            pidl_root: std::ptr::null_mut(),
+            psz_display_name: name_buf.as_mut_ptr(),
+            lpsz_title: title_w.as_ptr(),
+            ul_flags: BIF_RETURNONLYFSDIRS | BIF_EDITBOX | BIF_NEWDIALOGSTYLE,
+            lpfn: Some(on_browse),
+            l_param: dir_w.as_ref().map_or(0, |w| w.as_ptr() as isize),
+            i_image: 0,
+        };
+        let pidl = unsafe { SHBrowseForFolderW(&bi) };
+        if pidl.is_null() {
+            return Ok(None); // 用户取消
+        }
+        let mut path_buf = [0u16; MAX_PATH];
+        let ok = unsafe { SHGetPathFromIDListW(pidl, path_buf.as_mut_ptr()) };
+        unsafe { CoTaskMemFree(pidl) }; // PIDL 由 COM 分配器分配
+        if ok == 0 {
+            return Err("无法读取所选文件夹的路径".to_string());
+        }
+        let len = path_buf.iter().position(|c| *c == 0).unwrap_or(path_buf.len());
+        Ok(Some(String::from_utf16_lossy(&path_buf[..len])))
+    }
+
+    /// 用系统资源管理器打开一个本地文件夹（导出记录「打开所在文件夹」）。
+    pub fn open_folder(dir: &str) -> Result<(), String> {
+        let _com = ComGuard::new()?;
+        let op = wide("open");
+        let file = wide(dir);
+        let h = unsafe {
+            ShellExecuteW(
+                std::ptr::null_mut(),
+                op.as_ptr(),
+                file.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                SW_SHOWNORMAL,
+            )
+        };
+        // ShellExecuteW 返回值 > 32 才算成功（<=32 是 SE_ERR_* 错误码）
+        if (h as isize) <= 32 {
+            return Err(format!("系统无法打开该文件夹（错误码 {}）", h as isize));
+        }
+        Ok(())
+    }
+}
+
+/// 「选择文件夹」系统对话框（导出题库文件时选保存位置；桌面版专用）。
+/// 前端传：title（对话框标题）+ default_dir（初始目录，通常是后端 prefs 的 defaultDir）；
+/// 返回：用户所选目录（取消 = null）。与 save_dialog_file 共用 LAST_DIR 记忆，
+/// 让两个对话框的"上次目录"保持一致。
+/// 注意：路径全程以 JSON 字符串传递（不经 cmd/shell），中文与空格无需转义。
+#[tauri::command]
+fn pick_directory(
+    title: Option<String>,
+    default_dir: Option<String>,
+) -> Result<Option<String>, String> {
+    // 初始目录：显式传入且存在 > 上次选择 > 系统下载目录
+    let mut init: Option<std::path::PathBuf> = default_dir
+        .map(|d| std::path::PathBuf::from(d.trim()))
+        .filter(|p| p.is_dir());
+    if init.is_none() {
+        init = LAST_DIR.lock().unwrap().clone();
+    }
+    if init.is_none() {
+        init = std::env::var("USERPROFILE")
+            .ok()
+            .map(|p| std::path::PathBuf::from(p).join("Downloads"))
+            .filter(|p| p.is_dir());
+    }
+    let init_str = init.as_ref().map(|p| p.to_string_lossy().to_string());
+    let picked = win_folder::pick(
+        title.as_deref().map(str::trim).filter(|s| !s.is_empty()),
+        init_str.as_deref(),
+    )?;
+    if let Some(p) = picked.as_ref() {
+        logln(&format!("pick_directory: {p}"));
+        *LAST_DIR.lock().unwrap() = Some(std::path::PathBuf::from(p));
+    }
+    Ok(picked)
+}
+
+/// 在资源管理器中打开本地文件/文件夹所在目录（导出记录的「打开所在文件夹」）。
+/// 传文件路径时自动取其父目录；目录已被移动/删除时返回可读中文错误。
+#[tauri::command]
+fn open_directory(path: String) -> Result<(), String> {
+    let raw = path.trim();
+    if raw.is_empty() {
+        return Err("路径为空".to_string());
+    }
+    let p = std::path::Path::new(raw);
+    // 允许传整条文件路径（文件还在→父目录；文件已被删→父目录仍在时也照常打开）
+    let dir: &std::path::Path = if p.is_dir() {
+        p
+    } else if let Some(parent) = p.parent().filter(|d| d.is_dir()) {
+        parent
+    } else {
+        p
+    };
+    if !dir.is_dir() {
+        return Err("文件夹不存在（可能已被移动或删除）".to_string());
+    }
+    logln(&format!("open_directory: {}", dir.to_string_lossy()));
+    win_folder::open_folder(&dir.to_string_lossy())
+}
+
 // ==================== 自动更新（自建频道） ====================
 // 设计：不用 tauri-plugin-updater（其 NSIS 安装回默认目录，会破坏自定义安装位置
 // 如 D:\拾题）。改为壳内自实现：curl 拉清单/下载 → certutil 校验 SHA256 →
@@ -601,6 +815,8 @@ fn main() {
     let app = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             save_dialog_file,
+            pick_directory,
+            open_directory,
             app_version,
             open_url,
             restart_with_restore,

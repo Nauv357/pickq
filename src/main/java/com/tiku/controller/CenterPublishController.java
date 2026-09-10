@@ -1,8 +1,14 @@
 package com.tiku.controller;
 
 import com.tiku.dto.ApiResponse;
+import com.tiku.dto.PublishFromPathRequest;
 import com.tiku.service.CenterAuthStore;
 import com.tiku.service.ContentPackageInspector;
+import com.tiku.service.ExportRecordService;
+import com.tiku.util.PackageContainer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -19,6 +25,7 @@ import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
@@ -31,7 +38,8 @@ import java.util.stream.Collectors;
  * 题库广场「发布作品 / 我的作品」写侧代理（二期）。
  * 桌面端在应用内发布内容包、管理自己的作品，全部经本地后端转发到官网：
  * - POST   /api/center/publish/inspect             发布前本地体检（只解析元数据，不导入不转发）
- * - POST   /api/packs/upload                       直传发布（multipart，服务端解析元数据自动登记）
+ * - POST   /api/center/publish                     直传发布（multipart，服务端解析元数据自动登记）
+ * - POST   /api/center/publish-from-path           从本地路径直接发布（JSON body，文件不走前端中转）
  * - GET    /api/me/packs                           我的作品（含已下架，每作品最新一行 + 版本数）
  * - DELETE /api/packs/{packageKey}                 下架整个作品
  * - PUT    /api/packs/{packageKey}/{version}       更新版本元数据（描述/来源/外链）
@@ -54,6 +62,8 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/center")
 public class CenterPublishController {
 
+    private static final Logger log = LoggerFactory.getLogger(CenterPublishController.class);
+
     /** 内容包文件上限，与官网 upload.post.ts / file.put.ts 的 MAX_BYTES 一致 */
     private static final long MAX_FILE_BYTES = 200L * 1024 * 1024;
     /** 超过该阈值先把上传内容落到临时文件，再流式转发（小文件直接留在内存，省一次磁盘往返） */
@@ -64,9 +74,22 @@ public class CenterPublishController {
     private static final int READ_TIMEOUT_MS = 300_000;
 
     private final CenterAuthStore authStore;
+    /**
+     * 导出记录（可选依赖）：从本地路径发布时带 exportRecordId 才用到。
+     * 单独留一个单参构造：单元测试与手工构造（CenterPublishForwardTest 等）不需要数据层，
+     * 此时联动标记为 null = 不标记（发布本身照常完成）。
+     */
+    private final ExportRecordService exportRecordService;
 
+    /** 单参构造：测试/手工构造用（不联动导出记录标记） */
     public CenterPublishController(CenterAuthStore authStore) {
+        this(authStore, null);
+    }
+
+    @Autowired
+    public CenterPublishController(CenterAuthStore authStore, ExportRecordService exportRecordService) {
         this.authStore = authStore;
+        this.exportRecordService = exportRecordService;
     }
 
     // ==================== 校验与鉴权 ====================
@@ -180,9 +203,12 @@ public class CenterPublishController {
      * 上传内容的一次性暂存：≤ {@link #SPOOL_THRESHOLD_BYTES} 留内存，更大落临时文件。
      * 存在的意义：发布路径既要"体检"又要"转发"，若各自读一遍 MultipartFile，
      * 200MB 文件会被完整读两次；暂存后体检只取元数据（zip 随机读 package.json）、转发流式写出，
-     * 客户端请求体只被读一次。close() 负责删除临时文件。
+     * 客户端请求体只被读一次。close() 只删除自己创建的临时文件。
+     * <p>
+     * 从本地路径发布（{@link #stageFile}）时 tempFile 就是用户磁盘上的那个 .tiku：
+     * 不复制、不读进内存，自有标记 owned=false 保证 close() 绝不删用户文件。
      */
-    private record Staged(byte[] bytes, Path tempFile, long size) implements AutoCloseable {
+    private record Staged(byte[] bytes, Path tempFile, long size, boolean owned) implements AutoCloseable {
 
         /** 顺序读取（转发写出用） */
         InputStream open() throws IOException {
@@ -201,7 +227,8 @@ public class CenterPublishController {
 
         @Override
         public void close() {
-            if (tempFile != null) {
+            //只删本类自己创建的临时文件（owned）：从本地路径发布时那是用户的文件
+            if (tempFile != null && owned) {
                 try {
                     Files.deleteIfExists(tempFile);
                 } catch (IOException ignored) {
@@ -226,13 +253,18 @@ public class CenterPublishController {
                     }
                     throw e;
                 }
-                return new Staged(null, tempFile, Files.size(tempFile));
+                return new Staged(null, tempFile, Files.size(tempFile), true);
             }
             byte[] bytes = file.getBytes();
-            return new Staged(bytes, null, bytes.length);
+            return new Staged(bytes, null, bytes.length, true);
         } catch (IOException e) {
             throw new IllegalStateException("读取上传文件失败：" + e.getMessage());
         }
+    }
+
+    /** 从本地磁盘路径暂存（发布中心导出的文件就在本机）：直接引用原文件，不复制不删（owned=false） */
+    private static Staged stageFile(Path file, long size) {
+        return new Staged(null, file, size, false);
     }
 
     // ==================== multipart 组装与转发 ====================
@@ -478,17 +510,125 @@ public class CenterPublishController {
             // 本地严格体检（与官网 package-meta.ts / upload.post.ts 同口径）：不合法在这里就结束，一字节不出网
             staged.inspect();
 
-            List<TextPart> parts = new ArrayList<>();
-            parts.add(new TextPart("storageKind", kind));
-            if (!url.isEmpty()) {
-                parts.add(new TextPart("downloadUrl", url));
-            }
-            addIfPresent(parts, "title", title);
-            addIfPresent(parts, "description", description);
-            addIfPresent(parts, "source", source);
-            return textJson(forwardMultipart("POST", base + "/api/packs/upload", parts, staged,
+            return textJson(forwardMultipart("POST", base + "/api/packs/upload",
+                    publishParts(kind, url, title, description, source), staged,
                     file.getOriginalFilename(), file.getContentType()));
         }
+    }
+
+    /**
+     * POST /api/center/publish-from-path（JSON body，需登录）— 从本地路径直接发布内容包。
+     * body：{ filePath, storageKind, downloadUrl?, title?, description?, source?, exportRecordId? }；
+     * center 可作查询参数（缺省 https://pickq.cn），与 multipart 发布一致。
+     * <p>
+     * 存在意义：本地发布中心导出的 .tiku 就在本机磁盘上，没必要让前端把 200MB 读进内存再经
+     * HTTP 请求体回传一遍；后端直接读这个路径。除"文件来源"外，本条路径与 multipart 发布
+     * <b>完全同一套逻辑</b>：
+     * - 体检：同一个 {@link ContentPackageInspector#inspect(Path)}（.tiku 走 zip 中央目录随机读，
+     *   只解压 package.json，不把图片读进内存），不合法直接 IllegalArgumentException，一字节不出网；
+     * - 字段校验：同一个 storageKind / downloadUrl 口径；
+     * - 转发：同一个手写 multipart（文件流式读 + setFixedLengthStreamingMode 定长流式写，大文件不进堆）；
+     * - 校验登录：无 token 同样 IllegalStateException("请先登录题库广场账号")，不发远程请求。
+     * <p>
+     * 成功返回官网响应体原文；带 exportRecordId 时顺带把该导出记录标记为已发布
+     * （版本取包内 version，官网登记的就是它）。
+     */
+    @PostMapping("/publish-from-path")
+    public ResponseEntity<String> publishFromPath(@RequestParam(required = false) String center,
+                                                  @RequestBody(required = false) PublishFromPathRequest request) {
+        requireLogin();
+        if (request == null) {
+            throw new IllegalArgumentException("缺少请求体（需要 filePath）");
+        }
+        String base = checkBase(center);
+        LocalPackage local = requireLocalPackage(request.filePath());
+        String kind = normalizeStorageKind(request.storageKind());
+        String url = checkDownloadUrl(request.downloadUrl());
+        if ("EXTERNAL".equals(kind) && url.isEmpty()) {
+            throw new IllegalArgumentException("外链方式需要提供内容包下载链接（http/https）");
+        }
+
+        try (Staged staged = stageFile(local.path(), local.size())) {
+            // 与 multipart 发布同一套体检：格式/元数据不合法在这里就结束，一字节不出网
+            ContentPackageInspector.Inspection meta = staged.inspect();
+            String response = forwardMultipart("POST", base + "/api/packs/upload",
+                    publishParts(kind, url, request.title(), request.description(), request.source()),
+                    staged, local.path().getFileName().toString(), local.contentType());
+            // 上传成功：顺便把导出记录标记为已发布（版本取包内 version，官网登记的就是它）。
+            // 标记失败（记录已被删等）不影响"已经发布成功"这个事实：只记日志，响应仍按官网原文返回
+            if (request.exportRecordId() != null && exportRecordService != null) {
+                try {
+                    exportRecordService.markPublished(request.exportRecordId(), meta.version());
+                } catch (RuntimeException e) {
+                    log.warn("发布成功但标记导出记录失败：recordId={}, {}", request.exportRecordId(), e.getMessage());
+                }
+            }
+            return textJson(response);
+        }
+    }
+
+    /** 本地内容包文件（发布来源）：绝对路径 + 字节数 + 按魔数判定的 Content-Type */
+    private record LocalPackage(Path path, long size, String contentType) {
+    }
+
+    /**
+     * 本地路径校验：必须存在、是文件、非空且 ≤200MB（与 multipart 上传同为官网 200MB 上限）。
+     * 路径问题抛 IllegalArgumentException（400，用户可选个文件重试），读取失败抛 IllegalStateException（磁盘问题）。
+     */
+    private static LocalPackage requireLocalPackage(String filePath) {
+        if (filePath == null || filePath.isBlank()) {
+            throw new IllegalArgumentException("请提供要发布的内容包文件路径（filePath）");
+        }
+        Path path;
+        try {
+            path = Path.of(filePath.trim()).toAbsolutePath().normalize();
+        } catch (InvalidPathException e) {
+            throw new IllegalArgumentException("内容包文件路径不合法：" + filePath);
+        }
+        if (!Files.exists(path)) {
+            throw new IllegalArgumentException("内容包文件不存在：" + path);
+        }
+        if (Files.isDirectory(path)) {
+            throw new IllegalArgumentException("内容包文件路径是目录，不是文件：" + path);
+        }
+        long size;
+        try {
+            size = Files.size(path);
+        } catch (IOException e) {
+            throw new IllegalStateException("读取内容包文件失败：" + e.getMessage());
+        }
+        if (size <= 0) {
+            throw new IllegalArgumentException("内容包文件为空：" + path);
+        }
+        if (size > MAX_FILE_BYTES) {
+            throw new IllegalArgumentException("内容包文件超过 200MB 上限");
+        }
+        // 按魔数判定 Content-Type（.tiku = zip / 其余按 JSON）：官网不靠它解析（认魔数与内容），
+        // 与 multipart 发布保留浏览器上报类型同理，只是让中转请求头如实
+        String contentType;
+        try {
+            contentType = PackageContainer.isZipContainer(path) ? "application/zip" : "application/json";
+        } catch (IOException e) {
+            contentType = "application/octet-stream";
+        }
+        return new LocalPackage(path, size, contentType);
+    }
+
+    /**
+     * 发布表单字段（官网 upload.post.ts 读的就是这几个）：storageKind 始终显式送
+     * （官网缺省是 EXTERNAL，本地缺省为 HOSTED），空值字段不送（覆盖值留空即不覆盖）。
+     */
+    private static List<TextPart> publishParts(String kind, String url, String title,
+                                               String description, String source) {
+        List<TextPart> parts = new ArrayList<>();
+        parts.add(new TextPart("storageKind", kind));
+        if (!url.isEmpty()) {
+            parts.add(new TextPart("downloadUrl", url));
+        }
+        addIfPresent(parts, "title", title);
+        addIfPresent(parts, "description", description);
+        addIfPresent(parts, "source", source);
+        return parts;
     }
 
     /** 空值字段不送（官网 field() 只认长度 > 0 的部件；description/source 属覆盖值，空即不覆盖） */

@@ -5,5 +5,5 @@
   "remote": {
     "urls": ["http://127.0.0.1:*"]
   },
-  "permissions": ["core:default", "allow-save-dialog-file", "allow-updater", "allow-open-url", "allow-restore"]
+  "permissions": ["core:default", "allow-save-dialog-file", "allow-folder-picker", "allow-open-directory", "allow-updater", "allow-open-url", "allow-restore"]
 }
