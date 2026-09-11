@@ -1,6 +1,7 @@
 package com.tiku.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tiku.config.AiSettings;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -9,6 +10,7 @@ import java.nio.file.Path;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -105,6 +107,37 @@ class AiConfigServiceTest {
         assertFalse(service.isConfigured(), "缺模型不算已配置");
         write(tempDir, null, "sk-1", "m");
         assertFalse(service.isConfigured(), "缺地址不算已配置");
+    }
+
+    @Test
+    void saveWritesCompleteConfigurationAndCleansTemporaryFile(@TempDir Path tempDir) throws Exception {
+        AiConfigService service = service(tempDir);
+        AiSettings settings = new AiSettings();
+        settings.setBaseUrl("https://api.deepseek.com/v1");
+        settings.setApiKey("sk-test-key");
+        settings.setModel("deepseek-chat");
+
+        service.save(settings);
+
+        AiSettings loaded = service.load();
+        assertEquals(settings.getBaseUrl(), loaded.getBaseUrl());
+        assertEquals(settings.getApiKey(), loaded.getApiKey());
+        assertEquals(settings.getModel(), loaded.getModel());
+        try (var files = java.nio.file.Files.list(tempDir)) {
+            assertEquals(1, files.count(), "保存成功后不应留下 AI 配置临时文件");
+        }
+    }
+
+    @Test
+    void malformedConfigurationFallsBackToEmptySettings(@TempDir Path tempDir) throws Exception {
+        AiConfigService service = service(tempDir);
+        java.nio.file.Files.writeString(tempDir.resolve("ai-config.json"), "{not-json}");
+
+        AiSettings settings = service.load();
+
+        assertNull(settings.getBaseUrl());
+        assertNull(settings.getApiKey());
+        assertNull(settings.getModel());
     }
 
     /** 写一份 ai-config.json（null 字段写 null） */

@@ -26,6 +26,7 @@ public record AiJobResponse(
         List<ContentPackageQuestion> questions,  //SUCCESS 后返回（预览用）
         List<ContentPackageMaterial> materials,  //共享材料（材料组识别，预览用；可空）
         String warningHint,  //题数差异检测提示（可空；预览页展示，不阻塞确认导入）
+        String errorCode,    //稳定失败码（FAILED 时可用；错误详情仍使用 error）
         String error,
         LocalDateTime createdAt,
         LocalDateTime finishedAt

@@ -4,19 +4,16 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tiku.dto.ApiResponse;
 import com.tiku.service.CenterAuthStore;
+import com.tiku.service.CenterHttpClient;
+import com.tiku.service.CenterUrlPolicy;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.web.context.WebServerApplicationContext;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
@@ -24,7 +21,6 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
 
 /**
  * 题库广场账号（桌面端经本地代理登录/注册/登出/查我）。
@@ -50,6 +46,8 @@ public class CenterAuthController {
 
     private final CenterAuthStore authStore;
     private final ObjectMapper objectMapper;
+    private final CenterUrlPolicy urlPolicy;
+    private final CenterHttpClient httpClient;
     /**
      * 本地 web 服务器上下文：**延迟获取**（ObjectProvider）。
      * 生产运行（真实内嵌服务器）一定拿得到；@SpringBootTest 默认 MOCK 环境下没有该 bean，
@@ -61,83 +59,27 @@ public class CenterAuthController {
     private final Map<String, Long> desktopStates = new ConcurrentHashMap<>();
     private final SecureRandom secureRandom = new SecureRandom();
 
+    @Autowired
     public CenterAuthController(CenterAuthStore authStore, ObjectMapper objectMapper,
-            ObjectProvider<WebServerApplicationContext> webContextProvider) {
+            ObjectProvider<WebServerApplicationContext> webContextProvider, CenterUrlPolicy urlPolicy,
+            CenterHttpClient httpClient) {
         this.authStore = authStore;
         this.objectMapper = objectMapper;
         this.webContextProvider = webContextProvider;
+        this.urlPolicy = urlPolicy;
+        this.httpClient = httpClient;
     }
 
-    /** 校验中心地址：仅 http/https，禁止带用户信息（官方地址 https://pickq.cn） */
-    private String checkBase(String center) {
-        String base = center == null || center.isBlank() ? "https://pickq.cn" : center.trim();
-        if (!base.startsWith("http://") && !base.startsWith("https://")) {
-            throw new IllegalArgumentException("广场地址需为 http(s) 链接");
-        }
-        if (base.contains("@")) {
-            throw new IllegalArgumentException("广场地址不合法");
-        }
-        return base.replaceAll("/+$", "");
+    /** 保留给独立端口测试和手工构造使用的便捷构造。 */
+    public CenterAuthController(CenterAuthStore authStore, ObjectMapper objectMapper,
+            ObjectProvider<WebServerApplicationContext> webContextProvider) {
+        this(authStore, objectMapper, webContextProvider, new CenterUrlPolicy(),
+                new CenterHttpClient(authStore, objectMapper));
     }
 
-    /** 请求官网；已登录自动带 Authorization。HTTP >= 400 → 提取官网错误信息抛出 */
+    /** 请求官网；会话令牌、超时和远端错误格式均由基础设施客户端统一处理。 */
     private String request(String method, String url, String jsonBody, boolean desktop) {
-        try {
-            HttpURLConnection conn = (HttpURLConnection) URI.create(url).toURL().openConnection();
-            conn.setRequestMethod(method);
-            conn.setConnectTimeout(8000);
-            conn.setReadTimeout(30000);
-            String token = authStore.token();
-            if (token != null) {
-                conn.setRequestProperty("Authorization", "Bearer " + token);
-            }
-            if (desktop) {
-                conn.setRequestProperty("X-Desktop", "1");
-            }
-            conn.setRequestProperty("Accept", "application/json");
-            if (jsonBody != null) {
-                conn.setDoOutput(true);
-                conn.setRequestProperty("Content-Type", "application/json");
-                try (OutputStream os = conn.getOutputStream()) {
-                    os.write(jsonBody.getBytes(StandardCharsets.UTF_8));
-                }
-            }
-            int code = conn.getResponseCode();
-            InputStream stream = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
-            String body = stream == null ? ""
-                    : new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))
-                            .lines().collect(Collectors.joining("\n"));
-            if (code >= 400) {
-                throw new IllegalStateException(extractError(body, code));
-            }
-            return body;
-        } catch (IOException e) {
-            throw new IllegalStateException("无法连接题库广场：" + e.getMessage());
-        }
-    }
-
-    /** 从官网错误响应体提取用户可读 message（h3 错误 JSON：顶层 message / data.message / statusMessage） */
-    private String extractError(String body, int code) {
-        if (body != null && !body.isBlank()) {
-            try {
-                JsonNode root = objectMapper.readTree(body);
-                JsonNode m = root.path("message");
-                if (m.isTextual() && !m.asText().isBlank()) {
-                    return m.asText();
-                }
-                m = root.path("data").path("message");
-                if (m.isTextual() && !m.asText().isBlank()) {
-                    return m.asText();
-                }
-                m = root.path("statusMessage");
-                if (m.isTextual() && !m.asText().isBlank()) {
-                    return m.asText();
-                }
-            } catch (IOException ignored) {
-                /* 非 JSON 错误体 */
-            }
-        }
-        return "题库广场返回错误（HTTP " + code + "）";
+        return httpClient.forwardJson(method, url, jsonBody, CenterHttpClient.DEFAULT_READ_TIMEOUT_MS, desktop);
     }
 
     /** 成功响应体 → data 节点 */
@@ -174,7 +116,7 @@ public class CenterAuthController {
         if (req.username() == null || req.username().isBlank() || req.password() == null || req.password().isEmpty()) {
             throw new IllegalArgumentException("请输入用户名和密码");
         }
-        String base = checkBase(req.center());
+        String base = urlPolicy.centerBase(req.center());
         String body = request("POST", base + "/api/auth/login",
                 jsonOf(Map.of("username", req.username().trim(), "password", req.password())), true);
         JsonNode data = parseData(body);
@@ -192,7 +134,7 @@ public class CenterAuthController {
         if (req.username() == null || req.username().isBlank() || req.password() == null || req.password().isEmpty()) {
             throw new IllegalArgumentException("请输入用户名和密码");
         }
-        String base = checkBase(req.center());
+        String base = urlPolicy.centerBase(req.center());
         Map<String, Object> fields = new LinkedHashMap<>();
         fields.put("username", req.username().trim());
         fields.put("password", req.password());
@@ -216,7 +158,7 @@ public class CenterAuthController {
     /** POST /api/center/auth/logout { center? } — 退出登录（尽力通知官网并清除本地） */
     @PostMapping("/logout")
     public ApiResponse<Void> logout(@RequestBody(required = false) Map<String, String> req) {
-        String base = checkBase(req == null ? null : req.get("center"));
+        String base = urlPolicy.centerBase(req == null ? null : req.get("center"));
         try {
             request("POST", base + "/api/auth/logout", null, false);
         } catch (RuntimeException e) {
@@ -232,7 +174,7 @@ public class CenterAuthController {
         if (!authStore.isLoggedIn()) {
             return ApiResponse.success(userMap(null));
         }
-        String base = checkBase(center);
+        String base = urlPolicy.centerBase(center);
         String body = request("GET", base + "/api/auth/me", null, false);
         JsonNode data = parseData(body);
         JsonNode user = data.path("user");
@@ -294,7 +236,7 @@ public class CenterAuthController {
      */
     @PostMapping("/github/start")
     public ApiResponse<Map<String, Object>> githubStart(@RequestBody(required = false) Map<String, String> req) {
-        String base = checkBase(req == null ? null : req.get("center"));
+        String base = urlPolicy.centerBase(req == null ? null : req.get("center"));
         int port = localPort();
         long now = System.currentTimeMillis();
         purgeDesktopStates(now);
@@ -334,7 +276,7 @@ public class CenterAuthController {
             return resultPage(false, "登录失败或链接已过期，请回到拾题应用重试");
         }
         try {
-            String body = request("POST", checkBase(null) + DESKTOP_EXCHANGE_PATH,
+            String body = request("POST", urlPolicy.centerBase(null) + DESKTOP_EXCHANGE_PATH,
                     jsonOf(Map.of("ticket", t)), false);
             JsonNode data = parseData(body);
             String token = data.path("token").asText(null);

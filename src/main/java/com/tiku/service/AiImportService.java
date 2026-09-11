@@ -14,15 +14,11 @@ import com.tiku.model.ContentPackageQuestion;
 import com.tiku.model.OptionItem;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.awt.image.BufferedImage;
-import javax.imageio.ImageIO;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
@@ -36,7 +32,6 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Set;
-import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.Executor;
@@ -91,27 +86,8 @@ public class AiImportService {
     /** 题数差异检测：参考题数低于该值不检测（题号不可靠） */
     private static final int QUESTION_DIFF_MIN_REF = 8;
 
-    // ===== 分块并行（文本路径加速） =====
-    /** 每题号边界正则：行首 1-3 位数字 + 半角/全角点、顿号或括号 */
-    private static final Pattern QUESTION_START = Pattern.compile("(?m)^\\s*(\\d{1,3})\\s*[.．、)）]");
     /** 答案列表行：如 "1.B" "12. C" "3:ABD" "5√"；含学科卷 "【1题答案】B"（统一 AiAnswerFormat） */
     private static final Pattern ANSWER_LINE = AiAnswerFormat.ANSWER_LINE;
-    /**
-     * 源文答案标记：答案：X / 答：X / （X） / 【答案】X / 【N题答案】X / （对）等。
-     * 用于 aiSupplement=false 时校验模型给出的答案是否真有源文证据（防关闭思考后模型编造答案）。
-     */
-    private static final Pattern ANSWER_MARKER = Pattern.compile(
-            "(?:答案|参考答案|正确答案)\\s*[:：]?\\s*[（(]?\\s*([A-Ha-h]{1,6}|[对错√×])\\s*[）)]?"
-                    + "|答\\s*[:：]\\s*[（(]?\\s*([A-Ha-h]{1,6}|[对错√×])\\s*[）)]?"
-                    + "|[（(]\\s*([A-Ha-h]{1,6}|[对错√×])\\s*[）)]"
-                    + "|【\\s*答案\\s*】\\s*[:：]?\\s*([A-Ha-h]{1,6}|[对错√×])"
-                    + "|【\\s*(?:第)?\\s*\\d{1,3}\\s*题\\s*(?:的)?\\s*答案\\s*】\\s*[:：]?\\s*([A-Ha-h]{1,6}|[对错√×])");
-    /** 材料补齐时向前收集的停止行：上一题的题号行或选项行 */
-    private static final Pattern MATERIAL_STOP = Pattern.compile("^\\d{1,3}\\s*[.．、)）]|^[A-Da-d][.．、]");
-    /** 裸题号内容（如 "30."），材料补齐时整体替换 */
-    private static final Pattern BARE_NUMBER_CONTENT = Pattern.compile("^\\d{1,3}\\s*[.．、)）]?\\s*$");
-    /** 孤立题号行（如 "1." 单独成行） */
-    private static final Pattern QUESTION_NUMBER_ALONE = Pattern.compile("^\\d{1,3}\\s*[.．、)）]\\s*$");
     /** 每块目标题数（下限 10，保证每块输出量适中） */
     private static final int CHUNK_TARGET_QUESTIONS = 12;
     /** 每块图片配额（marksEmbedded 路径）：块内唯一图片数超过则按题号边界二次拆块——
@@ -136,12 +112,25 @@ public class AiImportService {
     private final ImageStorageService imageStorageService;
     private final com.tiku.mapper.MaterialMapper materialMapper;
     private final ObjectMapper objectMapper;
+    private final AiImportResultCodec resultCodec;
+    private final AiImportPromptFactory promptFactory;
+    private final AiImportDocumentPipeline documentPipeline;
+    private final AiImportTextStructure textStructure;
+    private final AiImportSourceTextService sourceTextService;
+    private final AiImportResultParser resultParser;
+    private final AiImportFormulaService formulaService;
+    private final AiImportAnswerService answerService;
+    private final AiImportVisionQualityService visionQualityService;
+    private final AiImportVisionMissingPageService visionMissingPageService;
+    private final AiImportImageReferenceService imageReferenceService;
+    private final AiImportFailureClassifier failureClassifier;
     private final Executor aiImportExecutor;
     private final java.util.concurrent.ExecutorService aiChunkExecutor;
     private final AiJobEventService aiJobEventService;
-    private final Path importsDir;
+    private final AiImportJobStorageService jobStorageService;
 
-    public AiImportService(AiImportJobMapper jobMapper,                           AiConfigService aiConfigService,
+    public AiImportService(AiImportJobMapper jobMapper,
+                           AiConfigService aiConfigService,
                            AiClientService aiClientService,
                            DocumentParserService documentParserService,
                            MineruParseService mineruParseService,
@@ -150,10 +139,22 @@ public class AiImportService {
                            ImageStorageService imageStorageService,
                            com.tiku.mapper.MaterialMapper materialMapper,
                            ObjectMapper objectMapper,
+                           AiImportResultCodec resultCodec,
+                           AiImportPromptFactory promptFactory,
+                           AiImportDocumentPipeline documentPipeline,
+                           AiImportTextStructure textStructure,
+                           AiImportSourceTextService sourceTextService,
+                           AiImportResultParser resultParser,
+                           AiImportFormulaService formulaService,
+                           AiImportAnswerService answerService,
+                           AiImportVisionQualityService visionQualityService,
+                           AiImportVisionMissingPageService visionMissingPageService,
+                           AiImportImageReferenceService imageReferenceService,
+                           AiImportFailureClassifier failureClassifier,
                            @Qualifier("aiImportExecutor") Executor aiImportExecutor,
                            @Qualifier("aiChunkExecutor") java.util.concurrent.ExecutorService aiChunkExecutor,
                            AiJobEventService aiJobEventService,
-                           @Value("${tiku.data-dir}") String dataDir) {
+                           AiImportJobStorageService jobStorageService) {
         this.jobMapper = jobMapper;
         this.aiConfigService = aiConfigService;
         this.aiClientService = aiClientService;
@@ -164,10 +165,22 @@ public class AiImportService {
         this.imageStorageService = imageStorageService;
         this.materialMapper = materialMapper;
         this.objectMapper = objectMapper;
+        this.resultCodec = resultCodec;
+        this.promptFactory = promptFactory;
+        this.documentPipeline = documentPipeline;
+        this.textStructure = textStructure;
+        this.sourceTextService = sourceTextService;
+        this.resultParser = resultParser;
+        this.formulaService = formulaService;
+        this.answerService = answerService;
+        this.visionQualityService = visionQualityService;
+        this.visionMissingPageService = visionMissingPageService;
+        this.imageReferenceService = imageReferenceService;
+        this.failureClassifier = failureClassifier;
         this.aiImportExecutor = aiImportExecutor;
         this.aiChunkExecutor = aiChunkExecutor;
         this.aiJobEventService = aiJobEventService;
-        this.importsDir = Path.of(dataDir, "imports");
+        this.jobStorageService = jobStorageService;
     }
 
     /**
@@ -189,6 +202,7 @@ public class AiImportService {
                 job.setStatus("FAILED");
                 job.setStage("DONE");
                 job.setError("应用上次退出中断了该任务，请删除后重新导入");
+                job.setErrorCode("APPLICATION_INTERRUPTED");
                 job.setFinishedAt(now);
                 jobMapper.updateById(job);
                 deleteJobFiles(job.getId());
@@ -202,26 +216,10 @@ public class AiImportService {
                 deleteJobFiles(job.getId());
             }
             //任务行已被物理删除但目录残留（>7 天）也清理
-            if (Files.isDirectory(importsDir)) {
-                try (var stream = Files.list(importsDir)) {
-                    stream.filter(Files::isDirectory).forEach(dir -> {
-                        String dirName = dir.getFileName().toString();
-                        if (!dirName.matches("\\d+")) {
-                            return;
-                        }
-                        try {
-                            long orphanId = Long.parseLong(dirName);
-                            if (jobMapper.selectById(orphanId) == null) {
-                                java.nio.file.attribute.FileTime ft = Files.getLastModifiedTime(dir);
-                                if (ft.toInstant().isBefore(
-                                        deadline.atZone(java.time.ZoneId.systemDefault()).toInstant())) {
-                                    deleteJobFiles(orphanId);
-                                }
-                            }
-                        } catch (Exception ignored) {
-                            //单目录清理失败不影响其他
-                        }
-                    });
+            java.time.Instant deadlineInstant = deadline.atZone(java.time.ZoneId.systemDefault()).toInstant();
+            for (Long orphanId : jobStorageService.findDirectoriesOlderThan(deadlineInstant)) {
+                if (jobMapper.selectById(orphanId) == null) {
+                    deleteJobFiles(orphanId);
                 }
             }
             if (!interrupted.isEmpty() || !stale.isEmpty()) {
@@ -252,7 +250,7 @@ public class AiImportService {
         }
         //文件名净化：剔除路径分隔符/控制字符/逗号等（逗号是 file_names 的拼接与解析分隔符），
         //防 `..\` 路径穿越写盘与含逗号文件名回读错位
-        fileNames = fileNames.stream().map(AiImportService::sanitizeFileName).toList();
+        fileNames = fileNames.stream().map(AiImportJobStorageService::sanitizeFileName).toList();
         if ("MINERU".equals(engine) && !aiConfigService.isMineruConfigured()) {
             throw new IllegalArgumentException("已选择 MinerU 云端解析，但「设置」中未配置 MinerU 解析 API Key");
         }
@@ -279,11 +277,14 @@ public class AiImportService {
         job.setCreatedAt(LocalDateTime.now());
         jobMapper.insert(job);
 
-        //文件落盘（异步线程不能安全持有 MultipartFile）
-        Path jobDir = importsDir.resolve(String.valueOf(job.getId()));
-        Files.createDirectories(jobDir);
-        for (int i = 0; i < fileNames.size(); i++) {
-            Files.write(jobDir.resolve(i + "-" + fileNames.get(i)), files.get(i));
+        //文件落盘（异步线程不能安全持有 MultipartFile）。落盘失败时回收刚创建的任务，
+        //避免数据库遗留永远无法执行的 PENDING 任务。
+        try {
+            jobStorageService.storeInputFiles(job.getId(), fileNames, files);
+        } catch (IOException | RuntimeException e) {
+            jobMapper.deleteById(job.getId());
+            deleteJobFiles(job.getId());
+            throw e;
         }
 
         //异步执行
@@ -297,28 +298,6 @@ public class AiImportService {
             throw new IllegalArgumentException("AI 导入任务较多，请等待进行中的任务完成后再试");
         }
         return jobId;
-    }
-
-    /**
-     * 上传文件名净化（display/落盘共用）：路径分隔符与非法字符替换为下划线、控制字符剔除、
-     * 逗号替换（file_names 以逗号拼接存储）、去首尾空白、拒绝 "."/".."、限长 150（截头留尾保扩展名）。
-     */
-    private static String sanitizeFileName(String raw) {
-        if (raw == null || raw.isBlank()) {
-            return "file";
-        }
-        String name = raw.replace('\\', '_').replace('/', '_')
-                .replace(',', '_')
-                .replaceAll("[\\\\/:*?\"<>|]", "_")
-                .replaceAll("[\\p{Cntrl}]", "")
-                .trim();
-        if (name.isEmpty() || ".".equals(name) || "..".equals(name)) {
-            name = "file";
-        }
-        if (name.length() > 150) {
-            name = name.substring(name.length() - 150);
-        }
-        return name;
     }
 
     // ==================== 异步执行 ====================
@@ -342,88 +321,27 @@ public class AiImportService {
 
             //1. 解析所有文件并合并（文本拼接 + 图片合并；答案文件与题目文件拼接后等价于"带卷末答案的文档"）
             //   进度按文件数推进（PARSING 10 → 35），多文件时用户可见"解析 2/3"的反馈
-            Path jobDir = importsDir.resolve(String.valueOf(jobId));
-            List<String> texts = new ArrayList<>();
-            List<AiClientService.ImageData> images = new ArrayList<>();
-            //阶段 4：内嵌图（题干/选项/材料图）+ 逐页文本（PDF 分块按页归属图片用）
-            List<DocumentParserService.ExtractedImage> extracted = new ArrayList<>();
-            List<String> pageTexts = new ArrayList<>();
-            StringBuilder warning = new StringBuilder();
-            String[] names = job.getFileNames().split(",");
-            int globalPageOffset = 0;
-            //引擎选择：MINERU 仅当用户显式勾选"扫描件 MinerU 增强"时使用（打字版文件一律本地——
-            //文本层充足时本地直传视觉/文本分块效果优于 MinerU，实测 125 题卷 MinerU 反而不如 agent 看图）；
-            //AUTO/LOCAL 永不自动走 MinerU；扫描件（文本层≈0）默认整页渲染交视觉模型直读。
-            //autoPlain（纯文本检测）对 AUTO 与 LOCAL 均生效：纯文字文档走本地文本分块（最快、判断题不漏）
-            boolean mineruConfigured = aiConfigService.isMineruConfigured();
-            String mineruKey = mineruConfigured ? aiConfigService.load().getMineruKey() : null;
-            String engine = job.getEngine() == null || job.getEngine().isBlank() ? "AUTO" : job.getEngine();
-            boolean engineLocal = "LOCAL".equals(engine);
-            boolean engineMineru = "MINERU".equals(engine);
-            boolean mineruUsed = false;
-            boolean allPlain = true; //纯文本检测（全部文件无图+文本层完整）——AUTO/LOCAL 生效
-            List<String> localTexts = new ArrayList<>(); //本地解析文本（MinerU 路径的答案溯源兜底）
-            int formulaTotal = 0; //docx 公式图（WMF/EMF MathType OLE）总数——公式密集 → 整理阶段强制思考
-            Set<Integer> formulaNosAll = new HashSet<>(); //公式图编号全集（残留转写兜底用；docx 编号=全局 extracted 编号）
-            for (int i = 0; i < names.length; i++) {
-                byte[] fileBytes = Files.readAllBytes(jobDir.resolve(i + "-" + names[i]));
-                DocumentParserService.ParseResult parsed;
-                //先本地解析一次（AUTO 检测用；MinerU 失败回退复用）
-                DocumentParserService.ParseResult localParsed = documentParserService.parse(names[i], fileBytes);
-                if (localParsed.text() != null && !localParsed.text().isBlank()) {
-                    localTexts.add(localParsed.text());
-                }
-                //MinerU 仅显式引擎（用户勾选"扫描件增强"）触发；打字版/扫描件默认本地
-                boolean wantMineru = engineMineru && mineruConfigured
-                        && mineruParseService.isMineruFile(names[i]);
-                if (wantMineru) {
-                    try {
-                        parsed = mineruParseService.parse(names[i], fileBytes, mineruKey);
-                        mineruUsed = true;
-                    } catch (Exception e) {
-                        //MinerU 失败（网络/API/额度）→ 回退本地解析，不整体失败
-                        log.warn("AI 导入任务 {} 文件 {} 走 MinerU 解析失败，回退本地解析：{}",
-                                jobId, names[i], e.getMessage());
-                        parsed = localParsed;
-                        warning.append("MinerU 解析不可用（").append(e.getMessage())
-                                .append("），该文件已回退本地解析 ");
-                    }
-                } else {
-                    parsed = localParsed;
-                }
-                if (engineMineru) {
-                    allPlain = false; //MinerU 引擎：数据流不同，不参与纯文本检测
-                } else {
-                    allPlain &= plainTextCandidate(localParsed);
-                }
-                if (parsed.text() != null && !parsed.text().isBlank()) {
-                    texts.add(parsed.text());
-                }
-                if (parsed.images() != null) {
-                    images.addAll(parsed.images());
-                }
-                if (parsed.pageTexts() != null) {
-                    pageTexts.addAll(parsed.pageTexts());
-                }
-                if (parsed.extractedImages() != null) {
-                    for (DocumentParserService.ExtractedImage e : parsed.extractedImages()) {
-                        //跨文件页号连续（docx 无页概念 pageNo=0，多文件含图走单次调用兜底）
-                        extracted.add(new DocumentParserService.ExtractedImage(e.pageNo() + globalPageOffset, e.sortX(), e.sortY(), e.pageHeight(), e.image()));
-                    }
-                }
-                globalPageOffset += parsed.pageTexts() == null ? 0 : parsed.pageTexts().size();
-                formulaTotal += parsed.formulaImageCount();
-                if (parsed.formulaImageNos() != null) {
-                    formulaNosAll.addAll(parsed.formulaImageNos());
-                }
-                if (parsed.warning() != null) {
-                    warning.append(parsed.warning()).append(' ');
-                }
-                //当前文件序号落库（前端"解析 2/3"），进度按文件数推进（PARSING 10 → 35）
-                job.setCurrentFileIndex(i + 1);
-                updateStage(job, "PROCESSING", "PARSING", 10 + (i + 1) * 25 / names.length);
+            Path jobDir = jobStorageService.jobDirectory(jobId);
+            AiImportDocumentPipeline.PreparedDocument prepared = documentPipeline.prepare(job, (current, total) -> {
+                job.setCurrentFileIndex(current);
+                updateStage(job, "PROCESSING", "PARSING", 10 + current * 25 / total);
                 aiJobEventService.publish(jobId, getJob(jobId));
+            });
+            List<String> texts = prepared.texts();
+            List<AiClientService.ImageData> images = prepared.images();
+            List<DocumentParserService.ExtractedImage> extracted = prepared.extractedImages();
+            List<String> pageTexts = prepared.pageTexts();
+            StringBuilder warning = new StringBuilder(prepared.warning());
+            if (!warning.isEmpty()) {
+                warning.append(' ');
             }
+            String[] names = prepared.fileNames().toArray(String[]::new);
+            boolean mineruUsed = prepared.mineruUsed();
+            boolean allPlain = prepared.allPlain();
+            String localEvidence = prepared.localEvidence();
+            int formulaTotal = prepared.formulaImageCount();
+            Set<Integer> formulaNosAll = prepared.formulaImageNumbers();
+            boolean engineMineru = "MINERU".equals(job.getEngine());
             //AUTO/LOCAL 引擎的纯文本检测（全部文件纯文本才生效）：强制走"本地文本分块"（跳过视觉单次/分页）——
             //纯文本文本层完整，文本分块保真且无 OCR 噪声；视觉路径对短题（判断题）漏题（quiz 实测 5/7）。
             //LOCAL 同样生效："最快"预设（LOCAL+关思考）对纯文字文档应走最快的文本分块
@@ -441,12 +359,6 @@ public class AiImportService {
             //文本流带 [图片N] 标记 = 图片锚点已确定性写入文本（docx 本地解析 / MinerU 重建 / PDF 就地标记）：
             //分块按标记取图，不依赖模型数图能力 → 图片路径不强制思考模式
             boolean marksInText = (mergedText != null && mergedText.contains("[图片")) || pdfDirect;
-            //MinerU 答案溯源兜底：MinerU 重建文本可能把卷末答案行识别坏（公式误读/丢行/样式串污染），
-            //本地解析文本中的 【N题答案】X / N.X 行是干净证据 → 供 postProcessAnswers 恢复原文答案
-            String localEvidence = null;
-            if (mineruUsed && !localTexts.isEmpty()) {
-                localEvidence = String.join("\n\n========== 下一份文件 ==========\n\n", localTexts);
-            }
             //PDF 直传封面/说明页图片过滤：第一页粉笔介绍图等广告图会被模型当题目图引用
             //（实测输出"[图片1]+空选项"垃圾块，且抢占开头题目的注意力）
             if (pdfDirect && !extracted.isEmpty() && pageTexts != null && !pageTexts.isEmpty()) {
@@ -503,14 +415,9 @@ public class AiImportService {
             //阶段 4：内嵌图临时落盘（imports/{jobId}/images/{N}.png，N = 全局编号从 1 开始），确认导入时转正式存储
             //（视觉单次路径无需思考也可用图片：占位符方案不依赖模型编号能力；无思考时也落盘供匹配）
             if (hasExtracted || (visionSingle && !extracted.isEmpty())) {
-                Path imgDir = jobDir.resolve("images");
-                Files.createDirectories(imgDir);
-                int n = 0;
-                for (DocumentParserService.ExtractedImage e : extracted) {
-                    n++;
-                    Files.write(imgDir.resolve(n + ".png"), e.image().data());
-                }
-                log.info("AI 导入任务 {} 提取内嵌图片 {} 张（按编号 1..{} 临时落盘）", jobId, n, n);
+                jobStorageService.storeExtractedImages(jobId, extracted);
+                log.info("AI 导入任务 {} 提取内嵌图片 {} 张（按编号 1..{} 临时落盘）", jobId,
+                        extracted.size(), extracted.size());
                 //把 [图片N] 标记按页内位置插入逐页文本（模型可见图在文本中的位置，引用更精准）
                 //视觉单次路径不用文本标记（占位符方案）；MinerU 路径由 chatChunked 按页归属编号；
                 //PDF 直传路径也不插标记——整页截图已给版式真相，文本标记位置是 y 坐标近似，
@@ -532,8 +439,8 @@ public class AiImportService {
             }
             //视觉路径（chatVisionSingle/chatVisionPages）保持原行为（思考模式下答案较可靠，模型直接输出）；
             //分块路径（chatChunked）内部改为"整理阶段"prompt（extractOnly），答案由 postProcessAnswers 统一处理
-            String systemPrompt = buildSystemPrompt(aiSupplement, false);
-            AiParsedResult parsedResult;
+            String systemPrompt = promptFactory.buildSystemPrompt(aiSupplement, false);
+            AiImportResult parsedResult;
             boolean visionPages = false;
             if (mineruUsed) {
                 //MinerU 路径（可选开关显式开启）：增强文本（阅读顺序 + 表格 HTML + 公式 LaTeX + [图片N] 标记内嵌）
@@ -575,11 +482,11 @@ public class AiImportService {
                 for (DocumentParserService.ExtractedImage e : extracted) {
                     allImages.add(e.image());
                 }
-                AiSettings vision = buildVisionSettings(settings);
-                String userPrompt = buildUserPrompt(mergedText, warning.toString().trim());
+                AiSettings vision = promptFactory.buildVisionSettings(settings);
+                String userPrompt = promptFactory.buildUserPrompt(mergedText, warning.toString().trim());
                 //内嵌图编号规则（[图片1]..[图片N]，图片随消息按编号顺序提供）
                 if (hasExtracted) {
-                    userPrompt += buildImageRefRule(1, extracted.size());
+                    userPrompt += promptFactory.buildImageRefRule(1, extracted.size());
                 }
                 String aiOutput = aiClientService.chatWithImages(vision, systemPrompt, userPrompt, allImages, true);
                 //单次多模态路径（扫描件/纯图片/含图）：sourceText 传 mergedText（可能为 null → 跳过答案证据检查）；
@@ -609,7 +516,7 @@ public class AiImportService {
             //残留公式图 LaTeX 转写兜底（docx 公式路径）：模型整理时可能漏转公式图 [图片N]
             //（非思考/模型波动实测均见）→ 按"docx 解析标记的公式图编号"收集残留，一次思考调用批量转写回填
             if (parsedResult != null && !formulaNosAll.isEmpty() && !extracted.isEmpty()) {
-                parsedResult = fixResidualFormulaImages(parsedResult, formulaNosAll, extracted, settings, jobId);
+                parsedResult = formulaService.replaceResidualFormulaImages(parsedResult, formulaNosAll, extracted, settings, jobId);
             }
 
             //用户取消检查（AI 调用后：丢弃结果，不写库）；取消确认后清理文件再停
@@ -677,18 +584,26 @@ public class AiImportService {
             sorted.sort(java.util.Comparator.comparingInt(
                     (ContentPackageQuestion q) -> q.getQuestionNumber() == null
                             ? Integer.MAX_VALUE : q.getQuestionNumber()));
-            parsedResult = new AiParsedResult(sorted, parsedResult.materials());
-            String resultJson = serializeResult(parsedResult);
+            parsedResult = new AiImportResult(sorted, parsedResult.materials());
+            String resultJson = resultCodec.serialize(parsedResult);
             //终态落库走条件更新（WHERE status <> 'CANCELED'）：取消竞态下线程只能停，
             //绝不能把 CANCELED 复活成 SUCCESS/FAILED（旧实现整行 updateById 会覆盖）
-            if (!writeTerminal(jobId, "SUCCESS", null, resultJson)) {
+            if (!writeTerminal(jobId, "SUCCESS", null, null, resultJson)) {
                 cleanupCanceledJobFiles(jobId);
                 return;
             }
         } catch (Exception e) {
-            log.error("AI 导入任务 {} 处理失败", jobId, e);
-            //失败终态同样条件更新；任务已被取消时不落失败原因（不覆盖用户的取消意图），只清理文件退出
-            if (!writeTerminal(jobId, "FAILED", truncate(e.getMessage(), 500), null)) {
+            AiImportFailureClassifier.Failure failure = failureClassifier.classify(e);
+            log.error("AI 导入任务 {} 处理失败：code={}, diagnostic={}", jobId,
+                    failure.code(), failure.diagnosticSummary());
+            //失败终态同样条件更新；任务已被取消时不落失败原因（不覆盖用户的取消意图），只清理文件退出。
+            //面向用户的文案 = 分类后的可操作提示 + 脱敏诊断摘要（截断到列长上限）：
+            //既保留"具体是什么错"（旧实现直接写 e.getMessage()，用户能看到可动手的原因），
+            //又不会把 API Key 之类的凭据写进数据库（分类器已按 sk-…/apiKey= 规则脱敏）。
+            String failureMessage = failure.diagnosticSummary().isBlank()
+                    ? failure.userMessage()
+                    : truncate(failure.userMessage() + "（诊断：" + failure.diagnosticSummary() + "）", 500);
+            if (!writeTerminal(jobId, "FAILED", failureMessage, failure.code(), null)) {
                 cleanupCanceledJobFiles(jobId);
                 return;
             }
@@ -702,7 +617,7 @@ public class AiImportService {
      * 终态落库（条件更新）：仅当任务尚未被取消时写入 SUCCESS/FAILED，
      * 返回是否真正落库（false = 任务已被用户取消，调用方应停止并清理）。
      */
-    private boolean writeTerminal(Long jobId, String status, String error, String resultJson) {
+    private boolean writeTerminal(Long jobId, String status, String error, String errorCode, String resultJson) {
         LambdaUpdateWrapper<AiImportJob> wrapper = new LambdaUpdateWrapper<AiImportJob>()
                 .eq(AiImportJob::getId, jobId)
                 .ne(AiImportJob::getStatus, "CANCELED")
@@ -712,6 +627,9 @@ public class AiImportService {
                 .set(AiImportJob::getFinishedAt, LocalDateTime.now());
         if (error != null) {
             wrapper.set(AiImportJob::getError, error);
+        }
+        if (errorCode != null) {
+            wrapper.set(AiImportJob::getErrorCode, errorCode);
         }
         if (resultJson != null) {
             wrapper.set(AiImportJob::getResultJson, resultJson);
@@ -784,6 +702,7 @@ public class AiImportService {
             job.setStatus("FAILED");
             job.setStage("DONE");
             job.setError("任务排队超时（可能因应用中断未能执行），请重新导入");
+            job.setErrorCode("QUEUE_TIMEOUT");
             job.setFinishedAt(LocalDateTime.now());
             jobMapper.updateById(job);
         }
@@ -796,7 +715,7 @@ public class AiImportService {
         List<ContentPackageMaterial> materials = null;
         if (includeQuestions && job.getResultJson() != null && !job.getResultJson().isBlank()) {
             try {
-                AiParsedResult parsed = parseStoredResult(job.getResultJson());
+                AiImportResult parsed = resultCodec.parse(job.getResultJson());
                 questions = parsed.questions();
                 materials = parsed.materials();
             } catch (IOException ignored) {
@@ -811,7 +730,8 @@ public class AiImportService {
                 job.getFileName(), job.getFileType(), job.getAiSupplement(), job.getThinking(),
                 job.getEngine(), job.getProcessPath(), job.getConfirmed(),
                 fileCount, job.getCurrentFileIndex(),
-                questions, materials, job.getWarningHint(), job.getError(), job.getCreatedAt(), job.getFinishedAt());
+                questions, materials, job.getWarningHint(), job.getErrorCode(), job.getError(),
+                job.getCreatedAt(), job.getFinishedAt());
     }
 
     // ==================== 最近未确认任务 / 取消删除 ====================
@@ -831,6 +751,7 @@ public class AiImportService {
                 job.setStatus("FAILED");
                 job.setStage("DONE");
                 job.setError("任务排队超时（可能因应用中断未能执行），请重新导入");
+                job.setErrorCode("QUEUE_TIMEOUT");
                 job.setFinishedAt(LocalDateTime.now());
                 jobMapper.updateById(job);
             }
@@ -866,17 +787,7 @@ public class AiImportService {
 
     private void deleteJobFiles(Long jobId) {
         try {
-            Path dir = importsDir.resolve(String.valueOf(jobId));
-            if (Files.exists(dir)) {
-                try (var stream = Files.walk(dir)) {
-                    stream.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
-                        try {
-                            Files.deleteIfExists(p);
-                        } catch (IOException ignored) {
-                        }
-                    });
-                }
-            }
+            jobStorageService.deleteJobDirectory(jobId);
         } catch (IOException e) {
             log.warn("清理 AI 导入文件失败 job={}: {}", jobId, e.getMessage());
         }
@@ -894,47 +805,20 @@ public class AiImportService {
      */
     public List<JobImageInfo> listJobImages(Long jobId) {
         findByIdOrThrow(jobId);
-        Path imgDir = importsDir.resolve(String.valueOf(jobId)).resolve("images");
-        List<JobImageInfo> result = new ArrayList<>();
-        if (!Files.isDirectory(imgDir)) {
-            return result;
-        }
-        try (var stream = Files.list(imgDir)) {
-            stream.filter(Files::isRegularFile).forEach(p -> {
-                String name = p.getFileName().toString();
-                Matcher m = Pattern.compile("^(\\d+)\\.([a-zA-Z0-9]+)$").matcher(name);
-                if (m.find()) {
-                    result.add(new JobImageInfo(Integer.parseInt(m.group(1)), name, m.group(2).toLowerCase()));
-                }
-            });
-        } catch (IOException e) {
+        try {
+            return jobStorageService.listImages(jobId).stream()
+                    .map(image -> new JobImageInfo(image.num(), image.fileName(), image.ext()))
+                    .toList();
+        } catch (IllegalStateException e) {
             log.warn("读取任务 {} 图片列表失败：{}", jobId, e.getMessage());
+            return List.of();
         }
-        result.sort(java.util.Comparator.comparingInt(JobImageInfo::num));
-        return result;
     }
 
     /** 读取任务临时图片字节（素材区渲染用；编号不存在 → 抛异常由 404 处理） */
     public byte[] readJobImage(Long jobId, int num) throws IOException {
         findByIdOrThrow(jobId);
-        Path imgDir = importsDir.resolve(String.valueOf(jobId)).resolve("images");
-        Path file = imgDir.resolve(num + ".png");
-        if (!Files.exists(file)) {
-            //兼容非 png 命名
-            try (var stream = Files.list(imgDir)) {
-                for (Path p : (Iterable<Path>) stream::iterator) {
-                    String name = p.getFileName().toString();
-                    if (name.startsWith(num + ".") && Files.isRegularFile(p)) {
-                        file = p;
-                        break;
-                    }
-                }
-            }
-        }
-        if (!Files.exists(file) || !Files.isRegularFile(file)) {
-            throw new IllegalArgumentException("图片不存在：" + num);
-        }
-        return Files.readAllBytes(file);
+        return jobStorageService.readImage(jobId, num);
     }
 
     // ==================== 材料素材（资料分析/阅读材料题） ====================
@@ -950,7 +834,7 @@ public class AiImportService {
             return List.of();
         }
         try {
-            return parseStoredResult(job.getResultJson()).materials();
+            return resultCodec.parse(job.getResultJson()).materials();
         } catch (IOException e) {
             log.warn("读取任务 {} 材料素材失败：{}", jobId, e.getMessage());
             return List.of();
@@ -977,16 +861,16 @@ public class AiImportService {
         if (!"SUCCESS".equals(job.getStatus())) {
             throw new IllegalArgumentException("任务未完成或已失败，无法导入");
         }
-        AiParsedResult parsed;
+        AiImportResult parsed;
         if (editedQuestions != null && !editedQuestions.isEmpty()) {
             //预览页编辑后的题目/材料（含素材区拖入的材料引用）：以提交内容为准；
             //请求内容绕过 parseAndValidate（后端校验路径），必须在此补全校验（防非法内容直落库）
             validateEditedContent(editedQuestions, editedMaterials);
-            parsed = new AiParsedResult(editedQuestions,
+            parsed = new AiImportResult(editedQuestions,
                     editedMaterials == null ? List.of() : editedMaterials);
         } else {
             try {
-                parsed = parseStoredResult(job.getResultJson());
+                parsed = resultCodec.parse(job.getResultJson());
             } catch (IOException e) {
                 throw new IllegalStateException("任务结果解析失败", e);
             }
@@ -1002,7 +886,7 @@ public class AiImportService {
             questionBankService.findByIdOrThrow(targetBankId);
         }
         //阶段 4：内嵌图落盘（[图片N] → [图片:正式文件名]）；未引用的编号保留原标记（预览可见）
-        Map<String, String> imageRefs = importImages(jobId, targetBankId, parsed);
+        Map<String, String> imageRefs = imageReferenceService.importReferencedImages(jobId, targetBankId, parsed);
         //材料入库（materialKey → 本地 material_id；content 中图片引用已替换）
         Map<String, Long> materialIdByKey = new HashMap<>();
         if (!parsed.materials().isEmpty()) {
@@ -1010,7 +894,7 @@ public class AiImportService {
             for (ContentPackageMaterial m : parsed.materials()) {
                 com.tiku.model.Material material = new com.tiku.model.Material();
                 material.setBankId(targetBankId);
-                material.setContent(replaceImageRefs(m.getContent(), imageRefs));
+                material.setContent(imageReferenceService.replaceReferences(m.getContent(), imageRefs));
                 material.setSortOrder(order++);
                 LocalDateTime now = LocalDateTime.now();
                 material.setCreatedAt(now);
@@ -1021,11 +905,11 @@ public class AiImportService {
         }
         //题目文本中的图片引用替换（题干/参考答案/选项）
         for (ContentPackageQuestion q : parsed.questions()) {
-            q.setContent(replaceImageRefs(q.getContent(), imageRefs));
-            q.setReferenceAnswer(replaceImageRefs(q.getReferenceAnswer(), imageRefs));
+            q.setContent(imageReferenceService.replaceReferences(q.getContent(), imageRefs));
+            q.setReferenceAnswer(imageReferenceService.replaceReferences(q.getReferenceAnswer(), imageRefs));
             if (q.getOptions() != null) {
                 q.setOptions(q.getOptions().stream()
-                        .map(o -> new OptionItem(o.key(), replaceImageRefs(o.text(), imageRefs)))
+                        .map(o -> new OptionItem(o.key(), imageReferenceService.replaceReferences(o.text(), imageRefs)))
                         .toList());
             }
         }
@@ -1110,79 +994,15 @@ public class AiImportService {
         }
     }
 
-    /** 图片编号 → 正式文件名映射（[图片N] → [图片:name]） */
-    private Map<String, String> importImages(Long jobId, Long bankId, AiParsedResult parsed) {
-        Map<String, String> byNumber = new HashMap<>();
-        //收集题目/材料文本中实际引用的编号
-        Set<String> referenced = new LinkedHashSet<>();
-        for (ContentPackageQuestion q : parsed.questions()) {
-            collectImageRefs(q.getContent(), referenced);
-            collectImageRefs(q.getReferenceAnswer(), referenced);
-            if (q.getOptions() != null) {
-                for (OptionItem o : q.getOptions()) {
-                    collectImageRefs(o.text(), referenced);
-                }
-            }
-        }
-        for (ContentPackageMaterial m : parsed.materials()) {
-            collectImageRefs(m.getContent(), referenced);
-        }
-        if (referenced.isEmpty()) {
-            return byNumber;
-        }
-        Path imgDir = importsDir.resolve(String.valueOf(jobId)).resolve("images");
-        for (String num : referenced) {
-            Path tmp = imgDir.resolve(num + ".png");
-            if (!Files.exists(tmp)) {
-                continue; //引用不存在的编号：保留原标记（预览可见）
-            }
-            try {
-                String name = imageStorageService.importImage(bankId, Files.readAllBytes(tmp));
-                byNumber.put(num, name);
-            } catch (IOException e) {
-                log.warn("AI 导入任务 {} 图片 {} 落盘失败：{}", jobId, num, e.getMessage());
-            }
-        }
-        if (!byNumber.isEmpty()) {
-            log.info("AI 导入任务 {} 图片落盘：{} 张（引用 {} 个编号）", jobId, byNumber.size(), referenced.size());
-        }
-        return byNumber;
-    }
 
-    /** 收集文本中的 [图片N] 编号 */
-    private void collectImageRefs(String text, Set<String> refs) {
-        if (text == null) {
-            return;
-        }
-        Matcher m = Pattern.compile("\\[图片(\\d+)]").matcher(text);
-        while (m.find()) {
-            refs.add(m.group(1));
-        }
-    }
 
-    /** 文本中的 [图片N] → [图片:name]（仅替换存在映射的编号；不存在的保留原标记） */
-    private String replaceImageRefs(String text, Map<String, String> refs) {
-        if (text == null || refs.isEmpty()) {
-            return text;
-        }
-        Matcher m = Pattern.compile("\\[图片(\\d+)]").matcher(text);
-        StringBuffer sb = new StringBuffer();
-        while (m.find()) {
-            String name = refs.get(m.group(1));
-            if (name != null) {
-                m.appendReplacement(sb, Matcher.quoteReplacement("[图片:" + name + "]"));
-            }
-        }
-        m.appendTail(sb);
-        return sb.toString();
-    }
 
     private int countQuestions(AiImportJob job) {
         if (job.getResultJson() == null || job.getResultJson().isBlank()) {
             return 0;
         }
         try {
-            return parseStoredResult(job.getResultJson()).questions().size();
+            return resultCodec.parse(job.getResultJson()).questions().size();
         } catch (IOException e) {
             return 0;
         }
@@ -1190,63 +1010,18 @@ public class AiImportService {
 
     // ==================== AI 输出解析校验 ====================
 
-    /** AI 整理结果：题目 + 共享材料（材料组识别仅单次调用路径启用，分块路径不输出材料） */
-    private record AiParsedResult(List<ContentPackageQuestion> questions, List<ContentPackageMaterial> materials) {
-    }
-
     /**
      * Markdown 输出解析（分块路径）：模型按标准 MD 模板输出 → MdQuestionParser 确定性解析 → validate 校验。
      * 题号直接取自标题（免源文定位回填）；材料由模型声明（## 材料 mN 块），题目按位置自动关联。
      * 解析失败/坏题丢弃不抛异常（补漏 + 预览兜底）。
      */
     private List<ContentPackageQuestion> mdParseQuestions(String mdOutput, boolean aiSupplement) {
-        return mdParseResult(mdOutput, aiSupplement).questions();
+        return resultParser.parseMarkdownQuestions(mdOutput);
     }
 
     /** Markdown 输出解析（含材料块） */
-    private AiParsedResult mdParseResult(String mdOutput, boolean aiSupplement) {
-        String md = unwrapJsonOutput(mdOutput);
-        MdQuestionParser.ParseOutcome outcome = MdQuestionParser.parseWithMaterials(md);
-        List<ContentPackageQuestion> parsed = new ArrayList<>();
-        for (ContentPackageQuestion q : outcome.questions()) {
-            if (validate(q, aiSupplement)) {
-                parsed.add(q);
-            }
-        }
-        return new AiParsedResult(parsed, outcome.materials());
-    }
-
-    /** json_object 响应格式会把 Markdown 包成 {"output": "## 第1题…"}（DeepSeek 思考模式实测）→ 解包取 output。 */
-    private String unwrapJsonOutput(String out) {
-        String s = out == null ? "" : stripMdFence(out).trim();
-        if (!s.startsWith("{")) {
-            return out;
-        }
-        try {
-            JsonNode node = objectMapper.readTree(s);
-            JsonNode o = node.path("output");
-            if (o.isTextual() && !o.asText().isBlank()) {
-                return o.asText();
-            }
-        } catch (Exception ignored) {
-        }
-        return out;
-    }
-
-    /** Markdown 代码围栏剥离（```md … ``` / ```markdown … ```），不做大括号截断（公式 LaTeX 含 {}）。 */
-    private String stripMdFence(String out) {
-        String s = out == null ? "" : out.trim();
-        if (s.startsWith("```")) {
-            int nl = s.indexOf('\n');
-            if (nl >= 0) {
-                s = s.substring(nl + 1);
-            }
-            int endFence = s.lastIndexOf("```");
-            if (endFence >= 0) {
-                s = s.substring(0, endFence);
-            }
-        }
-        return s;
+    private AiImportResult mdParseResult(String mdOutput, boolean aiSupplement) {
+        return resultParser.parseMarkdown(mdOutput);
     }
 
     /**
@@ -1259,550 +1034,31 @@ public class AiImportService {
      * 视觉路径模型输出文字已来自文本层（逐字采用），直接信任；残版/粘连题由 chatVisionPages 合并前过滤。
      * 图片编号引用（[图片N]）原样保留，确认导入时替换为 [图片:正式文件名]。
      */
-    private AiParsedResult parseAndValidate(String aiOutput, boolean aiSupplement, String sourceText,
+    private AiImportResult parseAndValidate(String aiOutput, boolean aiSupplement, String sourceText,
                                             boolean enableMaterials, boolean skipSourceRepair) {
-        String json = stripCodeFence(aiOutput);
-        JsonNode node;
-        try {
-            node = objectMapper.readTree(json);
-        } catch (IOException e) {
-            throw new IllegalStateException("AI 输出不是合法 JSON，请重试或更换模型");
-        }
-        List<ContentPackageMaterial> materials = new ArrayList<>();
-        if (enableMaterials) {
-            JsonNode matArr = node.path("materials");
-            if (matArr.isArray()) {
-                Set<String> seenKeys = new HashSet<>();
-                for (JsonNode item : matArr) {
-                    try {
-                        ContentPackageMaterial m = objectMapper.treeToValue(item, ContentPackageMaterial.class);
-                        if (m.getMaterialKey() == null || m.getMaterialKey().isBlank() || m.getContent() == null || m.getContent().isBlank()) {
-                            continue;
-                        }
-                        if (!seenKeys.add(m.getMaterialKey())) {
-                            continue; //materialKey 重复：保留先出现的
-                        }
-                        materials.add(m);
-                    } catch (Exception ignored) {
-                        //坏材料丢弃
-                    }
-                }
-            }
-        }
-        Set<String> validMaterialKeys = materials.stream().map(ContentPackageMaterial::getMaterialKey).collect(java.util.stream.Collectors.toSet());
-
-        JsonNode arr = node.isArray() ? node : node.path("questions");
-        List<ContentPackageQuestion> result = new ArrayList<>();
-        if (arr.isArray()) {
-            for (JsonNode item : arr) {
-                try {
-                    ContentPackageQuestion q = objectMapper.treeToValue(item, ContentPackageQuestion.class);
-                    if (validate(q, aiSupplement)) {
-                        //材料引用校验：materialKey 必须存在于 materials（分块路径无 materials → 一律清空）
-                        if (q.getMaterialKey() != null && !q.getMaterialKey().isBlank() && !validMaterialKeys.contains(q.getMaterialKey())) {
-                            q.setMaterialKey(null);
-                        }
-                        //模型关闭思考后可能省略材料/只输出题号/把"题号+选项"或"孤儿材料"当题干 →
-                        //本地从源文回填（确定性保真）；返回 false = 模型错配残片（题干与选项对不上），丢弃。
-                        //视觉分页路径跳过（见方法注释：行首题号定位会误杀"题号+题干同行"版式的完整题）
-                        if (!skipSourceRepair && !completeMaterialFromSource(q, sourceText)) {
-                            continue;
-                        }
-                        //answerSource 统一校正（不信任模型标记）：
-                        //- 无答案 → null（显示"无答案"）
-                        //- 有答案：源文有证据 → ORIGINAL；无证据 → aiSupplement=true 时 AI_SUPPLEMENT，
-                        //  aiSupplement=false 时视为编造，清空答案
-                        if (q.getAnswerKeys() != null && !q.getAnswerKeys().isEmpty()) {
-                            boolean evidence = hasSourceAnswerEvidence(sourceText, q);
-                            if (!aiSupplement && !evidence) {
-                                q.setAnswerKeys(List.of());
-                                q.setAnswerSource(null);
-                            } else {
-                                q.setAnswerSource(evidence ? "ORIGINAL" : "AI_SUPPLEMENT");
-                            }
-                        } else {
-                            q.setAnswerSource(null);
-                        }
-                        if (!aiSupplement) {
-                            //禁止补充模式：模型可能违反"不生成解析"规则自行编写答案文字/解析（实测）
-                            //→ 一律清空（用户预览页自行补填；原文解析属于 content 范畴，不入 analysis）
-                            q.setAnswerText(null);
-                            q.setAnalysis(null);
-                            //主观题参考作答也属"补充内容"：禁止补充模式一律清空
-                            if (q.getReferenceAnswer() != null) {
-                                q.setReferenceAnswer(null);
-                            }
-                        }
-                        result.add(q);
-                    }
-                } catch (Exception ignored) {
-                    //坏题丢弃
-                }
-            }
-        }
-        return new AiParsedResult(result, materials);
-    }
-
-    private boolean validate(ContentPackageQuestion q, boolean aiSupplement) {
-        if (q.getContent() == null || q.getContent().isBlank()) {
-            return false;
-        }
-        String type = q.getType() == null ? "" : q.getType().toUpperCase();
-        if (!VALID_TYPES.contains(type)) {
-            return false;
-        }
-        q.setType(type);
-        //主观题：无选项无答案，参考答案透传（referenceAnswer 允许为空，用户预览补填）
-        if (!"SUBJECTIVE".equals(type)) {
-            if (q.getOptions() == null || q.getOptions().isEmpty()) {
-                if ("JUDGE".equals(type)) {
-                    //判断题兜底：补"正确/错误"选项
-                    q.setOptions(List.of(new OptionItem("A", "正确"), new OptionItem("B", "错误")));
-                } else {
-                    //选项缺失（图片选项题/模型漏拆同行选项）→ 转主观保留：
-                    //整题丢弃是最坏结果（实测判断推理第 2 题图片选项被丢）；预览页可补选项/图
-                    q.setType("SUBJECTIVE");
-                    q.setOptions(List.of());
-                    q.setAnswerKeys(List.of());
-                    q.setAnswerText(null);
-                    q.setAnswerSource(null);
-                    type = "SUBJECTIVE";
-                }
-            }
-        }
-        //答案允许为空：aiSupplement=true 时模型可能漏补（实测某块 10/10 全漏，若整题丢弃会丢 9 题）；
-        //两种模式统一"答案留空、不丢题"，由用户在预览页补填（answerSource 置 null 显示"无答案"）
-        if (q.getAnswerKeys() == null || q.getAnswerKeys().isEmpty()) {
-            q.setAnswerKeys(List.of());
-        }
-        //answerSource 由 parseAndValidate 按源文证据统一校正（此处不设，避免与证据校验冲突）
-        //判断题选项兜底：AI 未给选项时补"正确/错误"
-        if ("JUDGE".equals(type) && q.getOptions().size() < 2) {
-            q.setOptions(List.of(new OptionItem("A", "正确"), new OptionItem("B", "错误")));
-        }
-        if (q.getQuestionKey() == null || q.getQuestionKey().isBlank()) {
-            q.setQuestionKey("AI_" + UUID.randomUUID().toString().substring(0, 8).toUpperCase());
-        }
-        if (q.getScore() == null) {
-            //主观题默认 5 分（自评半分行），客观题默认 1 分
-            q.setScore("SUBJECTIVE".equals(type) ? 5.0 : 1.0);
-        }
-        return true;
+        return resultParser.parseJson(aiOutput, aiSupplement, sourceText, enableMaterials, skipSourceRepair);
     }
 
     /** 剥离 markdown 代码块（```json ... ```） */
     private String stripCodeFence(String output) {
-        String s = output == null ? "" : output.trim();
-        int start = s.indexOf('{');
-        int end = s.lastIndexOf('}');
+        String normalized = output == null ? "" : output.trim();
+        int start = normalized.indexOf('{');
+        int end = normalized.lastIndexOf('}');
         if (start >= 0 && end > start) {
-            return s.substring(start, end + 1);
+            return normalized.substring(start, end + 1);
         }
-        return s;
+        return normalized;
     }
 
     /** 模型输出是否为 JSON 形态（无思考重试 + json_object 响应格式时模型可能输出旧版 JSON 结构） */
     private boolean looksLikeJson(String out) {
-        String s = out == null ? "" : out.trim();
-        return (s.startsWith("{") || s.startsWith("[")) && s.contains("question");
+        return resultParser.looksLikeJson(out);
     }
 
     /** 端点降级快速失败：源文题号 ≥5 但结果 <3 题 → 模型持续返回空白/垃圾，整单报错让用户稍后重试。
      *  （静默产出 1-2 题垃圾比明确失败更糟——用户以为导入成功） */
     private void assertNotDegraded(List<ContentPackageQuestion> questions, String fullSource) {
-        if (fullSource == null || fullSource.isBlank()) {
-            return;
-        }
-        int nums = 0;
-        for (String l : fullSource.split("\\R", -1)) {
-            if (isQuestionNumberLine(l.trim())) {
-                nums++;
-            }
-        }
-        if (nums >= 5 && questions.size() < 3) {
-            throw new IllegalStateException("模型端点持续返回空白内容（源文约 " + nums + " 题仅产出 "
-                    + questions.size() + " 题），本次导入失败，请稍后重试");
-        }
-    }
-
-    /**
-     * 模型输出题干可疑（材料省略 / 裸题号 / 把"题号+选项行"或"孤儿材料"当题干）时，本地从源文回填题干。
-     * 定位：① 题干/材料文本 + 首选项消歧；② 兜底：content 以题号开头 → 直接定位源文题号行；
-     *      ③ 内容定位后向后找最近的题号行，统一锚到题号行（孤儿材料场景）。
-     * 回填：从题号行向前收集非空行（直到上一题的题号行/选项行），反转 = 材料+题干（不含题号行）。
-     * 校验：短题干（≤30）消歧失败 = 模型错配残片（题干与选项来自不同题）→ 丢弃；
-     *      回填/保留后做选项一致性校验（题号行后 8 行内应含各选项文本，判断题跳过）→ 不通过丢弃。
-     *
-     * @return true 保留该题，false 丢弃（模型错配残片）
-     */
-    private boolean completeMaterialFromSource(ContentPackageQuestion q, String sourceText) {
-        if (sourceText == null || sourceText.isBlank() || q.getContent() == null) {
-            return true;
-        }
-        //带材料引用（materials 顶层输出）的题：材料已在 materials 里，禁止回填把材料再拼进题干
-        if (q.getMaterialKey() != null && !q.getMaterialKey().isBlank()) {
-            return true;
-        }
-        //图片引用（[图片N]）不在源文文本中：定位前剥离，避免定位失败/错位
-        String content = stripImageRefs(q.getContent()).trim();
-        if (content.isEmpty()) {
-            return false;
-        }
-        //模型把"答案：X / 解析：…"行当题干输出（残片）→ 直接丢弃（[\s\S]* 跨行，.* 不匹配换行）
-        if (content.matches("^(答案|参考答案|解析)[:：][\\s\\S]*")) {
-            log.warn("题干回填丢弃（答案/解析开头残片）：content={}", truncate(content, 50));
-            return false;
-        }
-        String optProbe = null;
-        if (q.getOptions() != null && !q.getOptions().isEmpty()) {
-            //图片选项（[图片N]）无法在文本中定位 → 剥离后为空则跳过消歧
-            String t = stripImageRefs(q.getOptions().get(0).text() == null ? "" : q.getOptions().get(0).text());
-            if (t != null) {
-                optProbe = t.length() > 8 ? t.substring(0, 8) : t;
-            }
-        }
-        //content 以题号开头（"30." 或 "10. A.xxx..."）→ 模型把"题号/题号+选项行"当题干输出（垃圾），
-        //无论通过哪种路径定位都直接回填（锚点可信）
-        Matcher numMatcher = Pattern.compile("^(\\d{1,3})\\s*[.．、)）]").matcher(content);
-        boolean numberAnchored = numMatcher.find();
-        String[] lines = sourceText.split("\\R", -1);
-        int anchorLine = -1;
-        //① 内容定位（含选项消歧）：先按"首行"匹配，再按"去空白全文"映射（多行 content 也能定位）
-        int contentLine = locateContentLine(lines, content);
-        if (contentLine >= 0) {
-            //标题区残片：定位行（含该行）之前没有任何题号行（文件标题被当题干）→ 丢弃。
-            //仅限短内容（≤60 字符）：粉笔 PDF 的 Q1 材料也在第一个题号行前，但材料长（100+ 字符），不能误杀
-            boolean beforeFirstNum = true;
-            for (int li = 0; li <= contentLine; li++) {
-                if (isQuestionNumberLine(lines[li].trim())) {
-                    beforeFirstNum = false;
-                    break;
-                }
-            }
-            if (beforeFirstNum && content.length() <= 60) {
-                log.warn("题干回填丢弃（标题区残片）：contentLine={} content={}", contentLine, truncate(content, 50));
-                return false;
-            }
-            anchorLine = contentLine;
-            if (optProbe != null && !optProbe.isBlank()) {
-                //消歧：定位行后 8 行内应能找到首选项文本
-                StringBuilder after = new StringBuilder();
-                for (int j = contentLine; j < Math.min(lines.length, contentLine + 8); j++) {
-                    after.append(lines[j]);
-                }
-                if (!after.toString().contains(optProbe)) {
-                    anchorLine = -1; //消歧失败 → 交②题号定位或丢弃判定
-                }
-            }
-        }
-        //② 兜底：内容定位失败且 content 以题号开头 → 按题号行定位
-        if (anchorLine < 0 && numberAnchored) {
-            String numPat = "^\\s*" + numMatcher.group(1) + "\\s*[.．、)）](?:\\s*[A-Da-d]|\\s*$)";
-            for (int i = 0; i < lines.length; i++) {
-                if (lines[i].matches(numPat)) {
-                    anchorLine = i;
-                    break;
-                }
-            }
-        }
-        if (anchorLine < 0) {
-            //模型错配残片（题干与选项对不上）：短题干丢弃，长题干保留由预览人工核对
-            //判断题豁免：判断题题干天然短（"判断：长江…（ ）"≈15-25 字符），且无选项溯源需求
-            if (content.length() <= 30 && !"JUDGE".equals(q.getType())) {
-                log.warn("题干回填丢弃（定位失败且题干过短）：content={}", truncate(content, 80));
-                return false;
-            }
-            return true;
-        }
-        //③ 内容定位可能落在材料/题干行 → 向后找最近的题号行，统一锚到题号行
-        int numLine = anchorLine;
-        if (!QUESTION_NUMBER_ALONE.matcher(lines[anchorLine].trim()).matches()) {
-            for (int j = anchorLine + 1; j < lines.length; j++) {
-                if (QUESTION_NUMBER_ALONE.matcher(lines[j].trim()).matches()) {
-                    numLine = j;
-                    break;
-                }
-            }
-        }
-        //收集下界 = 文档第一个题号行（标题区"计算机基础题库（整理版）"不算材料）
-        int firstNumLine = 0;
-        for (int li = 0; li < lines.length; li++) {
-            if (isQuestionNumberLine(lines[li].trim())) {
-                firstNumLine = li;
-                break;
-            }
-        }
-        //仅"材料题"收集：content 定位在题号行之前（材料在题号行前）或裸题号（content 为"30."垃圾）才需要回填；
-        //"题号+题干同行"格式（content 定位 = 题号行）content 已完整，不收集（防收集到标题/答案/解析行污染）
-        boolean shouldCollect = numberAnchored || (contentLine >= 0 && contentLine < numLine);
-        List<String> collected = new ArrayList<>();
-        if (shouldCollect) {
-            for (int i = numLine - 1; i >= firstNumLine; i--) {
-                String t = lines[i].trim();
-                if (t.isEmpty()) {
-                    continue;
-                }
-                if (MATERIAL_STOP.matcher(t).find() || t.matches("^(答案|参考答案|解析)[:：].*")) {
-                    break; //上一题题号/选项行、答案/解析行不是材料，停止（且不收集该行）
-                }
-                collected.add(t);
-            }
-        }
-        //回填（收集到材料+题干时）；无材料 = 合法短题，保持原样。
-        //定位已由"选项消歧/题号定位"保证可靠 → 直接回填（保真：材料/符号以下划线等以源文为准，
-        //覆盖模型"省略材料/题干选项拼接/改写"等一切变体）
-        if (!collected.isEmpty()) {
-            java.util.Collections.reverse(collected);
-            String backfill = String.join("\n", collected);
-            if (backfill.length() >= 15) {
-                q.setContent(backfill);
-            }
-        }
-        //选项一致性校验（防模型把"块首孤儿题号+选项"错配给下一题 → 题干与选项来自不同题）：
-        //按"题干归属题号"定位题号行 → 其后的选项区（1-5 行，含题号行本身以支持同行格式）
-        //必须包含每个选项文本；不包含 → 模型错配/编造，丢弃。判断题跳过（选项为后端兜底）。
-        //（不用"选项文本全局定位"：Q2/Q8 选项相同（键盘/鼠标…）时第一个匹配行会归属错题）
-        //图片选项（[图片N]）无法在文本中验证 → 跳过该校验（图片题由预览确认把关）
-        if (!"JUDGE".equals(q.getType()) && q.getOptions() != null && !q.getOptions().isEmpty()) {
-            List<OptionItem> textOptions = new ArrayList<>();
-            for (OptionItem o : q.getOptions()) {
-                if (o.text() == null || o.text().isBlank() || stripImageRefs(o.text()).isBlank()) {
-                    continue; //纯图片选项：跳过文本校验
-                }
-                textOptions.add(o);
-            }
-            if (textOptions.isEmpty()) {
-                return true; //全部是图片选项：无法文本校验，直接保留
-            }
-            int contentNum = -1;
-            if (contentLine >= 0) {
-                contentNum = findQuestionNumber(lines, contentLine, true);
-            }
-            if (contentNum > 0) {
-                int optAreaLine = findLineOf(lines, contentNum);
-                if (optAreaLine >= 0) {
-                    StringBuilder after = new StringBuilder();
-                    for (int j = optAreaLine; j < Math.min(lines.length, optAreaLine + 5); j++) {
-                        after.append(lines[j]).append('\n');
-                    }
-                    String afterText = after.toString();
-                    for (OptionItem o : textOptions) {
-                        String probe = o.text().length() > 6 ? o.text().substring(0, 6) : o.text();
-                        if (!afterText.contains(probe)) {
-                            log.warn("题干回填丢弃（选项不在本题选项区）：contentNum={} opt={} content={}",
-                                    contentNum, probe, truncate(q.getContent(), 60));
-                            return false;
-                        }
-                    }
-                }
-            } else {
-                //题干归属未知（定位失败）→ 退回"选项行+归属题号"校验
-                int optNum = -1;
-                boolean mixed = false;
-                for (OptionItem o : textOptions) {
-                    String probe = o.text().length() > 6 ? o.text().substring(0, 6) : o.text();
-                    Pattern optPat = Pattern.compile("[A-Da-d][.．、]\\s*" + Pattern.quote(probe));
-                    int optLine = -1;
-                    for (int li = 0; li < lines.length; li++) {
-                        if (optPat.matcher(lines[li]).find()) {
-                            optLine = li;
-                            break;
-                        }
-                    }
-                    if (optLine < 0) {
-                        return false; //选项在源文找不到 → 模型编造，丢弃
-                    }
-                    int num = findQuestionNumber(lines, optLine, false);
-                    if (num < 0) {
-                        continue;
-                    }
-                    if (optNum < 0) {
-                        optNum = num;
-                    } else if (optNum != num) {
-                        mixed = true;
-                        break;
-                    }
-                }
-                if (mixed) {
-                    log.warn("题干回填丢弃（选项跨题）：content={}", truncate(q.getContent(), 80));
-                    return false;
-                }
-            }
-        }
-        return true;
-    }
-
-    /**
-     * 在源文行数组中定位 content 所在行：
-     * ① content 首行（单行匹配）；② 去空白全文映射（content 跨行/含换行也能定位，返回材料开头所在行）。
-     * 找不到返回 -1。
-     */
-    private int locateContentLine(String[] lines, String content) {
-        String firstLine = content.split("\\R", 2)[0].trim();
-        if (!firstLine.isEmpty()) {
-            for (int i = 0; i < lines.length; i++) {
-                if (lines[i].contains(firstLine)) {
-                    return i;
-                }
-            }
-        }
-        //去空白全文映射
-        StringBuilder norm = new StringBuilder();
-        List<Integer> starts = new ArrayList<>();
-        for (String line : lines) {
-            starts.add(norm.length());
-            norm.append(line.replaceAll("\\s+", ""));
-        }
-        String probe = content.replaceAll("\\s+", "");
-        probe = probe.substring(0, Math.min(30, probe.length()));
-        if (probe.isEmpty()) {
-            return -1;
-        }
-        int pos = norm.indexOf(probe);
-        if (pos >= 0) {
-            for (int i = starts.size() - 1; i >= 0; i--) {
-                if (starts.get(i) <= pos) {
-                    return i;
-                }
-            }
-        }
-        return -1;
-    }
-
-    /**
-     * 收集源文中本题的答案证据字母集合（阶段 2 补充答案复用：原文有证据 → 直接采用 ORIGINAL，不调模型）：
-     * 1) 定位本题题号行 → 题号行后窗口内找答案标记（答案：X / 答：X / （X） / 【答案】X /（对）等）；
-     * 2) 按题号查卷末答案列表（"N.X" / "【N题答案】X" / 区间式 "1-8：B D C…"）。
-     * 题号优先取已回填的 questionNumber（分块路径可靠），定位失败时回退内容定位。
-     * 判断题证据映射：对/√ → A，错/× → B。纯图片导入（sourceText 为 null）→ 返回空集合。
-     */
-    private Set<String> collectSourceAnswerEvidence(String sourceText, ContentPackageQuestion q) {
-        Set<String> evidence = new HashSet<>();
-        if (sourceText == null || sourceText.isBlank()) {
-            return evidence;
-        }
-        String[] lines = sourceText.split("\\R", -1);
-        int qNum = q.getQuestionNumber() == null ? -1 : q.getQuestionNumber();
-        //1) 定位本题题号行（题干/材料行之后最近的题号行；放宽支持"1. 题干同行"格式）
-        //   图片编号标记不在源文文本中，定位前剥离
-        int contentLine = locateContentLine(lines, stripImageRefs(q.getContent() == null ? "" : q.getContent()));
-        int numLine = -1;
-        if (contentLine >= 0) {
-            for (int li = contentLine; li < lines.length; li++) {
-                String t = lines[li].trim();
-                if (QUESTION_NUMBER_ALONE.matcher(t).matches()
-                        || (t.matches("^\\d{1,3}\\s*[.．、)）].*") && !t.matches("^\\d{1,3}\\.\\d.*")
-                        && !ANSWER_LINE.matcher(t).matches())) {
-                    numLine = li;
-                    break;
-                }
-            }
-            //题号行窗口（含题号行本身——同行格式"1. 题干…答案：B"的答案标记在本行；
-            //到下一个题号行前为止，防止判断题等短题窗口跨到相邻题的答案）
-            if (numLine >= 0) {
-                int winEnd = Math.min(lines.length, numLine + 10);
-                for (int j = numLine + 1; j < winEnd; j++) {
-                    if (isQuestionNumberLine(lines[j].trim())) {
-                        winEnd = j;
-                        break;
-                    }
-                }
-                StringBuilder after = new StringBuilder();
-                for (int j = numLine; j < winEnd; j++) {
-                    after.append(lines[j]).append('\n');
-                }
-                collectEvidenceKeys(after.toString(), evidence);
-            }
-            //题号回退：内容定位成功但 questionNumber 未回填时从题号行解析
-            if (qNum <= 0 && numLine >= 0) {
-                Matcher nm = Pattern.compile("^(\\d{1,3})").matcher(lines[numLine].trim());
-                if (nm.find()) {
-                    qNum = Integer.parseInt(nm.group(1));
-                }
-            }
-        }
-        //2) 卷末答案列表（按题号；不依赖内容定位——MinerU 重建文本中题干可能带样式串无法定位）
-        if (qNum > 0) {
-            //卷末答案列表：N.X / 【N题答案】X / 区间式（"1-8：B D C C B A B D"）按题号对应
-            for (String line : lines) {
-                String letters = AiAnswerFormat.answerFor(line, qNum);
-                if (letters != null) {
-                    addAnswerChars(letters, evidence);
-                }
-                //紧凑单行答案列表（"答案：1.A 2.C 3.B" 同行）→ 行内题号映射
-                Map<Integer, String> compactMap = AiAnswerFormat.compactAnswerMap(line);
-                if (compactMap.containsKey(qNum)) {
-                    addAnswerChars(compactMap.get(qNum), evidence);
-                }
-            }
-        }
-        return evidence;
-    }
-
-    /**
-     * 校验源文中是否存在支持模型答案的明确证据（aiSupplement=false 防编造/错配答案）：
-     * 模型 answerKeys 的每个字母必须在本题的证据字母集合中，否则视为编造/错配（返回 false 清空）。
-     * 纯图片导入（sourceText 为 null）→ 放行。
-     */
-    private boolean hasSourceAnswerEvidence(String sourceText, ContentPackageQuestion q) {
-        if (sourceText == null || sourceText.isBlank()) {
-            return true;
-        }
-        Set<String> evidence = collectSourceAnswerEvidence(sourceText, q);
-        //校验：模型答案每个字母都必须有本题证据
-        if (q.getAnswerKeys() == null || q.getAnswerKeys().isEmpty()) {
-            return true;
-        }
-        if (evidence.isEmpty()) {
-            log.warn("答案证据校验：无证据 content={} ans={}", truncate(q.getContent(), 60), q.getAnswerKeys());
-            return false;
-        }
-        for (String k : q.getAnswerKeys()) {
-            if (!evidence.contains(k.toUpperCase())) {
-                log.warn("答案证据校验：字母不符 evidence={} ans={} content={}", evidence, q.getAnswerKeys(),
-                        truncate(q.getContent(), 60));
-                return false; //模型答案与本题证据不符 → 编造/错配
-            }
-        }
-        return true;
-    }
-
-    /** 从文本片段中收集答案证据字母（答案：X / 答：X / （X） / 【答案】X /（对）/ "答案：ABD" / "答案：正确"） */
-    private void collectEvidenceKeys(String window, Set<String> evidence) {
-        //"答案：ABD" 连续字母串（多选）与"答案：正确/错误"（判断题双字）
-        Matcher multi = Pattern.compile("(?:答案|参考答案|正确答案)\\s*[:：]?\\s*[（(]?\\s*([A-Ha-h]{1,6}|正确|错误)").matcher(window);
-        while (multi.find()) {
-            addAnswerChars(multi.group(1), evidence);
-        }
-        Matcher m = ANSWER_MARKER.matcher(window);
-        while (m.find()) {
-            for (int g = 1; g <= m.groupCount(); g++) {
-                if (m.group(g) != null) {
-                    addAnswerChars(m.group(g), evidence);
-                }
-            }
-        }
-    }
-
-    /** 答案码归一化并加入证据集合：A/a → A；对/√/正确 → A；错/×/错误 → B；"ABD" 逐个加入 */
-    private void addAnswerChars(String s, Set<String> evidence) {
-        if (s == null) {
-            return;
-        }
-        if ("正确".equals(s) || "对".equals(s) || "√".equals(s)) {
-            evidence.add("A");
-            return;
-        }
-        if ("错误".equals(s) || "错".equals(s) || "×".equals(s)) {
-            evidence.add("B");
-            return;
-        }
-        for (char c : s.toUpperCase().toCharArray()) {
-            String v = String.valueOf(c);
-            if (v.matches("[A-H]")) {
-                evidence.add(v);
-            }
-        }
+        resultParser.assertNotDegraded(questions, fullSource);
     }
 
     // ==================== 分块并行（文本路径加速） ====================
@@ -1817,14 +1073,14 @@ public class AiImportService {
      * 卷末答案列表会附加到每一块，供模型对照（不输出答案本身）。
      * PDF 直传（pageRenders 非空）：每块附带其页范围的整页截图（版式真相，网页端同款输入）。
      */
-    private AiParsedResult chatChunked(AiSettings settings, String systemPrompt, List<String> texts,
+    private AiImportResult chatChunked(AiSettings settings, String systemPrompt, List<String> texts,
                                        String warning, AiImportJob job, Long jobId, boolean aiSupplement,
                                        List<String> pageTexts, List<DocumentParserService.ExtractedImage> extracted,
                                        boolean marksEmbedded, String evidenceText,
                                        List<AiClientService.ImageData> pageRenders) {
         //两阶段分离：整理阶段只提取题目结构（MD 模板输出，"答案/解析"留空），
         //答案与解析由返回前 postProcessAnswers 统一处理（原文证据恢复 + 思考模式补充）
-        final String extractPrompt = buildMdExtractPrompt();
+        final String extractPrompt = promptFactory.buildMdExtractPrompt();
         //答案证据校验用源文（含答案文件；纯图片场景不走到这里）
         String fullSource = String.join("\n\n========== 下一份文件 ==========\n\n", texts);
         //答案溯源文本：MinerU 路径附本地解析文本（其卷末答案行干净可靠），内容定位仍以主文本为准（在前）
@@ -1897,18 +1153,18 @@ public class AiImportService {
         if (chunks.isEmpty()) {
             //回退：单次调用（多文件无法识别答案文件的情况；带图则全图随调用 + 编号规则）
             String merged = String.join("\n\n========== 下一份文件 ==========\n\n", texts);
-            String user = buildUserPrompt(merged, warning);
+            String user = promptFactory.buildUserPrompt(merged, warning);
             String out;
             if (!extracted.isEmpty()) {
                 user += pageRenders != null
-                        ? buildPdfVisionImageRule(1, pageRenders.size(), pageRenders.size(), 1, extracted.size())
-                        : buildImageRefRule(1, extracted.size());
+                        ? promptFactory.buildPdfVisionImageRule(1, pageRenders.size(), pageRenders.size(), 1, extracted.size())
+                        : promptFactory.buildImageRefRule(1, extracted.size());
                 List<AiClientService.ImageData> all = new ArrayList<>();
                 for (DocumentParserService.ExtractedImage e : extracted) {
                     all.add(e.image());
                 }
                 try {
-                    out = aiClientService.chatWithImages(buildVisionSettings(settings), extractPrompt, user, all, true);
+                    out = aiClientService.chatWithImages(promptFactory.buildVisionSettings(settings), extractPrompt, user, all, true);
                 } catch (Exception e) {
                     log.warn("AI 导入任务 {} 回退单次 vision 调用失败（{}），改用纯文本模型重试", jobId, e.getMessage());
                     out = aiClientService.chat(settings, extractPrompt, user, true);
@@ -1917,16 +1173,16 @@ public class AiImportService {
                 out = aiClientService.chat(settings, extractPrompt, user, true);
             }
             //回退单次路径同样补漏 + 答案后处理（与分块路径统一；带标记时补漏带图）
-            AiParsedResult single = mdParseResult(out, aiSupplement);
+            AiImportResult single = mdParseResult(out, aiSupplement);
             if (single.questions().isEmpty() && looksLikeJson(out)) {
                 single = parseAndValidate(out, aiSupplement, fullSource, true, false);
             }
             if (extracted.isEmpty() || marksEmbedded || pageRenders != null) {
-                single = new AiParsedResult(fillMissingQuestions(single.questions(), fullSource,
+                single = new AiImportResult(fillMissingQuestions(single.questions(), fullSource,
                         settings, extractPrompt, aiSupplement, jobId, extracted), single.materials());
             }
             assertNotDegraded(single.questions(), fullSource);
-            return postProcessAnswers(single, aiSupplement, fullSource, evidenceSource, settings, jobId, extracted);
+            return answerService.postProcess(single, aiSupplement, fullSource, evidenceSource, settings, jobId, extracted);
         }
 
         //分块并行：每块 prompt = 块文本 + 卷末答案列表 + （本块图片编号规则）
@@ -2020,15 +1276,15 @@ public class AiImportService {
                 if (marksEmbedded) {
                     //标记路径：列出块内实际的图片编号（块内编号可能不连续，如公式图被二次拆块隔开），
                     //避免"firstNum~lastNum"误导模型把编号与消息顺序错配
-                    sb.append(buildImageRefRuleList(imageChunkNumbers(chunks.get(i))));
+                    sb.append(promptFactory.buildImageRefRuleList(imageChunkNumbers(chunks.get(i))));
                 } else if (pageRenders != null) {
                     //PDF 直传（模型看图主导）：整页截图 + 块内嵌图随消息提供，模型按截图判断归属并引用 [图片N]。
                     //测试验证（91-95 区）模型看图配图全对，含同题干图形题与跨页题；程序坐标仅作兜底（见 assignPdfFigureImages）
-                    sb.append(buildPdfVisionImageRule(chunkFirstPage[i] + 1, chunkLastPage[i] + 1,
+                    sb.append(promptFactory.buildPdfVisionImageRule(chunkFirstPage[i] + 1, chunkLastPage[i] + 1,
                             chunkPageImages.get(i).size(),
                             imageChunks.get(i).firstNum(), imageChunks.get(i).lastNum()));
                 } else {
-                    sb.append(buildImageRefRule(imageChunks.get(i).firstNum(), imageChunks.get(i).lastNum()));
+                    sb.append(promptFactory.buildImageRefRule(imageChunks.get(i).firstNum(), imageChunks.get(i).lastNum()));
                 }
             }
             //诊断日志：块 prompt 全文（定位模型输入问题）
@@ -2062,7 +1318,7 @@ public class AiImportService {
                     int pageCount = chunkPageImages != null && idx < chunkPageImages.size() ? chunkPageImages.get(idx).size() : 0;
                     log.info("AI 导入任务 {} 块 {}/{} 路由：vision 模型（页图 {} 张 + 标记图 {} 张）",
                             jobId, idx + 1, prompts.size(), pageCount, imgs.size() - pageCount);
-                    out = aiClientService.chatWithImages(buildVisionSettings(settings), extractPrompt, prompts.get(idx), imgs, true);
+                    out = aiClientService.chatWithImages(promptFactory.buildVisionSettings(settings), extractPrompt, prompts.get(idx), imgs, true);
                 }
                 return out;
             }));
@@ -2075,7 +1331,7 @@ public class AiImportService {
             if (isCanceled(jobId)) {
                 //用户取消：放弃剩余块（尽力中断）
                 cancelFutures(futures, i);
-                return new AiParsedResult(all, blockMaterials);
+                return new AiImportResult(all, blockMaterials);
             }
             List<ContentPackageQuestion> parsed = new ArrayList<>();
             try {
@@ -2084,7 +1340,7 @@ public class AiImportService {
                 log.info("AI 导入任务 {} 块 {}/{} 模型原始输出（{} 字符）：{}",
                         jobId, i + 1, futures.size(), out.length(), truncate(out.replaceAll("\\R+", " | "), 1600));
                 //Markdown 输出管线：确定性解析（题号取自标题）；材料块合并（跨块去重见末尾归一）
-                AiParsedResult blockResult = mdParseResult(out, aiSupplement);
+                AiImportResult blockResult = mdParseResult(out, aiSupplement);
                 if (blockResult.questions().isEmpty() && looksLikeJson(out)) {
                     //无思考重试 + json_object 响应格式 → 模型可能输出旧版 JSON 结构；本地兼容解析
                     blockResult = parseAndValidate(out, aiSupplement, fullSource, true, false);
@@ -2092,7 +1348,7 @@ public class AiImportService {
                 parsed = blockResult.questions();
                 mergeMaterials(blockMaterials, blockResult.materials());
             } catch (CancellationException e) {
-                return new AiParsedResult(all, blockMaterials);
+                return new AiImportResult(all, blockMaterials);
             } catch (Exception e) {
                 //块调用失败（网络/限流）→ 不整体失败，走重试
                 log.warn("AI 导入任务 {} 第 {}/{} 块调用失败（{}），自动重试该块", jobId, i + 1, futures.size(), e.getMessage());
@@ -2116,12 +1372,12 @@ public class AiImportService {
                     try {
                         //按块路由重试：块内有图才 vision（同上）；第 2 次切换思考模式，第 3 次改纯文本模型
                         //（端点 vision 持续降级时文本模型仍可用；图形题已由程序确定性配图，不依赖模型看图）
-                        AiSettings rs = attempt == 1 ? withThinking(settings, false) : settings;
+                        AiSettings rs = attempt == 1 ? promptFactory.withThinking(settings, false) : settings;
                         String retry;
                         if (attempt == 2 || blockImgs.isEmpty()) {
                             retry = aiClientService.chat(rs, extractPrompt, prompts.get(i), true);
                         } else {
-                            retry = aiClientService.chatWithImages(buildVisionSettings(rs), extractPrompt, prompts.get(i), blockImgs, true);
+                            retry = aiClientService.chatWithImages(promptFactory.buildVisionSettings(rs), extractPrompt, prompts.get(i), blockImgs, true);
                         }
                         List<ContentPackageQuestion> retryParsed = mdParseQuestions(retry, aiSupplement);
                         if (retryParsed.isEmpty() && looksLikeJson(retry)) {
@@ -2146,7 +1402,7 @@ public class AiImportService {
         List<ContentPackageQuestion> unique = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         for (ContentPackageQuestion q : all) {
-            String norm = normalizeQuestion(q);
+            String norm = visionQualityService.normalizeQuestion(q);
             if (seen.add(norm)) {
                 unique.add(q);
             }
@@ -2158,12 +1414,12 @@ public class AiImportService {
             //兜底：分块结果为空（切块异常时可能发生），回退单次调用
             log.warn("AI 导入任务 {} 分块结果为空，回退单次调用", jobId);
             String merged = String.join("\n\n========== 下一份文件 ==========\n\n", texts);
-            String user = buildUserPrompt(merged, warning);
+            String user = promptFactory.buildUserPrompt(merged, warning);
             String out;
             if (!extracted.isEmpty()) {
                 user += pageRenders != null
-                        ? buildPdfVisionImageRule(1, pageRenders.size(), pageRenders.size(), 1, extracted.size())
-                        : buildImageRefRule(1, extracted.size());
+                        ? promptFactory.buildPdfVisionImageRule(1, pageRenders.size(), pageRenders.size(), 1, extracted.size())
+                        : promptFactory.buildImageRefRule(1, extracted.size());
                 List<AiClientService.ImageData> allImgs = new ArrayList<>();
                 for (DocumentParserService.ExtractedImage e : extracted) {
                     allImgs.add(e.image());
@@ -2172,7 +1428,7 @@ public class AiImportService {
                 try {
                     out = allImgs.isEmpty()
                             ? aiClientService.chat(settings, extractPrompt, user, true)
-                            : aiClientService.chatWithImages(buildVisionSettings(settings), extractPrompt, user, allImgs, true);
+                            : aiClientService.chatWithImages(promptFactory.buildVisionSettings(settings), extractPrompt, user, allImgs, true);
                 } catch (Exception e) {
                     log.warn("AI 导入任务 {} 回退单次 vision 调用失败（{}），改用纯文本模型重试", jobId, e.getMessage());
                     out = aiClientService.chat(settings, extractPrompt, user, true);
@@ -2180,17 +1436,17 @@ public class AiImportService {
             } else {
                 out = aiClientService.chat(settings, extractPrompt, user, true);
             }
-            AiParsedResult single = mdParseResult(out, aiSupplement);
+            AiImportResult single = mdParseResult(out, aiSupplement);
             if (single.questions().isEmpty() && looksLikeJson(out)) {
                 single = parseAndValidate(out, aiSupplement, fullSource, true, false);
             }
             //回退单次路径同样补漏（无图时本地路径；MinerU 路径带图补漏），模型可能漏短题（如判断题"（ ）"格式）
             if (extracted.isEmpty() || marksEmbedded || pageRenders != null) {
-                single = new AiParsedResult(fillMissingQuestions(single.questions(), fullSource,
+                single = new AiImportResult(fillMissingQuestions(single.questions(), fullSource,
                         settings, extractPrompt, aiSupplement, jobId, extracted), single.materials());
             }
             assertNotDegraded(single.questions(), fullSource);
-            return postProcessAnswers(single, aiSupplement, fullSource, evidenceSource, settings, jobId, extracted);
+            return answerService.postProcess(single, aiSupplement, fullSource, evidenceSource, settings, jobId, extracted);
         }
         //精确补漏：模型偶发漏题（块输出 9-12 题不等）→ 按题号与源文对比，缺失的题单独补一次调用。
         //本地路径含图时跳过补漏（补漏调用原本无法带图）；MinerU 路径带图补漏（marksEmbedded）——
@@ -2236,9 +1492,9 @@ public class AiImportService {
                 if (content.isBlank()) {
                     continue;
                 }
-                int line = locateContentLine(lines, content);
+                int line = sourceTextService.locateContentLine(lines, content);
                 if (line >= 0) {
-                    int num = findQuestionNumber(lines, line, true);
+                    int num = sourceTextService.findQuestionNumber(lines, line, true);
                     if (num > 0) {
                         q.setQuestionNumber(num);
                     }
@@ -2256,7 +1512,7 @@ public class AiImportService {
                     continue;
                 }
                 ContentPackageQuestion existing = byNum.get(n);
-                if (existing == null || questionQuality(q) > questionQuality(existing)) {
+                if (existing == null || visionQualityService.quality(q) > visionQualityService.quality(existing)) {
                     byNum.put(n, q);
                 }
             }
@@ -2297,7 +1553,7 @@ public class AiImportService {
         if (!materials.isEmpty()) {
             log.info("AI 导入任务 {} 模型声明共享材料 {} 组", jobId, materials.size());
         }
-        return postProcessAnswers(new AiParsedResult(unique, materials), aiSupplement, fullSource,
+        return answerService.postProcess(new AiImportResult(unique, materials), aiSupplement, fullSource,
                 evidenceSource, settings, jobId, extracted);
     }
 
@@ -2319,361 +1575,6 @@ public class AiImportService {
         }
     }
 
-    /**
-     * 两阶段分离的答案处理（整理完成后）：
-     * 1) 清空整理阶段模型可能输出的答案/解析（extractOnly prompt 已禁止，这里兜底）——无思考答案不可信；
-     * 2) 原文证据确定性恢复（恒执行，与 aiSupplement 无关）：源文有答案证据（题后"答案：X"、
-     *    卷末答案列表、单独答案文件、教师版【N题答案】）→ 直接采用证据答案（ORIGINAL，零模型调用）；
-     * 3) aiSupplement=true 且仍有缺答案题 → 思考模式分批补充（每题 10 题一批并行，强制 thinking）——
-     *    思考只用在"真正需要生成"的步骤，整体等待时间远低于"整理时就思考"。
-     *    不勾选 aiSupplement：原文答案已恢复，缺失题留空（预览页用户补）。
-     * 主观题：原文证据 = 卷末【N题答案】分段参考答案；aiSupplement=true 时其余主观题思考补充 referenceAnswer。
-     * evidenceSource：答案溯源文本（MinerU 路径 = 主文本 + 本地解析文本；其余 = 主文本）。
-     */
-    private AiParsedResult postProcessAnswers(AiParsedResult parsed, boolean aiSupplement, String fullSource,
-                                              String evidenceSource, AiSettings settings, Long jobId,
-                                              List<DocumentParserService.ExtractedImage> extracted) {
-        List<ContentPackageQuestion> questions = parsed.questions();
-        if (questions.isEmpty()) {
-            return parsed;
-        }
-        //SUBJECTIVE 误判校验：选择题被输出为 SUBJECTIVE 时，仅当模型已给出 ≥2 个非空选项才强制转 SINGLE。
-        //空选项一律保持 SUBJECTIVE——转成"空选项单选"会卡死确认导入（前端/后端都要求选项非空，实测"选项为空"报错）
-        //学科卷主观句式扩充（实验题"填正确答案标号"/填空线/计算题"求…"），防止实验题被误转成选择题
-        for (ContentPackageQuestion q : questions) {
-            if (!"SUBJECTIVE".equals(q.getType())) {
-                continue;
-            }
-            String c = q.getContent() == null ? "" : q.getContent();
-            boolean subjectivePhrase = c.matches(".*(请简述|请论述|请说明|谈谈|说明理由|简述|论述|撰写|作答|请分析|填正确答案标号|（填|求|计算).*");
-            boolean choicePhrase = c.matches(".*(哪个|哪项|以下|下列|多少|正确|错误|属于|能够|不能|选择|填入).*");
-            boolean hasRealOptions = q.getOptions() != null && q.getOptions().size() >= 2
-                    && q.getOptions().stream().allMatch(o -> o != null && o.text() != null && !o.text().isBlank());
-            if (choicePhrase && !subjectivePhrase && hasRealOptions) {
-                log.info("SUBJECTIVE 误判修正：{} → SINGLE（选项齐全）", truncate(c, 40));
-                q.setType("SINGLE");
-            }
-        }
-        //1) 清空整理阶段模型输出的答案/解析（统一由本方法处理）
-        for (ContentPackageQuestion q : questions) {
-            q.setAnswerKeys(List.of());
-            q.setAnswerText(null);
-            q.setAnalysis(null);
-            q.setReferenceAnswer(null);
-            q.setAnswerSource(null);
-        }
-        //2) 原文证据确定性恢复（独立于 aiSupplement：文档自带答案（卷末/题后/答案文件）是用户提供的事实，
-        //   只要源文有证据就恢复为 ORIGINAL——即使不勾选"AI 补充"，原文答案也应正确填入；
-        //   aiSupplement 只控制"原文缺失的题是否用思考模式补算"）
-        int evidenceCount = 0;
-        int recoveredSubjective = 0;
-        for (ContentPackageQuestion q : questions) {
-            if ("SUBJECTIVE".equals(q.getType())) {
-                //主观题：从卷末【N题答案】恢复分段参考答案（教师版试卷常见"【13题答案】（1）…（2）…"）。
-                //evidenceSource 优先（MinerU 路径含本地解析文本，答案行干净可靠）
-                Integer qn = q.getQuestionNumber();
-                if (qn == null) {
-                    qn = locateNumberByContent(fullSource, q);
-                }
-                if (qn != null) {
-                    String tail = AiAnswerFormat.bracketAnswerTail(evidenceSource, qn);
-                    if (tail != null && !tail.isBlank()) {
-                        q.setReferenceAnswer(tail);
-                        q.setAnswerSource("ORIGINAL");
-                        recoveredSubjective++;
-                    }
-                }
-                continue;
-            }
-            if (q.getOptions() == null || q.getOptions().isEmpty()) {
-                continue; //无选项：证据恢复不适用
-            }
-            Set<String> evidence = collectSourceAnswerEvidence(evidenceSource, q);
-            if (evidence.isEmpty()) {
-                continue;
-            }
-            List<String> optionKeys = q.getOptions().stream().map(OptionItem::key).map(String::toUpperCase).toList();
-            List<String> keys = evidence.stream().filter(optionKeys::contains).distinct().sorted().toList();
-            if (keys.isEmpty()) {
-                continue;
-            }
-            q.setAnswerKeys(keys);
-            q.setAnswerSource("ORIGINAL");
-            evidenceCount++;
-        }
-        if (!aiSupplement) {
-            log.info("AI 导入任务 {} 答案处理完成（未勾选 AI 补充）：{} 题原文证据恢复，{} 题主观题原文参考答案恢复，缺失留空",
-                    jobId, evidenceCount, recoveredSubjective);
-            return parsed; //不补充：缺失答案留空，预览页用户补
-        }
-        //3) 缺答案题（含全部主观题；已从卷末恢复参考答案的主观题跳过）→ 思考模式分批补充
-        List<ContentPackageQuestion> missing = questions.stream()
-                .filter(q -> q.getAnswerKeys() == null || q.getAnswerKeys().isEmpty())
-                .filter(q -> !("SUBJECTIVE".equals(q.getType())
-                        && q.getReferenceAnswer() != null && !q.getReferenceAnswer().isBlank()))
-                .toList();
-        if (missing.isEmpty()) {
-            log.info("AI 导入任务 {} 答案处理完成：{} 题原文证据恢复，{} 题主观题参考答案恢复，无需 AI 补充",
-                    jobId, evidenceCount, recoveredSubjective);
-            return parsed;
-        }
-        supplementAnswers(missing, settings, jobId, extracted, parsed.materials());
-        //4) 材料引用最终校验：materialKey 必须存在于最终 materials（本地截取可能只覆盖单材料组，
-        //模型引用的其他 key 悬空会导致 confirm 失败"材料不存在"）→ 悬空引用清空（题目保留，预览可补）
-        List<ContentPackageMaterial> finalMaterials = parsed.materials();
-        if (finalMaterials != null && !finalMaterials.isEmpty()) {
-            Set<String> keys = new HashSet<>();
-            for (ContentPackageMaterial m : finalMaterials) {
-                if (m.getMaterialKey() != null) {
-                    keys.add(m.getMaterialKey());
-                }
-            }
-            for (ContentPackageQuestion q : questions) {
-                if (q.getMaterialKey() != null && !keys.contains(q.getMaterialKey())) {
-                    log.warn("AI 导入任务 {} 题目引用材料 {} 但最终材料不存在，清空引用（预览可手动关联）",
-                            jobId, q.getMaterialKey());
-                    q.setMaterialKey(null);
-                }
-            }
-        }
-        log.info("AI 导入任务 {} 答案处理完成：{} 题原文证据恢复，{} 题主观题参考答案恢复，{} 题思考模式补充（含失败留空）",
-                jobId, evidenceCount, recoveredSubjective, missing.size());
-        //定界符统一：模型偶发输出 \(...\) / \[...\]（LaTeX 原生定界）——前端公式渲染只认 $...$ / $$...$$，
-        //统一转写为 $ 定界（含 AI 补充的解析与原文恢复的参考答案）
-        normalizeLatexInResult(parsed);
-        return parsed;
-    }
-
-    /** 全结果（题干/选项/解析/参考答案/材料）LaTeX 定界符归一：\( → $、\) → $、\[ → $$、\] → $$ */
-    private void normalizeLatexInResult(AiParsedResult parsed) {
-        for (ContentPackageQuestion q : parsed.questions()) {
-            q.setContent(normalizeLatexDelimiters(q.getContent()));
-            if (q.getOptions() != null) {
-                q.setOptions(q.getOptions().stream()
-                        .map(o -> new OptionItem(o.key(), normalizeLatexDelimiters(o.text())))
-                        .toList());
-            }
-            q.setAnalysis(normalizeLatexDelimiters(q.getAnalysis()));
-            q.setReferenceAnswer(normalizeLatexDelimiters(q.getReferenceAnswer()));
-            q.setAnswerText(normalizeLatexDelimiters(q.getAnswerText()));
-        }
-        if (parsed.materials() != null) {
-            for (ContentPackageMaterial m : parsed.materials()) {
-                m.setContent(normalizeLatexDelimiters(m.getContent()));
-            }
-        }
-    }
-
-    /** 单段定界符归一（先 \[ \] → $$，后 \( \) → $——$$ 内含 $，顺序不可反） */
-    private String normalizeLatexDelimiters(String s) {
-        if (s == null || s.isEmpty()) {
-            return s;
-        }
-        return s.replace("\\[", "$$").replace("\\]", "$$")
-                .replace("\\(", "$").replace("\\)", "$");
-    }
-
-    /**
-     * 残留公式图 LaTeX 转写兜底（docx 公式路径）：模型整理阶段可能漏转公式图（实测非思考模式全残留、
-     * 思考模式偶发残留大头针符号等）——本方法扫描题目 content/选项/参考答案中的 [图片N]，
-     * 只处理"docx 解析标记为公式（WMF/EMF）"的编号（示意图/照片编号不在集合内 → 不动），
-     * 一次思考调用批量转写 LaTeX 并回填。调用失败/转写缺失 → 保留原 [图片N]（预览可见，人工可补）。
-     */
-    private AiParsedResult fixResidualFormulaImages(AiParsedResult parsed, Set<Integer> formulaNos,
-                                                    List<DocumentParserService.ExtractedImage> extracted,
-                                                    AiSettings settings, Long jobId) {
-        try {
-            //收集残留公式图引用（题干/选项/参考答案/材料）与每张图的题目上下文
-            Set<Integer> residual = new TreeSet<>();
-            Map<Integer, String> ctxByRef = new HashMap<>();
-            for (ContentPackageQuestion q : parsed.questions()) {
-                String ctx = questionContext(q.getContent());
-                collectResidualFormulaRefs(q.getContent(), formulaNos, residual, ctx, ctxByRef);
-                if (q.getOptions() != null) {
-                    for (OptionItem o : q.getOptions()) {
-                        collectResidualFormulaRefs(o.text(), formulaNos, residual, ctx, ctxByRef);
-                    }
-                }
-                collectResidualFormulaRefs(q.getReferenceAnswer(), formulaNos, residual, ctx, ctxByRef);
-                collectResidualFormulaRefs(q.getAnswerText(), formulaNos, residual, ctx, ctxByRef);
-            }
-            if (parsed.materials() != null) {
-                for (ContentPackageMaterial m : parsed.materials()) {
-                    String ctx = questionContext(m.getContent());
-                    collectResidualFormulaRefs(m.getContent(), formulaNos, residual, ctx, ctxByRef);
-                }
-            }
-            if (residual.isEmpty()) {
-                return parsed;
-            }
-            log.info("AI 导入任务 {} 残留公式图 {} 个（{}），逐张带上下文 LaTeX 转写兜底", jobId, residual.size(),
-                    residual.stream().map(n -> "[图片" + n + "]").reduce("", (a, b) -> a + b));
-            //逐张转写：一次一张 + 题目上下文 + 2x 放大（无上下文时模型对印刷公式乱猜，实测 98 图 "2.5 kPa"
-            //被转成 "k0På"；带上下文与放大后转写准确）
-            List<Integer> nums = new ArrayList<>(residual);
-            AiSettings think = withThinking(settings, true);
-            AiSettings vision = buildVisionSettings(think);
-            Map<Integer, String> replacements = new HashMap<>();
-            for (int n : nums) {
-                if (n < 1 || n > extracted.size()) {
-                    continue;
-                }
-                try {
-                    String ctx = ctxByRef.getOrDefault(n, "");
-                    String prompt = "题目背景：" + (ctx.isEmpty() ? "（该公式是某道题的官方答案）" : ctx)
-                            + "\n下图中是该处对应的数学公式/数值答案，请逐字符完整转写为 LaTeX 文本"
-                            + "（行内公式用 $...$ 包裹；图中每个数字、字母、单位、上下标都必须保留，禁止省略或简化，务必照图准确）；"
-                            + "只输出 LaTeX，不要解释。";
-                    byte[] img = upscale2x(extracted.get(n - 1).image().data());
-                    String out = aiClientService.chatWithImages(vision,
-                            "你是公式转写助手。", prompt,
-                            List.of(new AiClientService.ImageData("image/png", img)), false);
-                    String latex = out == null ? "" : out.trim();
-                    //剥围栏，规范化 $ 包裹（模型可能输出 \(...\) 或裸 LaTeX）
-                    latex = stripCodeFence(latex);
-                    if (latex.startsWith("\\(") && latex.endsWith("\\)")) {
-                        latex = "$" + latex.substring(2, latex.length() - 2).trim() + "$";
-                    }
-                    int d = latex.indexOf('$');
-                    if (d >= 0) {
-                        latex = latex.substring(d);
-                        int e = latex.lastIndexOf('$');
-                        if (e > d) {
-                            latex = latex.substring(0, e + 1);
-                        }
-                    } else if (!latex.isEmpty()) {
-                        latex = "$" + latex + "$";
-                    }
-                    if (latex.length() > 2 && latex.startsWith("$") && latex.endsWith("$")) {
-                        replacements.put(n, latex);
-                        log.info("AI 导入任务 {} 残留公式 [图片{}] 转写：{}", jobId, n, truncate(latex, 200));
-                    } else {
-                        log.warn("AI 导入任务 {} 残留公式 [图片{}] 转写无效（保留原图）：{}", jobId, n, truncate(out, 200));
-                    }
-                } catch (Exception e) {
-                    log.warn("AI 导入任务 {} 残留公式 [图片{}] 转写失败（保留原图）：{}", jobId, n, e.getMessage());
-                }
-            }
-            if (replacements.isEmpty()) {
-                return parsed;
-            }
-            //回填（题干/选项/参考答案/材料）
-            int replaced = 0;
-            for (ContentPackageQuestion q : parsed.questions()) {
-                replaced += replaceFormulaRefsIn(q::getContent, q::setContent, replacements);
-                if (q.getOptions() != null && !q.getOptions().isEmpty()) {
-                    List<OptionItem> newOpts = new ArrayList<>();
-                    boolean changed = false;
-                    for (OptionItem o : q.getOptions()) {
-                        String nt = applyFormulaRefs(o.text(), replacements);
-                        if (!nt.equals(o.text())) {
-                            changed = true;
-                        }
-                        newOpts.add(new OptionItem(o.key(), nt));
-                    }
-                    if (changed) {
-                        q.setOptions(newOpts);
-                        replaced += replacements.size(); //计数近似（无法精确数每选项命中数）
-                    }
-                }
-                replaced += replaceFormulaRefsIn(q::getReferenceAnswer, q::setReferenceAnswer, replacements);
-                replaced += replaceFormulaRefsIn(q::getAnswerText, q::setAnswerText, replacements);
-            }
-            if (parsed.materials() != null) {
-                for (ContentPackageMaterial m : parsed.materials()) {
-                    replaced += replaceFormulaRefsIn(m::getContent, m::setContent, replacements);
-                }
-            }
-            log.info("AI 导入任务 {} 公式转写回填完成：{} 处", jobId, replaced);
-        } catch (Exception e) {
-            log.warn("AI 导入任务 {} 残留公式转写兜底失败（保留原图标记）：{}", jobId, e.getMessage());
-        }
-        return parsed;
-    }
-
-    /** 题目上下文（转写参考）：题干前 120 字（去换行） */
-    private String questionContext(String content) {
-        if (content == null || content.isBlank()) {
-            return "";
-        }
-        String flat = content.replaceAll("\\s+", " ").replaceAll("\\[图片\\d+\\]", " ").trim();
-        return flat.length() > 120 ? flat.substring(0, 120) : flat;
-    }
-
-    /** 图片 2x 放大（BICUBIC，白底）——印刷公式小字号放大后模型识别显著改善 */
-    private byte[] upscale2x(byte[] png) {
-        try {
-            BufferedImage img = ImageIO.read(new ByteArrayInputStream(png));
-            if (img == null) {
-                return png;
-            }
-            int w = img.getWidth() * 2;
-            int h = img.getHeight() * 2;
-            BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
-            java.awt.Graphics2D g = out.createGraphics();
-            g.setColor(java.awt.Color.WHITE);
-            g.fillRect(0, 0, w, h);
-            g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION,
-                    java.awt.RenderingHints.VALUE_INTERPOLATION_BICUBIC);
-            g.drawImage(img, 0, 0, w, h, null);
-            g.dispose();
-            ByteArrayOutputStream bos = new ByteArrayOutputStream();
-            if (!ImageIO.write(out, "png", bos)) {
-                return png;
-            }
-            return bos.toByteArray();
-        } catch (Exception e) {
-            return png;
-        }
-    }
-
-    private void collectResidualFormulaRefs(String text, Set<Integer> formulaNos, Set<Integer> out,
-                                            String ctx, Map<Integer, String> ctxByRef) {
-        if (text == null || text.isEmpty()) {
-            return;
-        }
-        Matcher m = IMAGE_REF.matcher(text);
-        while (m.find()) {
-            int n = Integer.parseInt(m.group(1));
-            if (formulaNos.contains(n)) {
-                out.add(n);
-                if (ctx != null && !ctx.isBlank()) {
-                    ctxByRef.putIfAbsent(n, ctx);
-                }
-            }
-        }
-    }
-
-    /** 单段文本应用公式替换（命中任一编号返回替换后文本；未命中返回原文本） */
-    private String applyFormulaRefs(String text, Map<Integer, String> replacements) {
-        if (text == null || text.isEmpty() || replacements.isEmpty()) {
-            return text;
-        }
-        String out = text;
-        for (Map.Entry<Integer, String> e : replacements.entrySet()) {
-            String mark = "[图片" + e.getKey() + "]";
-            if (out.contains(mark)) {
-                out = out.replaceAll("\\[图片" + e.getKey() + "]", Matcher.quoteReplacement(e.getValue()));
-            }
-        }
-        return out;
-    }
-
-    /** 通用替换：getter 取文本 → 替换 [图片N] → setter 写回；返回命中替换数 */
-    private int replaceFormulaRefsIn(java.util.function.Supplier<String> getter,
-                                     java.util.function.Consumer<String> setter,
-                                     Map<Integer, String> replacements) {
-        String text = getter.get();
-        if (text == null || text.isEmpty() || replacements.isEmpty()) {
-            return 0;
-        }
-        String out = applyFormulaRefs(text, replacements);
-        if (!out.equals(text)) {
-            setter.accept(out);
-            return 1;
-        }
-        return 0;
-    }
 
     /** 按题干内容在源文定位题号（主观题卷末答案恢复用；定位失败返回 null） */
     private Integer locateNumberByContent(String fullSource, ContentPackageQuestion q) {
@@ -2681,11 +1582,11 @@ public class AiImportService {
             return null;
         }
         String[] lines = fullSource.split("\\R", -1);
-        int line = locateContentLine(lines, stripImageRefs(q.getContent()));
+        int line = sourceTextService.locateContentLine(lines, stripImageRefs(q.getContent()));
         if (line < 0) {
             return null;
         }
-        int num = findQuestionNumber(lines, line, true);
+        int num = sourceTextService.findQuestionNumber(lines, line, true);
         return num > 0 ? num : null;
     }
 
@@ -2780,8 +1681,8 @@ public class AiImportService {
         }
         try {
             String out = imgs.isEmpty()
-                    ? aiClientService.chat(think, buildSystemPrompt(true, false), sb.toString(), true)
-                    : aiClientService.chatWithImages(buildVisionSettings(think), buildSystemPrompt(true, false), sb.toString(), imgs, true);
+                    ? aiClientService.chat(think, promptFactory.buildSystemPrompt(true, false), sb.toString(), true)
+                    : aiClientService.chatWithImages(promptFactory.buildVisionSettings(think), promptFactory.buildSystemPrompt(true, false), sb.toString(), imgs, true);
             JsonNode root = objectMapper.readTree(stripCodeFence(out));
             JsonNode answers = root.path("answers");
             if (!answers.isArray()) {
@@ -3155,11 +2056,11 @@ public class AiImportService {
             if (content.isBlank()) {
                 continue;
             }
-            int line = locateContentLine(lines, content);
+            int line = sourceTextService.locateContentLine(lines, content);
             if (line < 0) {
                 continue;
             }
-            int num = findQuestionNumber(lines, line, true); //向后找题号行
+            int num = sourceTextService.findQuestionNumber(lines, line, true); //向后找题号行
             if (num > 0) {
                 covered.add(num);
             }
@@ -3200,7 +2101,7 @@ public class AiImportService {
         List<ContentPackageQuestion> dedup = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         for (ContentPackageQuestion q : result) {
-            if (seen.add(normalizeQuestion(q))) {
+            if (seen.add(visionQualityService.normalizeQuestion(q))) {
                 dedup.add(q);
             }
         }
@@ -3214,9 +2115,9 @@ public class AiImportService {
                                                  List<DocumentParserService.ExtractedImage> extracted) {
         int idx = sourceNums.indexOf(n);
         //起始：上一题题号行（片段含上一题，供模型参照边界）；第一题向前看 3 行（保留章节标题"一、选择题"作题型上下文）
-        int startLine = idx > 0 ? findLineOf(lines, sourceNums.get(idx - 1)) : Math.max(0, findLineOf(lines, n) - 3);
+        int startLine = idx > 0 ? sourceTextService.findLineOf(lines, sourceNums.get(idx - 1)) : Math.max(0, sourceTextService.findLineOf(lines, n) - 3);
         //结束：下一题题号行（整题完整片段——多行计算题/实验题不再被 +4 行截断）；最后一题到文末
-        int endLine = idx + 1 < sourceNums.size() ? findLineOf(lines, sourceNums.get(idx + 1)) : lines.length;
+        int endLine = idx + 1 < sourceNums.size() ? sourceTextService.findLineOf(lines, sourceNums.get(idx + 1)) : lines.length;
         StringBuilder frag = new StringBuilder();
         for (int i = startLine; i < endLine; i++) {
             frag.append(lines[i]).append('\n');
@@ -3244,10 +2145,10 @@ public class AiImportService {
         for (int attempt = 0; attempt < 2; attempt++) {
             try {
                 //第 1 次无思考（快），第 2 次思考（稳）——端点偶发空白内容时交替可恢复
-                AiSettings rs = attempt == 0 ? noThink : withThinking(settings, true);
+                AiSettings rs = attempt == 0 ? noThink : promptFactory.withThinking(settings, true);
                 String out = imgs.isEmpty()
                         ? aiClientService.chat(rs, systemPrompt, user, true)
-                        : aiClientService.chatWithImages(buildVisionSettings(rs), systemPrompt, user, imgs, true);
+                        : aiClientService.chatWithImages(promptFactory.buildVisionSettings(rs), systemPrompt, user, imgs, true);
                 log.info("AI 导入任务 {} 补漏第 {} 题原始输出（{} 字符）：{}",
                         jobId, n, out.length(), truncate(out.replaceAll("\\R+", " | "), 900));
                 List<ContentPackageQuestion> parsed = mdParseQuestions(out, aiSupplement);
@@ -3257,8 +2158,8 @@ public class AiImportService {
                     if (p.getContent() == null || p.getContent().isBlank()) {
                         continue;
                     }
-                    int pLine = locateContentLine(lines, p.getContent().replaceAll("\\[图片\\d+]", "").trim());
-                    int pNum = pLine >= 0 ? findQuestionNumber(lines, pLine, true) : -1;
+                    int pLine = sourceTextService.locateContentLine(lines, p.getContent().replaceAll("\\[图片\\d+]", "").trim());
+                    int pNum = pLine >= 0 ? sourceTextService.findQuestionNumber(lines, pLine, true) : -1;
                     if (pNum == n) {
                         //补漏题直接写死题号（定位已确认）——补漏结果原本追加在列表末尾，
                         //无题号时排序归位失效（图形题等被排到末尾）；此处显式设置后按题号排序即归位
@@ -3278,50 +2179,6 @@ public class AiImportService {
             }
         }
         return matched;
-    }
-
-    private int findLineOf(String[] lines, int num) {
-        for (int i = 0; i < lines.length; i++) {
-            String t = lines[i].trim();
-            if (isQuestionNumberLine(t)) {
-                Matcher m = Pattern.compile("^(\\d{1,3})").matcher(t);
-                if (m.find() && Integer.parseInt(m.group(1)) == num) {
-                    return i;
-                }
-            }
-        }
-        return 0;
-    }
-
-    /**
-     * 从 startLine 开始查找题号归属：
-     * forward=true 向后找（题干/材料在题号行之前）；forward=false 向前找（选项在题号行之后）。
-     * 优先"孤立题号行"（粉笔 PDF 格式）；找不到时放宽为"行首题号"（"1. 题干同行"的 txt 格式），
-     * 排除小数行（"15.8%"）与答案列表行（"1.A"）。找不到返回 -1。
-     */
-    /**
-     * 从 startLine 开始查找题号归属：
-     * forward=true 向后找（题干/材料在题号行之前）；forward=false 向前找（选项在题号行之后）。
-     * 匹配"行首题号"（含孤立题号行"1."——".*"可匹配空），排除小数行（"15.8%"）与答案列表行（"1.A"）。
-     * 注意：不做"孤立题号行优先"两遍扫描——实测 vlm 把题号拼在题干块末尾（"…评价。30."）时拆行产生孤立行，
-     * "优先孤立行"会跳过近处的"题号+文字"行（"1.宽了…"）去命中远处孤立行（全部题定位成 30），
-     * 单遍"最近行首题号"语义正确且覆盖孤立行。找不到返回 -1。
-     */
-    private int findQuestionNumber(String[] lines, int startLine, boolean forward) {
-        int step = forward ? 1 : -1;
-        int end = forward ? lines.length : -1;
-        for (int li = startLine; li != end; li += step) {
-            String t = lines[li].trim();
-            String s = t.replaceAll("^(\\[图片\\d+])+", "").trim();
-            if (s.matches("^\\d{1,3}\\s*[.．、)）].*") && !isDecimalLikeLine(s)
-                    && !ANSWER_LINE.matcher(s).matches()) {
-                Matcher m = Pattern.compile("^(\\d{1,3})").matcher(s);
-                if (m.find()) {
-                    return Integer.parseInt(m.group(1));
-                }
-            }
-        }
-        return -1;
     }
 
     /** 规范化题目内容（去空白 + 剥离图片编号标记）用于去重：同题干+同选项视为同一题（题干忠实原文） */
@@ -3345,107 +2202,9 @@ public class AiImportService {
         return t.replaceAll("\\s+", "").replace("_", "");
     }
 
-    /** 题目质量分（视觉去重用：重叠块残版 vs 完整版；选项全 + 有答案 = 更完整） */
-    private int questionQuality(ContentPackageQuestion q) {
-        int score = q.getOptions() == null ? 0 : q.getOptions().size() * 10;
-        if (q.getAnswerKeys() != null && !q.getAnswerKeys().isEmpty()) {
-            score += 5;
-        }
-        if (q.getContent() != null && q.getContent().length() > 30) {
-            score += 3;
-        }
-        return score;
-    }
 
-    /** 视觉路径坏题判定：残版（选项全部相同/全空）或粘连题（题干行尾残留题号、与下一题内容混合） */
-    private static final Pattern GLUED_QUESTION = Pattern.compile("\\d{1,2}\\s*[.．、]\\s*(?:\\n|$)");
-    /** 行尾孤立题号（"…规律性：2." 是本题题号被抄进题干行尾，剥除后保留题目；真粘连"…截面是：7.\n下一题…"由 isVisionJunk 判定过滤） */
-    private static final Pattern TRAILING_QNO = Pattern.compile("\\d{1,2}\\s*[.．、]\\s*$");
 
-    private boolean isVisionJunk(ContentPackageQuestion q) {
-        //1. 残版：选项全部相同（非空且完全相同 → 真残版）。全空选项不视为残版：图形题的选项是图，
-        //   模型无法输出文字 → 输出空壳（A./B./C./D. 或空），由 resolvePlaceholders 用图形块填充；
-        //   误杀会导致图形题整题丢失、其图错插给相邻文字题
-        if (q.getOptions() != null && q.getOptions().size() > 1) {
-            String first = q.getOptions().get(0).text() == null ? "" : q.getOptions().get(0).text().trim();
-            boolean allBlank = first.isEmpty();
-            boolean allSame = true;
-            for (OptionItem o : q.getOptions()) {
-                String t = o.text() == null ? "" : o.text().trim();
-                if (!t.isEmpty()) {
-                    allBlank = false;
-                }
-                if (!t.equals(first)) {
-                    allSame = false;
-                    break;
-                }
-            }
-            if (allSame && !allBlank) {
-                log.info("isVisionJunk 过滤（选项全同）：{} | options={}", truncate(q.getContent() == null ? "" : q.getContent(), 30),
-                        q.getOptions().stream().map(o -> o.text() == null ? "" : o.text()).collect(java.util.stream.Collectors.toList()));
-                return true;
-            }
-        }
-        //1b. 残版：客观题（非判断/主观）选项 < 3（跨页题的残版只有 1-2 个选项，如选项跨页的三明治法则题；
-        //    完整版在同一题的其他块输出，重叠块保证）。选项是图的题选项数不受影响（如太师椅 4 个选项 key 齐全）
-        if (!"JUDGE".equals(q.getType()) && !"SUBJECTIVE".equals(q.getType())
-                && (q.getOptions() == null || q.getOptions().size() < 3)) {
-            log.info("isVisionJunk 过滤（选项<3）：{} | options={}", truncate(q.getContent() == null ? "" : q.getContent(), 30),
-                    q.getOptions() == null ? "null" : q.getOptions().stream().map(o -> o.text() == null ? "" : o.text()).collect(java.util.stream.Collectors.toList()));
-            return true;
-        }
-        //2. 粘连：content 行尾残留题号（"…规律性：2." / "…截面是：7.\n某企业…" / "…切面？24.\n…"）。
-        //   行尾孤立题号（"…规律性：2."）是"本题题号被模型抄进题干行尾"→ 剥除后保留（否则图形题被误杀、
-        //   其图错插给相邻文字题）；题号后还有下一题内容（"…截面是：7.\n某企业…"）才是真粘连 → 过滤。
-        String content = q.getContent() == null ? "" : q.getContent();
-        String[] cl = content.split("\\R", -1);
-        boolean stripped = false;
-        for (int i = 0; i < cl.length; i++) {
-            if (TRAILING_QNO.matcher(cl[i]).find()) {
-                if (i == cl.length - 1 || cl[i + 1].isBlank()) {
-                    cl[i] = TRAILING_QNO.matcher(cl[i]).replaceAll("");
-                    stripped = true;
-                } else {
-                    log.info("isVisionJunk 过滤（真粘连）：{}", truncate(q.getContent() == null ? "" : q.getContent(), 50));
-                    return true; // 题号后还有下一题内容 → 真粘连
-                }
-            }
-        }
-        if (stripped) {
-            q.setContent(String.join("\n", cl));
-            content = q.getContent();
-        }
-        if (GLUED_QUESTION.matcher(content).find()) {
-            log.info("isVisionJunk 过滤（GLUED 残留）：{}", truncate(q.getContent() == null ? "" : q.getContent(), 50));
-            return true;
-        }
-        return false;
-    }
 
-    /**
-     * 清除视觉路径输出中越界/幻觉的图片编号引用（模型偶发引用本块编号范围外的 [图片N]，
-     * 确认导入时会映射成其他页的图 → 错图；越界引用清除后该题图缺失，预览可见，优于错图）。
-     */
-    private void sanitizeImageRefs(List<ContentPackageQuestion> questions, int firstNum, int lastNum) {
-        if (firstNum <= 0) {
-            return;
-        }
-        for (ContentPackageQuestion q : questions) {
-            if (q.getContent() != null) {
-                q.setContent(stripOutOfRangeRefs(q.getContent(), firstNum, lastNum));
-            }
-            if (q.getOptions() != null) {
-                List<OptionItem> fixed = new ArrayList<>();
-                for (OptionItem o : q.getOptions()) {
-                    fixed.add(new OptionItem(o.key(), o.text() == null ? null : stripOutOfRangeRefs(o.text(), firstNum, lastNum)));
-                }
-                q.setOptions(fixed);
-            }
-            if (q.getReferenceAnswer() != null) {
-                q.setReferenceAnswer(stripOutOfRangeRefs(q.getReferenceAnswer(), firstNum, lastNum));
-            }
-        }
-    }
 
     private String stripOutOfRangeRefs(String text, int firstNum, int lastNum) {
         Matcher m = Pattern.compile("\\[图片(\\d+)\\]").matcher(text);
@@ -3468,8 +2227,8 @@ public class AiImportService {
         String[] lines = fullSource.split("\\R", -1);
         List<ContentPackageQuestion> sorted = new ArrayList<>(questions);
         sorted.sort((a, b) -> {
-            int la = locateContentLine(lines, stripImageRefs(a.getContent() == null ? "" : a.getContent()));
-            int lb = locateContentLine(lines, stripImageRefs(b.getContent() == null ? "" : b.getContent()));
+            int la = sourceTextService.locateContentLine(lines, stripImageRefs(a.getContent() == null ? "" : a.getContent()));
+            int lb = sourceTextService.locateContentLine(lines, stripImageRefs(b.getContent() == null ? "" : b.getContent()));
             if (la < 0 && lb < 0) {
                 return 0;
             }
@@ -3491,7 +2250,7 @@ public class AiImportService {
      * → 按题干在源文中的页内位置，从 300 DPI 整页渲染中裁剪"题干下方第一个图形块"，就地追加 [图片N]。
      * 只做题干图（不塞选项）；定位失败/无图形块 → 保持原样（预览人工补图）。
      */
-    private AiParsedResult resolvePdfStemImages(AiParsedResult parsed, List<String> pageTexts,
+    private AiImportResult resolvePdfStemImages(AiImportResult parsed, List<String> pageTexts,
                                                 List<DocumentParserService.ExtractedImage> extracted,
                                                 Path jobDir, String pdfFileName, Long jobId) {
         try {
@@ -3560,7 +2319,7 @@ public class AiImportService {
                 if (q.getContent() == null || textOnly.isBlank()) {
                     continue;
                 }
-                int line = locateContentLine(lines, textOnly);
+                int line = sourceTextService.locateContentLine(lines, textOnly);
                 if (line < 0) {
                     continue;
                 }
@@ -3883,7 +2642,7 @@ public class AiImportService {
                     log.info("AI 导入任务 {} 矢量图兜底：题号 {} 裁剪题干图 [图片{}]", jobId, q.getQuestionNumber(), num);
                 }
             }
-            return new AiParsedResult(out, parsed.materials());
+            return new AiImportResult(out, parsed.materials());
         } catch (Exception e) {
             log.warn("AI 导入任务 {} PDF 矢量图兜底失败：{}", jobId, e.getMessage());
             return parsed;
@@ -3916,7 +2675,7 @@ public class AiImportService {
         }
     }
 
-    private AiParsedResult assignPdfFigureImages(AiParsedResult parsed, List<String> pageTexts,
+    private AiImportResult assignPdfFigureImages(AiImportResult parsed, List<String> pageTexts,
                                                  List<DocumentParserService.ExtractedImage> extracted,
                                                  Path jobDir, String pdfFileName, Long jobId) {
         try {
@@ -3965,7 +2724,7 @@ public class AiImportService {
                 if (s2.isBlank()) {
                     continue;
                 }
-                int line = locateContentLine(lines, s2);
+                int line = sourceTextService.locateContentLine(lines, s2);
                 if (line < 0) {
                     continue;
                 }
@@ -4071,15 +2830,13 @@ public class AiImportService {
                 log.info("AI 导入任务 {} 图题归位：题号 {} 内嵌图 [图片{}]", jobId, q.getQuestionNumber(), num);
             }
             log.info("AI 导入任务 {} 图题归位：{} 题配图完成（未配图图形题由预览页人工补图）", jobId, assigned);
-            return new AiParsedResult(out, parsed.materials());
+            return new AiImportResult(out, parsed.materials());
         } catch (Exception e) {
             log.warn("AI 导入任务 {} PDF 图题归位失败：{}", jobId, e.getMessage());
             return parsed;
         }
     }
 
-    /** 位置占位符：模型输出的【题干图片】【选项A图片】等（含"图片"二字即可匹配） */
-    private static final Pattern PLACEHOLDER = Pattern.compile("【[^】]*图片[^】]*】");
 
     /** 图形题题干特征：几何图形/俯视图/展开图/问号题/图形分类等。
      *  这类题的图形由程序按版面位置确定性裁剪配图，模型不引用 [图片N]（模型数图/归属不可靠）。 */
@@ -4131,7 +2888,7 @@ public class AiImportService {
      * 匹配失败（矢量图等无内嵌图）→ 占位符保留，预览页手动补图。
      * 校验：跳过源文回填（行首题号定位会误杀"题号+题干同行"版式）；残版/粘连过滤 + 去重择优。
      */
-    private AiParsedResult chatVisionSingle(AiSettings settings, List<String> pageTexts,
+    private AiImportResult chatVisionSingle(AiSettings settings, List<String> pageTexts,
                                             List<DocumentParserService.ExtractedImage> extracted,
                                             String fullSource, String warning, AiImportJob job, Long jobId,
                                             boolean aiSupplement, Path jobDir, String pdfFileName) throws IOException {
@@ -4145,26 +2902,26 @@ public class AiImportService {
             log.warn("AI 导入任务 {} 文本页数 {} 与渲染页数 {} 不一致，取较小值 {}", jobId, pageTexts.size(), pageImages.size(), pages);
         }
         //2. 简化 prompt（位置占位符规则）
-        String systemPrompt = buildVisionSingleSystemPrompt(aiSupplement);
-        String userPrompt = buildVisionSingleUserPrompt(pageTexts, pages, warning);
+        String systemPrompt = promptFactory.buildVisionSingleSystemPrompt(aiSupplement);
+        String userPrompt = promptFactory.buildVisionSingleUserPrompt(pageTexts, pages, warning);
         //3. 单次调用（thinking 跟随用户选择：默认无思考 48s；思考开启 124s 更稳）
-        AiSettings vision = buildVisionSettings(settings);
+        AiSettings vision = promptFactory.buildVisionSettings(settings);
         log.info("AI 导入任务 {} 视觉单次：{} 页 / {} 张整页图 / {} 张内嵌图（thinking={}）",
                 jobId, pages, pageImages.size(), extracted.size(), settings.getThinking());
         String out = aiClientService.chatWithImages(vision, systemPrompt, userPrompt, pageImages, true);
         //4. 解析 + 残版/粘连过滤 + 去重择优（40/40 无粘连，防御保留）
-        AiParsedResult parsed = parseAndValidate(out, aiSupplement, fullSource, true, true);
+        AiImportResult parsed = parseAndValidate(out, aiSupplement, fullSource, true, true);
         List<ContentPackageQuestion> cleaned = new ArrayList<>();
         for (ContentPackageQuestion q : parsed.questions()) {
-            if (!isVisionJunk(q)) {
+            if (!visionQualityService.isJunk(q)) {
                 cleaned.add(q);
             }
         }
         Map<String, ContentPackageQuestion> byNorm = new LinkedHashMap<>();
         for (ContentPackageQuestion q : cleaned) {
-            String norm = normalizeQuestion(q);
+            String norm = visionQualityService.normalizeQuestion(q);
             ContentPackageQuestion existing = byNorm.get(norm);
-            if (existing == null || questionQuality(q) > questionQuality(existing)) {
+            if (existing == null || visionQualityService.quality(q) > visionQualityService.quality(existing)) {
                 byNorm.put(norm, q);
             }
         }
@@ -4173,17 +2930,13 @@ public class AiImportService {
             log.info("AI 导入任务 {} 视觉单次过滤去重：{} → {} 题", jobId, parsed.questions().size(), questions.size());
         }
         //5. 占位符 → 图片（确定性区域裁剪：题号行/选项行坐标 → 渲染图裁剪 + 白边裁剪；带内位图优先）
-        questions = sortBySourceOrder(questions, fullSource);
+        questions = visionQualityService.sortBySourceOrder(questions, fullSource);
         List<List<DocumentParserService.LinePos>> linePositions =
                 documentParserService.collectLinePositions(Files.readAllBytes(jobDir.resolve("0-" + pdfFileName)));
         resolvePlaceholders(questions, pageTexts, extracted, analysisImages, linePositions, jobDir);
-        return new AiParsedResult(questions, parsed.materials());
+        return new AiImportResult(questions, parsed.materials());
     }
 
-    /** 占位符 → 图片匹配常量（实测校准：选项图区间 = [选项字母行 −15pt, 字母行 +55pt]，字母叠在图的上缘） */
-    private static final float OPTION_IMG_OFFSET_PT = -15f;
-    private static final float OPTION_IMG_HEIGHT_PT = 70f;
-    private static final float STEM_IMG_MIN_PT = 24f;
     /** 题干图块顶部距题干行最大间距（pt）：超过说明块不属于本题（相邻图形题被漏掉时的无主块），跳过防错插 */
     private static final float STEM_IMAGE_MAX_GAP_PT = 80f;
     /** 块 0 距题干行超过此值（pt）→ 块 0 判定为第一个选项图（题干下方有引导语/空白，如太师椅 4 图竖排）而非题干图 */
@@ -4922,10 +3675,6 @@ public class AiImportService {
         return t.isEmpty() || t.matches("[A-Da-d][.．、]?");
     }
 
-    /** 题干带图片密度阈值（%）：图形题题干带 9-16%，纯文字 5-7% */
-    private static final float STEM_IMAGE_DENSITY_THRESHOLD = 8f;
-    /** 选项带行覆盖比例阈值（%）：同行文字选项 ~15%，图 ~60%+ */
-    private static final float OPTION_COVERAGE_THRESHOLD = 40f;
 
     /**
      * 带内图片检测（后端版式分析，不依赖模型位置判断）：
@@ -5083,45 +3832,6 @@ public class AiImportService {
         return out.toByteArray();
     }
 
-    /** 视觉单次系统提示：简化（实测复杂 prompt 导致模型劣化/过度思考）。
-     * 图片位置不由模型判断（实测模型把题干图误判为选项图）→ 后端按"题干带/选项带"像素与位图坐标分析自动插入。 */
-    private String buildVisionSingleSystemPrompt(boolean aiSupplement) {
-        String subjectiveRule = aiSupplement
-                ? "主观题（无选项的作答类题目）输出 type=\"SUBJECTIVE\"，referenceAnswer 写参考答案（原文没有时由你生成）。"
-                : "主观题（无选项的作答类题目）输出 type=\"SUBJECTIVE\"，referenceAnswer 写原文提供的参考答案；原文没有则留空，不要自行编写。";
-        return """
-                你是题库整理助手。把试卷整理为标准题目，严格输出一个 JSON 对象：{"questions":[...]}。
-                每题字段：type("SINGLE"/"MULTIPLE"/"JUDGE"/"SUBJECTIVE")、content(题干)、
-                options([{"key":"A","text":"..."}])、answerKeys(数组)、referenceAnswer(主观题可选)。
-                规则：
-                1. 题号位置与题目边界以页面截图的视觉排版为准（文本层的行顺序可能与视觉布局不一致，如题号出现在行尾）。
-                2. 题干与选项文字以文本层为准，逐字保留，不要改写；图片内容不要转述，图片位置由系统自动处理，你无需标注。
-                   例外：图片内容是数学公式/化学式时，直接转写为 LaTeX（$...$，如 $F=ma$）写进对应文本位置，不要跳过公式。
-                3. 题干是纯图片（无文字）的题（如"从所给的四个选项中…"图形推理）：content 写文本层中的引导语（如"从所给的四个选项中，选择最合适的一个填入问号处，使之呈现一定的规律性："），
-                   选项文字层有内容就写内容（如"A.①②⑥，③④⑤"），没有内容就写 "A."、"B."、"C."、"D."。
-                4. 每道题都必须输出，包括图形推理题，禁止遗漏、禁止合并相邻题。
-                5. 原文没有答案的题 answerKeys 返回空数组 []，不要编造。
-                6. 共享材料题（多题共用大题干，如"材料一/资料分析"）输出顶层 "materials": [{"materialKey":"m1","content":"材料全文"}]，
-                   题目加 "materialKey":"m1" 引用，content 只写问题部分；没有共享材料不要输出 materials。
-                7. """ + subjectiveRule + """
-                8. 只输出 JSON，不要任何其他文字。
-                """;
-    }
-
-    /** 视觉单次用户提示：整页截图按页序 + 每页文本层 */
-    private String buildVisionSingleUserPrompt(List<String> pageTexts, int pages, String warning) {
-        StringBuilder sb = new StringBuilder();
-        if (warning != null && !warning.isBlank()) {
-            sb.append("注意：").append(warning).append('\n');
-        }
-        sb.append("以下是试卷的页面截图（按页顺序）与每页文本层。截图用于判断题号位置、题目边界、图形归属与跨页情况；")
-                .append("文字一律以文本层为准（不要从截图重新识别文字）。\n\n");
-        for (int p = 0; p < pages; p++) {
-            sb.append("【第 ").append(p + 1).append(" 页文本层】\n").append(stripImageRefs(pageTexts.get(p))).append('\n');
-        }
-        return sb.toString();
-    }
-
     // ==================== 视觉分页路径（思考模式 + 单文件 PDF 有文本层） ====================
 
     /**
@@ -5134,7 +3844,7 @@ public class AiImportService {
      * 答案证据校验 / 题干回填 / 材料识别复用 parseAndValidate（sourceText = 全文文本）。
      * 不做正则题号补漏（fillMissingQuestions 对同行题号失效），重叠块 + 差异检测兜底。
      */
-    private AiParsedResult chatVisionPages(AiSettings settings, String systemPrompt,
+    private AiImportResult chatVisionPages(AiSettings settings, String systemPrompt,
                                            List<String> pageTexts, List<DocumentParserService.ExtractedImage> extracted,
                                            String fullSource, String warning, AiImportJob job, Long jobId,
                                            boolean aiSupplement, Path jobDir, String pdfFileName) throws IOException {
@@ -5156,13 +3866,13 @@ public class AiImportService {
             }
         }
         //3. 构建每块 prompt 与图片列表（块内整页图按页序 + 块内内嵌图按全局编号 [图片N]）
-        AiSettings vision = buildVisionSettings(settings);
+        AiSettings vision = promptFactory.buildVisionSettings(settings);
         List<String> prompts = new ArrayList<>();
         List<List<AiClientService.ImageData>> blockImages = new ArrayList<>();
         List<int[]> blockNumRanges = new ArrayList<>(); //{firstNum, lastNum}（无内嵌图 = {0,0}）
         for (int[] block : blocks) {
             int start = block[0], end = block[1];
-            String prompt = buildVisionPagePrompt(pageTexts, start, end, pages, warning);
+            String prompt = promptFactory.buildVisionPagePrompt(pageTexts, start, end, pages, warning);
             List<AiClientService.ImageData> imgs = new ArrayList<>(pageImages.subList(start, end));
             int firstNum = 0, lastNum = 0;
             for (int idx = 0; idx < extracted.size(); idx++) {
@@ -5176,7 +3886,7 @@ public class AiImportService {
                 }
             }
             if (firstNum > 0) {
-                prompt += buildVisionImageRefRule(firstNum, lastNum);
+                prompt += promptFactory.buildVisionImageRefRule(firstNum, lastNum);
             }
             prompts.add(prompt);
             blockImages.add(imgs);
@@ -5197,14 +3907,14 @@ public class AiImportService {
         for (int i = 0; i < futures.size(); i++) {
             if (isCanceled(jobId)) {
                 cancelFutures(futures, i);
-                return new AiParsedResult(all, allMaterials);
+                return new AiImportResult(all, allMaterials);
             }
-            AiParsedResult parsed = new AiParsedResult(List.of(), List.of());
+            AiImportResult parsed = new AiImportResult(List.of(), List.of());
             try {
                 String out = futures.get(i).get(6, TimeUnit.MINUTES);
                 parsed = parseAndValidate(out, aiSupplement, fullSource, true, true);
             } catch (CancellationException e) {
-                return new AiParsedResult(all, allMaterials);
+                return new AiImportResult(all, allMaterials);
             } catch (Exception e) {
                 //块调用失败（网络/限流/非法 JSON）→ 不整体失败，走重试
                 log.warn("AI 导入任务 {} 第 {}/{} 块（视觉）调用失败（{}），自动重试该块", jobId, i + 1, futures.size(), e.getMessage());
@@ -5212,7 +3922,7 @@ public class AiImportService {
             if (parsed.questions().size() < 5 && !isCanceled(jobId)) {
                 try {
                     String retry = aiClientService.chatWithImages(vision, systemPrompt, prompts.get(i), blockImages.get(i), true);
-                    AiParsedResult retryParsed = parseAndValidate(retry, aiSupplement, fullSource, true, true);
+                    AiImportResult retryParsed = parseAndValidate(retry, aiSupplement, fullSource, true, true);
                     if (retryParsed.questions().size() > parsed.questions().size()) {
                         parsed = retryParsed;
                     }
@@ -5223,7 +3933,7 @@ public class AiImportService {
             log.info("AI 导入任务 {} 第 {}/{} 块（视觉）：解析 {} 题", jobId, i + 1, futures.size(), parsed.questions().size());
             //越界图片编号清除（模型偶发引用本块范围外的 [图片N] → 防确认导入时错图）
             int[] range = blockNumRanges.get(i);
-            sanitizeImageRefs(parsed.questions(), range[0], range[1]);
+            visionQualityService.sanitizeImageReferences(parsed.questions(), range[0], range[1]);
             all.addAll(parsed.questions());
             for (ContentPackageMaterial m : parsed.materials()) {
                 if (m.getMaterialKey() != null && !m.getMaterialKey().isBlank() && matKeys.add(m.getMaterialKey())) {
@@ -5238,7 +3948,7 @@ public class AiImportService {
         //   ——坏题直接丢弃，不靠 quality 择优保留（块重叠会输出干净版；全部劣化时题缺失由差异检测提示）
         List<ContentPackageQuestion> cleaned = new ArrayList<>();
         for (ContentPackageQuestion q : all) {
-            if (isVisionJunk(q)) {
+            if (visionQualityService.isJunk(q)) {
                 continue;
             }
             cleaned.add(q);
@@ -5248,9 +3958,9 @@ public class AiImportService {
         //   "把下面的六个图形分为两类…"但选项不同）
         Map<String, ContentPackageQuestion> byNorm = new LinkedHashMap<>();
         for (ContentPackageQuestion q : cleaned) {
-            String norm = normalizeQuestion(q);
+            String norm = visionQualityService.normalizeQuestion(q);
             ContentPackageQuestion existing = byNorm.get(norm);
-            if (existing == null || questionQuality(q) > questionQuality(existing)) {
+            if (existing == null || visionQualityService.quality(q) > visionQualityService.quality(existing)) {
                 byNorm.put(norm, q);
             }
         }
@@ -5261,9 +3971,9 @@ public class AiImportService {
         if (unique.isEmpty()) {
             //兜底：视觉分块全部失败 → 回退单次多模态（全页图 + 全文 + 全内嵌图）
             log.warn("AI 导入任务 {} 视觉分块结果为空，回退单次多模态调用", jobId);
-            String user = buildUserPrompt(fullSource, warning);
+            String user = promptFactory.buildUserPrompt(fullSource, warning);
             if (!extracted.isEmpty()) {
-                user += buildImageRefRule(1, extracted.size());
+                user += promptFactory.buildImageRefRule(1, extracted.size());
                 List<AiClientService.ImageData> allImgs = new ArrayList<>(pageImages);
                 for (DocumentParserService.ExtractedImage e : extracted) {
                     allImgs.add(e.image());
@@ -5276,180 +3986,13 @@ public class AiImportService {
         }
         //7. 页级视觉补漏：图形推理等"内容全在图片"的题模型偶发跳过 → 对比每页参考题数（行首+行尾题号）
         //   与实际输出题数（content 定位源文行 → 页），缺题的页单独补一次视觉调用（该页图 + 文本）
-        unique = visionFillMissingPages(unique, allMaterials, matKeys, pageTexts, pageImages, extracted,
-                fullSource, warning, vision, systemPrompt, aiSupplement, job, jobId);
+        unique = visionMissingPageService.fillMissingPages(unique, allMaterials, matKeys, pageTexts, pageImages, extracted,
+                fullSource, warning, vision, systemPrompt, aiSupplement, jobId, () -> isCanceled(jobId));
         //8. 按源文位置排序（还原文档顺序；补漏题归位，不再追加在末尾）
-        unique = sortBySourceOrder(unique, fullSource);
-        return new AiParsedResult(unique, allMaterials);
+        unique = visionQualityService.sortBySourceOrder(unique, fullSource);
+        return new AiImportResult(unique, allMaterials);
     }
 
-    /**
-     * 页级视觉补漏：模型漏掉整页中部分题目（典型：图形推理题题干/选项全在图片，文本层只有引导语）
-     * 时，按"每页宽松参考题数 vs 实际输出题数"定位缺失页，单页重跑一次视觉调用。
-     * 补漏结果与主流程同样过滤/去重后合并（质量择优）。
-     */
-    private List<ContentPackageQuestion> visionFillMissingPages(List<ContentPackageQuestion> unique,
-            List<ContentPackageMaterial> allMaterials, Set<String> matKeys, List<String> pageTexts,
-            List<AiClientService.ImageData> pageImages, List<DocumentParserService.ExtractedImage> extracted,
-            String fullSource, String warning, AiSettings vision, String systemPrompt, boolean aiSupplement,
-            AiImportJob job, Long jobId) {
-        //行 → 字符偏移 → 页 映射（fullSource 单文件 = 页文本拼接，行结构一致）
-        String[] srcLines = fullSource.split("\\R", -1);
-        int[] lineStarts = new int[srcLines.length];
-        int acc = 0;
-        for (int i = 0; i < srcLines.length; i++) {
-            lineStarts[i] = acc;
-            acc += srcLines[i].length() + 1;
-        }
-        int[] pageStarts = new int[pageTexts.size() + 1];
-        acc = 0;
-        for (int i = 0; i < pageTexts.size(); i++) {
-            pageStarts[i] = acc;
-            acc += pageTexts.get(i).length();
-        }
-        pageStarts[pageTexts.size()] = acc;
-        //每页参考题数（宽松统计：行首 + 行尾题号）
-        int[] refPerPage = new int[pageTexts.size()];
-        for (int p = 0; p < pageTexts.size(); p++) {
-            refPerPage[p] = looseQuestionCount(pageTexts.get(p));
-        }
-        //每页实际输出题数（content 定位源文行 → 页）
-        int[] gotPerPage = new int[pageTexts.size()];
-        for (ContentPackageQuestion q : unique) {
-            int line = locateContentLine(srcLines, stripImageRefs(q.getContent() == null ? "" : q.getContent()));
-            if (line >= 0) {
-                int page = pageIndexOf(pageStarts, lineStarts[line]);
-                if (page >= 0 && page < gotPerPage.length) {
-                    gotPerPage[page]++;
-                }
-            }
-        }
-        //缺题页：参考 ≥ 2 且实际 < 参考（至少缺 1 题）
-        List<Integer> missingPages = new ArrayList<>();
-        for (int p = 0; p < pageTexts.size(); p++) {
-            if (refPerPage[p] >= 2 && gotPerPage[p] < refPerPage[p]) {
-                missingPages.add(p);
-            }
-        }
-        if (missingPages.isEmpty()) {
-            return unique;
-        }
-        log.info("AI 导入任务 {} 视觉补漏：页 {} 参考题数 {} vs 实际 {}，缺题，单页重跑", jobId,
-                missingPages.stream().map(p -> String.valueOf(p + 1)).collect(java.util.stream.Collectors.joining(",")),
-                java.util.Arrays.toString(missingPages.stream().mapToInt(p -> refPerPage[p]).toArray()),
-                java.util.Arrays.toString(missingPages.stream().mapToInt(p -> gotPerPage[p]).toArray()));
-        //补漏调用：单页图 + 单页文本 + 本页内嵌图编号（串行，避免并发劣化；最多补 4 页防循环）
-        List<ContentPackageQuestion> fillAll = new ArrayList<>();
-        int filled = 0;
-        for (int p : missingPages) {
-            if (filled >= 4 || isCanceled(jobId)) {
-                break;
-            }
-            String prompt = buildVisionPagePrompt(pageTexts, p, p + 1, pageTexts.size(), warning)
-                    + "\n该页在上一轮整理中有题目缺失（可能因题目内容全在图片中），请重新识别本页【全部】题目："
-                    + "包括图形推理题（题干/选项是图片的题，在对应位置写 [图片N] 标记），一题不漏。";
-            List<AiClientService.ImageData> imgs = new ArrayList<>(pageImages.subList(p, p + 1));
-            int firstNum = 0, lastNum = 0;
-            for (int idx = 0; idx < extracted.size(); idx++) {
-                DocumentParserService.ExtractedImage e = extracted.get(idx);
-                if (e.pageNo() == p) {
-                    if (firstNum == 0) {
-                        firstNum = idx + 1;
-                    }
-                    lastNum = idx + 1;
-                    imgs.add(e.image());
-                }
-            }
-            if (firstNum > 0) {
-                prompt += buildVisionImageRefRule(firstNum, lastNum);
-            }
-            try {
-                String out = aiClientService.chatWithImages(vision, systemPrompt, prompt, imgs, true);
-                AiParsedResult parsed = parseAndValidate(out, aiSupplement, fullSource, true, true);
-                //越界图片编号清除（防错图）
-                sanitizeImageRefs(parsed.questions(), firstNum, lastNum);
-                for (ContentPackageQuestion q : parsed.questions()) {
-                    if (!isVisionJunk(q)) {
-                        fillAll.add(q);
-                    }
-                }
-                for (ContentPackageMaterial m : parsed.materials()) {
-                    if (m.getMaterialKey() != null && !m.getMaterialKey().isBlank() && matKeys.add(m.getMaterialKey())) {
-                        allMaterials.add(m);
-                    }
-                }
-                log.info("AI 导入任务 {} 视觉补漏第 {} 页：解析 {} 题", jobId, p + 1, parsed.questions().size());
-            } catch (Exception e) {
-                log.warn("AI 导入任务 {} 视觉补漏第 {} 页失败：{}", jobId, p + 1, e.getMessage());
-            }
-            filled++;
-        }
-        //合并（过滤去重已对补漏结果执行；与主结果按质量择优合并）
-        Map<String, ContentPackageQuestion> byNorm = new LinkedHashMap<>();
-        for (ContentPackageQuestion q : unique) {
-            byNorm.put(normalizeQuestion(q), q);
-        }
-        for (ContentPackageQuestion q : fillAll) {
-            String norm = normalizeQuestion(q);
-            ContentPackageQuestion existing = byNorm.get(norm);
-            if (existing == null || questionQuality(q) > questionQuality(existing)) {
-                byNorm.put(norm, q);
-            }
-        }
-        List<ContentPackageQuestion> merged = new ArrayList<>(byNorm.values());
-        if (merged.size() > unique.size()) {
-            log.info("AI 导入任务 {} 视觉补漏合并：{} → {} 题", jobId, unique.size(), merged.size());
-        }
-        return merged;
-    }
-
-    /**
-     * 视觉分块 prompt：块内页文本层（文字精确、题号可能行尾）+ 整页截图说明（版式真相、题号归位）。
-     * 关键约束：文字以文本层为准（防 OCR 误差）；题号以截图视觉位置为准（行尾题号归位）；
-     * 块边界不完整题目跳过（重叠块兜底）；文本层中的 [图片N] 标记剥离（近似位置无意义，插图位置看截图）。
-     */
-    private String buildVisionPagePrompt(List<String> pageTexts, int start, int end, int totalPages, String warning) {
-        StringBuilder sb = new StringBuilder();
-        if (warning != null && !warning.isBlank()) {
-            sb.append("注意：").append(warning).append('\n');
-        }
-        sb.append("以下是试卷第 ").append(start + 1).append('-').append(end)
-                .append(" 页（共 ").append(totalPages).append(" 页）的内容。\n\n");
-        sb.append("【文本层】（PDF 精确提取，文字准确，请逐字采用；但行顺序可能与视觉布局不一致：")
-                .append("题号有时出现在行尾（如“…规律性：2.”里的 2 其实是第 2 题的题号，排版上位于题干左侧）")
-                .append("——请以截图为准归位）\n");
-        for (int p = start; p < end; p++) {
-            sb.append("【第 ").append(p + 1).append(" 页】\n").append(stripImageRefs(pageTexts.get(p))).append('\n');
-        }
-        sb.append("\n【页面截图】已随本消息按页顺序提供（第 ").append(start + 1).append('-').append(end)
-                .append(" 页截图）：截图仅用于判断题号位置、题目边界、图形/选项的视觉归属与跨页情况；")
-                .append("**不要从截图重新识别文字**，题干与选项文字一律以文本层为准（避免 OCR 误差）；")
-                .append("插图/图形的位置以截图为准。\n");
-        sb.append("本部分开头/结尾不完整的题目（题干或选项超出本部分范围）跳过不输出，不要补写；")
-                .append("完整题目必须全部输出，禁止遗漏。\n");
-        return sb.toString();
-    }
-
-    /**
-     * 视觉路径图片引用规则：与 buildImageRefRule 同构，但删除"文本中已插入 [图片N] 标记"的说法
-     * （视觉路径文本层已剥离标记，插图位置看截图；编号 = 内嵌图全局顺序，与消息中图片顺序一致）。
-     */
-    private String buildVisionImageRefRule(int first, int last) {
-        int count = last - first + 1;
-        return """
-
-                【图片引用规则】本部分共 %d 张插图，编号为 [图片%d]~[图片%d]（已随本消息按编号顺序提供，编号即图片顺序）。
-                插图的视觉位置请对照页面截图判断（截图中的图形即插图所在位置）。
-                当题干、选项或共享材料是图片（或含图片）时，必须在对应文本位置写入 [图片N] 标记：
-                - 题干有图：content = 完整题干文字 + [图片N]；题干只有图没有文字时，content 只写 [图片N]
-                - 选项是图：该选项 text 只写 [图片N]；文字与图混合：文字 + [图片N]
-                - 共享材料有图：material.content 中写 [图片N]
-                禁止编造编号：只引用实际提供的 [图片%d]~[图片%d]；无法确定图片归属时宁可少引用；
-                每个选项通常对应不同的图片，禁止把多个选项写成同一个编号。
-                公式图（内容是数学公式/化学式的 [图片N]）禁止引用：题干与选项中的公式一律转写为 $...$ LaTeX 文本，
-                禁止把公式图编号写进 content 或选项 text；[图片N] 只用于照片、几何图形、曲线图等非公式内容。
-                """.formatted(count, first, last, first, last);
-    }
 
     /**
      * 宽松参考题数（仅用于差异检测，不拆分文本）：
@@ -5459,26 +4002,7 @@ public class AiImportService {
      * 参考值允许少量误计（如"增长15."），差异检测阈值（0.6）留有裕量。
      */
     private int looseQuestionCount(String text) {
-        if (text == null || text.isBlank()) {
-            return 0;
-        }
-        Pattern tailNum = Pattern.compile("\\d{1,2}\\s*[.．、)]\\s*$");
-        String[] lines = text.split("\\R");
-        int count = 0;
-        int from = firstSectionHeaderLine(lines);
-        for (int i = from; i < lines.length; i++) {
-            String t = lines[i].trim();
-            if (t.isEmpty()) {
-                continue;
-            }
-            if (isQuestionNumberLine(t)) {
-                count++;
-            } else if (!t.matches("^\\d{1,3}\\s*[.．、)）]\\s*$") && tailNum.matcher(t).find()
-                    && !ANSWER_LINE.matcher(t).matches()) {
-                count++;
-            }
-        }
-        return count;
+        return textStructure.looseQuestionCount(text);
     }
 
     /**
@@ -5486,43 +4010,12 @@ public class AiImportService {
      * 前者对双栏/乱序题号宽容，后者对说明区噪声免疫；两者互补。
      */
     private int referenceQuestionCount(String text) {
-        int loose = looseQuestionCount(text);
-        int run = 0;
-        if (text != null && !text.isBlank()) {
-            run = detectQuestionBoundaries(text).size();
-        }
-        return Math.max(loose, run);
+        return textStructure.referenceQuestionCount(text);
     }
 
     /** 第一个章节标题行（"一、选择题…"）；找不到返回 0。说明区题号（注意事项）从题号统计中排除 */
     private int firstSectionHeaderLine(String[] lines) {
-        for (int i = 0; i < lines.length; i++) {
-            String t = lines[i].trim();
-            if (t.matches("^[一二三四五六七八九十]+[、.．]\\s*.*")) {
-                return i;
-            }
-        }
-        return 0;
-    }
-
-    /**
-     * "纯文本候选"判定（AUTO 引擎：纯文本走本地，避免 MinerU 的 OCR 噪声/云端开销）：
-     * 无内嵌图 + 文本量足（每页平均 ≥100 字符） + 文本层题号充分（≥3）。
-     * 有图（常识判断 12 图承载 27 题）/文本不足（扫描件）/无题号（论文类）→ 非纯文本 → 走 MinerU。
-     * 注意：不做 pageTexts 检查（docx 无页概念 pageTexts 为空会误判非纯文本——实测 docx 被误走 MinerU 只出 2/8 题）。
-     */
-    private boolean plainTextCandidate(DocumentParserService.ParseResult r) {
-        if (r == null || r.text() == null || r.text().isBlank()) {
-            return false;
-        }
-        if (r.extractedImages() != null && !r.extractedImages().isEmpty()) {
-            return false; //有内嵌图 → 复杂文档
-        }
-        int pages = Math.max(1, r.pageTexts() == null ? 1 : r.pageTexts().size());
-        if (r.text().length() < pages * 100L) {
-            return false; //文本量不足（扫描件/图片型）
-        }
-        return looseQuestionCount(r.text()) >= 3; //题号充分（分块/回填依赖题号边界）
+        return textStructure.firstSectionHeaderLine(lines);
     }
 
     private void cancelFutures(List<Future<String>> futures, int from) {
@@ -5537,24 +4030,9 @@ public class AiImportService {
      * 检测不到连续题号时返回单块（调用方回退单次调用）。
      */
     private List<int[]> splitChunks(String text, int chunkTarget) {
-        List<Integer> bounds = detectQuestionBoundaries(text);
-        log.info("分块边界检测：{} 个题号边界（chunkTarget={}）", bounds.size(), chunkTarget);
-        if (bounds.size() < 3) {
-            return List.of(new int[]{0, text.length()});
-        }
-        int chunkCount = Math.min(CHUNK_MAX, Math.max(1, (bounds.size() + chunkTarget - 1) / chunkTarget));
-        int perChunk = (bounds.size() + chunkCount - 1) / chunkCount;
-        List<int[]> ranges = new ArrayList<>();
-        for (int c = 0; c < chunkCount; c++) {
-            int startIdx = c * perChunk;
-            int endIdx = Math.min(bounds.size(), (c + 1) * perChunk);
-            //重叠一块：从上一块的最后一道题开始切（双栏 PDF 提取顺序中，题的"材料+题干"可能紧贴上一题的
-            //选项行，从上一块末题开始可保证本块首题完整）；随后修剪块首/块尾"孤儿"
-            //（上一题残留的"题号+选项"、下一题的"材料+题干"），消除模型把它们错配给相邻题的诱因
-            int start = (startIdx == 0) ? 0 : bounds.get(startIdx - 1);
-            int end = (endIdx >= bounds.size()) ? text.length() : bounds.get(endIdx);
-            ranges.add(new int[]{start, end});
-        }
+        List<int[]> ranges = textStructure.splitChunks(text, chunkTarget);
+        log.info("分块边界检测：{} 个题号边界（chunkTarget={}）",
+                textStructure.detectQuestionBoundaries(text).size(), chunkTarget);
         return ranges;
     }
 
@@ -5565,58 +4043,7 @@ public class AiImportService {
      * 修剪后每块只含完整题目序列；孤儿在相邻块中是完整题，不丢失。
      */
     private String trimOrphans(String chunk, boolean trimHead, boolean trimTail) {
-        String[] lines = chunk.split("\\R", -1);
-        int start = 0;
-        int end = lines.length;
-        if (trimHead) {
-            //跳过块首的"上一题残留"（题号行 + 选项/答案/解析行），直到本块第一个题号行。
-            //支持孤立题号行（粉笔 "10." 单独成行）与"题号+题干同行"（txt "10. 题干…"）。
-            boolean seenNumber = false;
-            while (start < end) {
-                String t = lines[start].trim();
-                if (t.isEmpty()) {
-                    start++;
-                    continue;
-                }
-                if (isQuestionNumberLine(t) && !seenNumber) {
-                    seenNumber = true; //第一个题号行 = 上一题残留 → 跳过
-                    start++;
-                    continue;
-                }
-                if (seenNumber && (t.matches("^[A-Da-d][.．、].*")
-                        || t.matches("^(答案|参考答案|解析)[:：]?.*"))) {
-                    start++; //上一题的选项/答案/解析行 → 跳过
-                    continue;
-                }
-                break; //遇到本块首题（题号行或材料）→ 停止
-            }
-        }
-        if (trimTail) {
-            //从尾往前：只删除"下一题残留"（材料/题干行）；选项行、题号行、答案行、解析行一律保留。
-            //（旧实现把选项行也 end-- 删除，导致每块最后一题缺选项，靠补漏兜底才没暴露）
-            while (end > start) {
-                String t = lines[end - 1].trim();
-                if (t.isEmpty()) {
-                    end--;
-                    continue;
-                }
-                if (t.matches("^[A-Da-d][.．、].*")) {
-                    break; //选项行 → 保留，停止
-                }
-                if (QUESTION_NUMBER_ALONE.matcher(t).matches() || t.matches("^\\d{1,3}\\s*[.．、)）].*")) {
-                    break; //题号行（孤立或"题号+题干"同行）→ 保留，停止
-                }
-                if (t.matches("^(答案|参考答案|解析)[:：]?.*")) {
-                    break; //答案/解析行（txt 格式块尾正常内容）→ 保留，停止
-                }
-                if (t.contains("[图片") && t.endsWith("]")) {
-                    break; //图片标记行（"[图片21][图片22]"）→ 保留：图标记紧跟所属题干，
-                    //跨页题的题干在页尾、图标记在页首（切块重叠时会被误当"下一题材料"删除 → 末题丢图，实测 Q14）
-                }
-                end--; //其余（下一题材料/题干=尾孤儿）→ 删除
-            }
-        }
-        return String.join("\n", java.util.Arrays.copyOfRange(lines, start, end));
+        return textStructure.trimOrphans(chunk, trimHead, trimTail);
     }
 
     /**
@@ -5631,10 +4058,7 @@ public class AiImportService {
      * 注意：String.matches 是全串匹配，必须带 .* 后缀。
      */
     private boolean isDecimalLikeLine(String t) {
-        if (t.matches("^\\d{1,3}\\.\\d{4}(\\s*[-—~～]\\s*\\d{4})?\\s*年.*")) {
-            return false; //题号+年份（"1.2020年" / "13.2019-2021年"）
-        }
-        return t.matches("^\\d{1,3}\\.\\d.*");
+        return textStructure.isDecimalLikeLine(t);
     }
 
     /**
@@ -5642,15 +4066,7 @@ public class AiImportService {
      * 行首允许 [图片N] 标记前缀（MinerU 重建文本中材料图表标记可能与题号同行："[图片1][图片2]6.2012年…"）。
      */
     private boolean isQuestionNumberLine(String t) {
-        if (QUESTION_NUMBER_ALONE.matcher(t).matches()) {
-            return true;
-        }
-        String s = t.replaceAll("^(\\[图片\\d+])+", "").trim();
-        if (s.isEmpty()) {
-            return false;
-        }
-        return s.matches("^\\d{1,3}\\s*[.．、)）].*") && !isDecimalLikeLine(s)
-                && !ANSWER_LINE.matcher(s).matches();
+        return textStructure.isQuestionNumberLine(t);
     }
 
     /**
@@ -5660,47 +4076,7 @@ public class AiImportService {
      * @return 边界行起始位置列表（按文档顺序），不足 3 个返回空
      */
     private List<Integer> detectQuestionBoundaries(String text) {
-        List<int[]> candidates = new ArrayList<>(); // {number, start}
-        Matcher m = QUESTION_START.matcher(text);
-        while (m.find()) {
-            int lineEnd = text.indexOf('\n', m.start());
-            String line = text.substring(m.start(), lineEnd < 0 ? text.length() : lineEnd).trim();
-            if (ANSWER_LINE.matcher(line).matches()) {
-                continue; //答案列表行不算题号
-            }
-            candidates.add(new int[]{Integer.parseInt(m.group(1)), m.start()});
-        }
-        if (candidates.size() < 3) {
-            return List.of();
-        }
-        //最长连续递增（+1，允许跳号）序列：扫描每个候选作起点，取最长
-        List<int[]> best = List.of();
-        for (int s = 0; s < candidates.size(); s++) {
-            List<int[]> run = new ArrayList<>();
-            int expect = candidates.get(s)[0];
-            for (int i = s; i < candidates.size(); i++) {
-                int num = candidates.get(i)[0];
-                if (num == expect) {
-                    run.add(candidates.get(i));
-                    expect++;
-                } else if (num > expect) {
-                    //跳号（题目可能缺号）：接受并继续
-                    expect = num + 1;
-                    run.add(candidates.get(i));
-                }
-            }
-            if (run.size() > best.size()) {
-                best = run;
-            }
-        }
-        if (best.size() < 3) {
-            return List.of();
-        }
-        List<Integer> positions = new ArrayList<>();
-        for (int[] c : best) {
-            positions.add(c[1]);
-        }
-        return positions;
+        return textStructure.detectQuestionBoundaries(text);
     }
 
     /**
@@ -5718,19 +4094,7 @@ public class AiImportService {
      * 找不到返回 -1（尾段整体是最后一题的内容，不含答案列表）。
      */
     private int answerSectionStartOffset(String tailCandidate) {
-        if (tailCandidate == null || tailCandidate.isBlank()) {
-            return -1;
-        }
-        Matcher lm = Pattern.compile("(?m)^.*$").matcher(tailCandidate);
-        while (lm.find()) {
-            String l = lm.group().trim();
-            if (ANSWER_LINE.matcher(l).matches()
-                    || AiAnswerFormat.RANGE_ANSWER.matcher(l).matches()
-                    || l.matches("^(答案|参考答案|正确答案)[:：]?$")) {
-                return lm.start();
-            }
-        }
-        return -1;
+        return textStructure.answerSectionStartOffset(tailCandidate);
     }
 
     /**
@@ -5739,376 +4103,19 @@ public class AiImportService {
      * 不可拆（无内部边界/预算耗尽）保持原块。
      */
     private List<int[]> splitRangesByImageQuota(String text, List<int[]> ranges) {
-        List<int[]> out = new ArrayList<>();
-        int budget = CHUNK_MAX - ranges.size(); //可新增块数（并行上限）
-        for (int[] r : ranges) {
-            if (budget <= 0) {
-                out.add(r);
-                continue;
-            }
-            String seg = text.substring(r[0], r[1]);
-            Set<String> nums = new HashSet<>();
-            Matcher m = IMAGE_REF.matcher(seg);
-            while (m.find()) {
-                nums.add(m.group(1));
-            }
-            if (nums.size() <= MAX_CHUNK_IMAGES) {
-                out.add(r);
-                continue;
-            }
-            List<Integer> inner = new ArrayList<>();
-            for (int b : detectQuestionBoundaries(seg)) {
-                if (b > 0) {
-                    inner.add(b);
-                }
-            }
-            if (inner.isEmpty()) {
-                out.add(r);
-                continue;
-            }
-            //贪心切分：累计块内图片数超配额即在下个题号前切开
-            List<Integer> cuts = new ArrayList<>();
-            int lastCut = 0;
-            Set<String> acc = new HashSet<>();
-            for (int b : inner) {
-                Matcher mm = IMAGE_REF.matcher(seg.substring(lastCut, b));
-                while (mm.find()) {
-                    acc.add(mm.group(1));
-                }
-                if (acc.size() > MAX_CHUNK_IMAGES && b > lastCut) {
-                    cuts.add(b);
-                    lastCut = b;
-                    acc.clear();
-                }
-            }
-            if (cuts.isEmpty()) {
-                out.add(r);
-                continue;
-            }
-            int prev = 0;
-            for (int c : cuts) {
-                if (budget <= 0) {
-                    break;
-                }
-                out.add(new int[]{r[0] + prev, r[0] + c});
-                prev = c;
-                budget--;
-            }
-            out.add(new int[]{r[0] + prev, r[1]});
-        }
-        return out;
+        return textStructure.splitRangesByImageQuota(text, ranges);
     }
 
     // ==================== Prompt 构建 ====================
 
-    /** 多模态模型配置（visionModel 缺省 = model） */
-    private AiSettings buildVisionSettings(AiSettings settings) {
-        AiSettings vision = new AiSettings();
-        vision.setBaseUrl(settings.getBaseUrl());
-        vision.setApiKey(settings.getApiKey());
-        vision.setModel(settings.getVisionModel() != null && !settings.getVisionModel().isBlank()
-                ? settings.getVisionModel() : settings.getModel());
-        vision.setThinking(settings.getThinking());
-        return vision;
-    }
-
-    /** 复制连接配置并强制思考开关（重试切换思考/无思考用——端点偶发空白内容时交替重试可恢复） */
-    private AiSettings withThinking(AiSettings base, boolean thinking) {
-        AiSettings s = new AiSettings();
-        s.setBaseUrl(base.getBaseUrl());
-        s.setApiKey(base.getApiKey());
-        s.setModel(base.getModel());
-        s.setVisionModel(base.getVisionModel());
-        s.setThinking(thinking);
-        return s;
-    }
-
-    /**
-     * 图片编号引用规则（附加到 user prompt；图片已随消息按编号顺序提供）。
-     * 仅思考开启时启用（实测关闭思考不可靠：漏引用/错配/幻觉编号）。
-     * 强调"题干有文字也有图时 content = 文字 + [图片N]"（防模型把整个题干替换成图片引用，实测发生过）。
-     */
-    /**
-     * PDF 直传（模型看图主导）图片规则：整页截图 + 块内内嵌图随消息提供，模型按截图判断图形归属并引用编号。
-     * 测试验证（91-95 区，同题干图形题 + 纸盒题 + 跨页场景）：模型看图配图全部正确，且整页图下不丢题。
-     * 消息图片顺序：整页截图（firstPage..lastPage）在前，内嵌图（[图片N1]..[图片N2] 升序）在后。
-     */
-    private String buildPdfVisionImageRule(int firstPage, int lastPage, int pageImageCount,
-                                           int first, int last) {
-        int count = last - first + 1;
-        return """
-
-                【图片引用规则】本部分随消息提供整页截图 %d 张（第 %d~%d 页，位于消息图片最前，用于判断版式与图形归属），
-                以及内嵌图 %d 张（编号 [图片%d]~[图片%d]，紧随截图之后、按编号顺序提供，编号即顺序）。
-                图形与图片归属（重要，逐题核对，禁止错配）：
-                - 每题若有图形/照片/图表：对照整页截图判断该图属于哪道题，在对应位置引用正确的 [图片N]：
-                  题干有图 → content = 完整题干文字 + [图片N]（题干末尾）；
-                  选项是图 → 该选项 text 写 [图片N]（文字与图混合则文字 + [图片N]）；
-                  选项区每个选项通常对应不同图，禁止多个选项引用同一编号。
-                - 题干文字几乎相同的相邻图形题（如"从所给的四个选项中…"系列）：以截图中的图形为准区分，
-                  每题的图必须引用自己对应的编号，禁止把上一题的图配给下一题。
-                - 公式图（内嵌图内容是数学公式/化学式的）禁止引用编号，一律转写为 $...$ LaTeX 文本。
-                - 正文文字以文本层为准，不要转写截图中的正文文字；文本层断档处的公式/横线例外（见页面截图说明）。
-                - 禁止编造编号：只引用实际提供的 [图片%d]~[图片%d]；无法确定归属时宁可不引用（未配图题预览页会提示，可人工补图）。
-                """.formatted(pageImageCount, firstPage, lastPage, count, first, last, first, last);
-    }
-
-    private String buildImageRefRule(int first, int last) {
-        int count = last - first + 1;
-        return """
-
-                【图片引用规则】本部分共 %d 张图片，编号为 [图片%d]~[图片%d]（已随本消息按编号顺序提供，编号即图片顺序）。
-                文本中可能已在图片所在位置插入了 [图片N] 标记（有标记则据此判断图片归属）；没有标记时按编号顺序对照文档判断。
-                当题干、选项或共享材料是图片（或含图片）时，必须在对应文本位置写入 [图片N] 标记：
-                - 题干有图：content = 完整题干文字 + [图片N]；题干只有图没有文字时，content 只写 [图片N]
-                - 选项是图：该选项 text 只写 [图片N]；文字与图混合：文字 + [图片N]
-                - 共享材料有图：material.content 中写 [图片N]
-                禁止编造编号：只引用实际提供的 [图片%d]~[图片%d]；无法确定图片归属时宁可少引用；
-                每个选项通常对应不同的图片，禁止把多个选项写成同一个编号。
-                公式图（内容是数学公式/化学式的 [图片N]）禁止引用：题干与选项中的公式一律转写为 $...$ LaTeX 文本，
-                禁止把公式图编号写进 content 或选项 text；[图片N] 只用于照片、几何图形、曲线图等非公式内容。
-                """.formatted(count, first, last, first, last);
-    }
-
-    /**
-     * 图片引用规则（标记路径）：列出块内实际的图片编号（按文本出现顺序），与随消息提供的图片一一对应。
-     * 块内编号可能不连续（配额拆块把公式图隔开），不能用 firstNum~lastNum 描述。
-     */
-    private String buildImageRefRuleList(List<Integer> nums) {
-        String list = nums.stream().map(n -> "[图片" + n + "]").collect(java.util.stream.Collectors.joining("、"));
-        return """
-
-                【图片引用规则】本部分共 %d 张图片：%s（已随本消息按此顺序提供，编号即图片顺序）。
-                文本中已在图片所在位置插入了 [图片N] 标记，请据此判断图片归属。
-                当题干、选项或共享材料是图片（或含图片）时，必须在对应文本位置写入 [图片N] 标记：
-                - 题干有图：content = 完整题干文字 + [图片N]；题干只有图没有文字时，content 只写 [图片N]
-                - 选项是图：该选项 text 只写 [图片N]；文字与图混合：文字 + [图片N]
-                - 共享材料有图：material.content 中写 [图片N]
-                禁止编造编号：只引用实际提供的编号；无法确定图片归属时宁可少引用；
-                每个选项通常对应不同的图片，禁止把多个选项写成同一个编号。
-                公式图（内容是数学公式/化学式的 [图片N]）禁止引用：题干与选项中的公式一律转写为 $...$ LaTeX 文本，
-                禁止把公式图编号写进 content 或选项 text；[图片N] 只用于照片、几何图形、曲线图等非公式内容。
-                """.formatted(nums.size(), list);
-    }
-
     /** 块内图片编号（按文本出现顺序去重） */
     private List<Integer> imageChunkNumbers(String chunkText) {
-        List<Integer> nums = new ArrayList<>();
-        if (chunkText == null) {
-            return nums;
-        }
-        Set<Integer> seen = new HashSet<>();
-        Matcher m = IMAGE_REF.matcher(chunkText);
-        while (m.find()) {
-            int n = Integer.parseInt(m.group(1));
-            if (seen.add(n)) {
-                nums.add(n);
-            }
-        }
-        return nums;
+        return textStructure.imageChunkNumbers(chunkText);
     }
 
     /** 剥离 AI 输出中的图片编号标记（[图片N]）——文本定位/去重时用（标记不在源文文本中） */
     private String stripImageRefs(String text) {
-        if (text == null) {
-            return null;
-        }
-        return text.replaceAll("\\[图片\\d+\\]", " ");
-    }
-
-    /** 结果序列化：{"materials":[...], "questions":[...]}（无材料时退化为 questions 数组，兼容旧解析） */
-    private String serializeResult(AiParsedResult result) {
-        try {
-            if (result.materials() == null || result.materials().isEmpty()) {
-                return objectMapper.writeValueAsString(result.questions());
-            }
-            com.fasterxml.jackson.databind.node.ObjectNode node = objectMapper.createObjectNode();
-            node.set("materials", objectMapper.valueToTree(result.materials()));
-            node.set("questions", objectMapper.valueToTree(result.questions()));
-            return objectMapper.writeValueAsString(node);
-        } catch (IOException e) {
-            throw new IllegalStateException("AI 导入结果序列化失败", e);
-        }
-    }
-
-    /** 解析结果 JSON（兼容：数组 = 仅题目；对象 = {"materials":[...], "questions":[...]}） */
-    private AiParsedResult parseStoredResult(String resultJson) throws IOException {
-        JsonNode node = objectMapper.readTree(resultJson);
-        List<ContentPackageQuestion> questions = new ArrayList<>();
-        List<ContentPackageMaterial> materials = new ArrayList<>();
-        if (node.isArray()) {
-            for (JsonNode item : node) {
-                try {
-                    questions.add(objectMapper.treeToValue(item, ContentPackageQuestion.class));
-                } catch (Exception ignored) {
-                }
-            }
-        } else {
-            JsonNode matArr = node.path("materials");
-            if (matArr.isArray()) {
-                for (JsonNode item : matArr) {
-                    try {
-                        materials.add(objectMapper.treeToValue(item, ContentPackageMaterial.class));
-                    } catch (Exception ignored) {
-                    }
-                }
-            }
-            JsonNode qArr = node.path("questions");
-            if (qArr.isArray()) {
-                for (JsonNode item : qArr) {
-                    try {
-                        questions.add(objectMapper.treeToValue(item, ContentPackageQuestion.class));
-                    } catch (Exception ignored) {
-                    }
-                }
-            }
-        }
-        return new AiParsedResult(questions, materials);
-    }
-
-    /**
-     * 整理阶段系统提示（Markdown 输出，替代 JSON extractOnly）。
-     * MD 是模型更擅长的书写格式：无 schema 转义/数组截断压力，长题干/公式/子题/图片位置保真；
-     * 后端用确定性解析器 MdQuestionParser 把标准模板还原为题目结构（题号直接取自标题，免源文定位）。
-     * 图片原则（用户实测网页端 DeepSeek 行为对齐）：就地引用不重排（题干图留题干、不塞选项）；
-     * 公式图一律转写 LaTeX（前端 KaTeX 渲染），不再截图保存公式。
-     */
-    private String buildMdExtractPrompt() {
-        return """
-                你是题库整理助手。把用户提供的文档内容整理成题目清单，严格按以下 Markdown 模板输出（只输出 Markdown 模板内容，不要输出其他格式或任何说明文字）：
-
-                ## 第N题 · 题型
-                **题干**：
-                （题干全文，逐字保留原文，可多行；公式以 LaTeX（$...$）输出；含 (1)(2)(3) 子问的题目把全部子问合并在一题内，按原文换行保留）
-                **选项**：
-                - A. 选项内容
-                - B. 选项内容
-                **答案**：留空（本阶段不要写答案）
-                **解析**：留空
-
-                规则（重要）：
-                1. 题号必须与文档一致、按文档顺序输出；**每个题块必须以"## 第N题 · 题型"标题开头，禁止省略标题**；
-                   禁止合并相邻题、禁止遗漏任何一题（包括图形题、表格题、题号在行尾的题）。
-                2. 题型写：单选 / 多选 / 判断 / 主观。填空题、实验题、作图题、计算题等非选择题 → 主观，且不写"**选项**"行。
-                3. 题干含"填正确答案标号"等字样时，其中出现的 A/B/C/D 是填空标号不是选择题选项 → 题型为主观，不写选项。
-                4. 选项挤在同一行（"A. …B. …C. …D. …"）时拆成独立选项行。
-                5. 公式必须转写为 LaTeX：图片内容是数学公式/化学式时，直接输出 $...$ 公式文本（如 $F=ma$、$\\frac{1}{2}mv^2$、$kL^2$），
-                   不要引用图片、不要描述图片、不要跳过公式。
-                6. [图片N] 标记表示该位置存在一张图片（本块内图片已随消息提供）。图片就地保留：题干的图写在题干中原位置（通常在题干末尾），
-                   只有选项本身是图片（如图线选项、几何图形选项）时该选项才写 [图片N]；禁止把题干图移到选项里、禁止重排图片位置；
-                   公式图（内容是数学公式/化学式的 [图片N]）例外：一律按规则 5 转写为 $...$ LaTeX 文本，禁止引用公式图编号；
-                   图形推理题的图在题干、选项是文字（如"①②⑥，③④⑤"）时照写文字。禁止编造编号，禁止转述图片内容。
-                   若消息附带页面截图：截图仅用于判断版式（题号位置、题目边界、图形与选项的视觉归属），文字一律以文本层为准，图片引用仍用 [图片N]。
-                7. 卷末"参考答案"区的答案行（"1.B"、"【1题答案】B"、"1-8：B D C…"）不是题目，不要输出；试卷开头的注意事项/答题说明也不是题目，跳过。
-                   封面/宣传页的图片与广告内容（logo、二维码、课程推广等）不是题目内容：禁止引用其图片、禁止输出为题目。
-                8. 题干与选项逐字保留原文：下划线、填空线、括号、引号、公式、特殊符号一律原样，禁止改写、删除或规范化。
-                9. 题号紧跟在定义/说明文字之后（如"正向情绪价值：指……能力。1.下列属于……"）时，题号前的定义句属于该题题干，并入题干输出，禁止跳过。
-                10. 共享材料：文档存在多题共用的大题干/表格/图表（如"材料一"、资料分析材料）时，在该组题之前输出一个"## 材料 m1"块（后续材料依次 m2、m3…），
-                    材料全文写在块内（可含公式与 [图片N]）；材料后的题目 content 只写问题部分，不重复材料文字。没有共享材料时禁止输出材料块。
-                11. 每个题块之间空一行。
-                """;
-    }
-
-    /**
-     * 系统提示。extractOnly=true（整理阶段）时：不输出答案/解析（answerKeys 空数组、不写 answerText/analysis），
-     * 答案与解析由后续"补充阶段"单独处理（原文证据确定性恢复 + 思考模式 AI 补充）——
-     * 无思考整理时模型自算的答案可信度低（实测），且省去答案生成可显著提速。
-     */
-    private String buildSystemPrompt(boolean aiSupplement, boolean extractOnly) {
-        String answerRule;
-        if (extractOnly) {
-            answerRule = "2. 本阶段只整理题目结构：所有题目的 answerKeys 一律返回空数组 []，不要输出 answerText 和 analysis，"
-                    + "不要自行计算或猜测答案（答案与解析由后续阶段单独补充）；原文中的答案信息（题后\"答案：X\"、卷末答案列表如 \"1.B\"、\"【1题答案】B\"）照常保留在文档里即可，不要写进题目字段。\n"
-                    + "   图片标记规则（重要）：文档文本中的 [图片N] 标记表示该位置存在一张图片（公式图/插图，本块内图片已随消息提供）。"
-                    + "题干/选项是图片（或公式图）的题：紧跟题干文字之后的标记通常是题干图，保留在 content 末尾；选项区的标记按出现顺序写入对应选项的 text（\"[图片N]\"）；"
-                    + "同一位置的多个连续标记按顺序对应；无法确定归属的标记保留在 content 末尾，不要丢弃也不要编造编号，禁止转述图片内容。";
-        } else if (aiSupplement) {
-            answerRule = "2. 只有原文完全没有答案的题目，才由你补充答案（基于内容判断正确），并将 answerSource 标记为 \"AI_SUPPLEMENT\"；使用原文答案的题目标记为 \"ORIGINAL\"。";
-        } else {
-            answerRule = "2. 原文没有答案的题目，保留 answerKeys 为空数组 []，不要自行补充答案，也不要生成解析；使用原文答案的题目标记 answerSource 为 \"ORIGINAL\"。";
-        }
-        String subjectiveRule;
-        if (extractOnly) {
-            subjectiveRule = "8. 主观题（应用题/简答/论述/计算题/实验题/填空题，无选项的作答类题目）：输出 type=\"SUBJECTIVE\"，不输出 options/answerKeys（空数组），"
-                    + "referenceAnswer 留空（参考答案由后续阶段补充）。";
-        } else if (aiSupplement) {
-            subjectiveRule = "8. 主观题（应用题/简答/论述/计算题/实验题/填空题，无选项的作答类题目）：输出 type=\"SUBJECTIVE\"，不输出 options/answerKeys（空数组），"
-                    + "referenceAnswer 字段写参考答案（可含 [图片N] 标记；原文的分段答案如（1）…（2）…原样保留）；原文没有参考答案时由你生成参考作答。";
-        } else {
-            subjectiveRule = "8. 主观题（应用题/简答/论述/计算题/实验题/填空题，无选项的作答类题目）：输出 type=\"SUBJECTIVE\"，不输出 options/answerKeys（空数组），"
-                    + "referenceAnswer 写原文提供的参考答案（原文的分段答案如（1）…（2）…原样保留）；原文没有参考答案时 referenceAnswer 留空，不要自行编写。";
-        }
-        //材料规则：extractOnly（整理阶段）时材料由后端本地截取，作为"材料素材"供预览页用户拖入题目材料区
-        //（不附加到 prompt、不转写、不自动关联——AI 对材料↔题目关联不可靠，人工兜底）；
-        //非 extractOnly（视觉路径/补充阶段）保持模型输出 materials 的规则
-        String materialRule = extractOnly
-                ? "（材料题（多题共用大题干，如资料分析/阅读材料）处理：材料文字不需要你转写或输出，"
-                + "也不要输出顶层 materials 字段、不要在题目上添加 materialKey 引用——"
-                + "共享材料已由本地检测，预览页会作为素材块提供，用户可拖入题目材料区；"
-                + "这类题 content 照常写题干原文（问题部分）即可）"
-                : "（材料规则见上：材料单独输出到顶层 materials，题目用 materialKey 引用）";
-        return """
-                你是题库整理助手。把用户提供的文档内容整理为考试题目，严格输出一个 JSON 对象：{"questions":[...]}。
-                每道题字段：
-                type: "SINGLE"单选 / "MULTIPLE"多选 / "JUDGE"判断 / "SUBJECTIVE"主观题（无选项无答案）
-                content: 题干（忠实原文，不做改写）
-                options: [{"key":"A","text":"..."}]（顺序与原文一致；判断题固定 [{"key":"A","text":"正确"},{"key":"B","text":"错误"}]；主观题空数组）
-                answerKeys: 正确答案 key 数组（单选/判断一个，多选多个；主观题空数组）
-                answerText: 答案文字（可选）  analysis: 解析（可选）
-                referenceAnswer: 主观题参考答案（仅 SUBJECTIVE，可选）
-                topic: 主题（可选）  category: 分类（可选）  score: 分值（默认1，主观题默认5）
-                answerSource: "ORIGINAL" 或 "AI_SUPPLEMENT"（见下方答案规则）
-
-                共享材料规则（资料分析/阅读材料题）：
-                若文档存在"多题共用的大题干"（如材料一/材料二、一段阅读材料带多道问题），
-                把材料单独输出到顶层 "materials": [{"materialKey":"m1","content":"材料全文"}]，
-                这些题的 content 只写问题部分，并在题目上加 "materialKey":"m1" 引用；
-                禁止把材料文字重复写进每题 content；没有共享材料的文档不要输出 materials。
-                """ + materialRule + """
-                答案规则（最重要）：
-                1. 原文提供答案的题目，必须使用原文答案，禁止自行计算或修改。原文答案可能出现在：
-                   题后（"答案：B"、"答：C"）、括号标注（"（对）"、"（√）"）、
-                   文档末尾的"参考答案/答案列表"（如 "1.B 2.C 3.ABD"、"【1题答案】B"、
-                   "第1~8题答案 1-8：B D C…" 区间式，按题号对应到各题）；
-                   若多个文件一并提供，其中一份可能是答案文件，其答案列表同样按题号对应，不要单独出题。
-                """ + answerRule + """
-                3. 主观题按下方"主观题规则"输出（见第 8 条），不要跳过。
-                4. 原文明显笔误（如选项缺字母）可做最小修正并保持语义不变。
-                5. 材料题（阅读材料+问题）按"共享材料规则"处理：材料进 materials、content 只写问题、题目带 materialKey。
-                6. 题干与选项必须逐字保留原文：下划线 _、填空线、括号、引号、公式、特殊符号一律原样保留，
-                   禁止删除、替换或规范化（如把 "___" 改成空格、把（ ）改成空白）。
-                   公式（包括以图片形式出现的数学/化学公式）必须转写为 LaTeX（$...$，如 $F=ma$、$\\frac{1}{2}mv^2$），
-                   不要用图片引用、不要截图式描述、不要跳过公式。
-                   图片就地保留：题干的图写在题干中原位置（通常在题干末尾），只有选项本身是图片（如图线选项）时
-                   该选项才写 [图片N]；禁止把题干图移到选项里、禁止重排图片位置。
-                7. 文档中的每一道题都必须输出，禁止遗漏；确实无法确定答案时 answerKeys 返回空数组 []，
-                   不要因此省略整道题。
-                """ + subjectiveRule + """
-                9. 学科卷（数理化生等）规则：填空题、实验题、作图题、计算题等非选择题 → type="SUBJECTIVE"；
-                   题目含 (1)(2)(3) 等子问时合并为一题（子问文字按原文保留在题干中，换行分隔），禁止拆成多题；
-                   题干含"填正确答案标号"等字样时，其中出现的 A/B/C/D 是填空标号不是选择题选项 → 不输出 options；
-                   选项挤在同一行（"A. …B. …C. …D. …"）时拆成独立选项；
-                   选项是图片（如图线选项）时，该选项 text 只写 [图片N]。
-                10. 卷末"参考答案"区的答案行（"1.B"、"【1题答案】B"、"1-8：B D C…"）不是题目，不要输出；
-                   试卷开头的注意事项/答题说明（"答题前…""注意事项…"开头段落）也不是题目，跳过。
-                11. 禁止合并相邻题：每题独立输出；相邻题目之间内容不交叉。
-
-                要求：题干完整、答案以原文为准、解析简明；只输出 JSON，不要任何其他文字。
-                """;
-    }
-
-    private String buildUserPrompt(String text, String warning) {
-        StringBuilder sb = new StringBuilder();
-        if (warning != null) {
-            sb.append("注意：").append(warning).append('\n');
-        }
-        sb.append("以下是文档内容，请整理为题目：\n\n");
-        if (text != null && !text.isBlank()) {
-            sb.append(text);
-        } else {
-            sb.append("（文档以图片形式提供，请识别图片中的内容出题）");
-        }
-        return sb.toString();
+        return textStructure.stripImageRefs(text);
     }
 
     // ==================== 工具 ====================

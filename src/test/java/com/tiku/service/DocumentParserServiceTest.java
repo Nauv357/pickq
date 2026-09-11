@@ -16,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * docx 解析层验收（学科卷泛化）：
@@ -25,7 +26,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class DocumentParserServiceTest {
 
-    private static final String PHYSICS_DOCX = "sample-ai-files/2024安徽高考真题物理（教师版）.docx";
+    private static final String PHYSICS_DOCX = "sample-ai-files/2024安徽高考真题物理.docx";
+
+    /**
+     * 样例文件是**版权材料，不入 git**（`.gitignore` 忽略 `sample-ai-files/`）。
+     * 干净克隆上找不到文件时应**跳过**而不是失败——否则 `mvn test` 在 CI 上永远是红的。
+     * 本地放了样例（见 CONTRIBUTING §5）则照常执行完整断言。
+     */
+    private static void requireSample(Path f) {
+        assumeTrue(Files.exists(f), "跳过：缺少本地样例文件 " + f.toAbsolutePath()
+                + "（版权材料不入 git，见 CONTRIBUTING.md 测试一节）");
+    }
 
     private DocumentParserService.ParseResult parse(String path) throws IOException {
         DocumentParserService service = new DocumentParserService();
@@ -35,7 +46,7 @@ class DocumentParserServiceTest {
     @Test
     void physicsDocxExtractsAllImagesAsDecodablePng() throws IOException {
         Path f = Path.of(PHYSICS_DOCX);
-        assertTrue(Files.exists(f), "缺少样例文件：" + f.toAbsolutePath());
+        requireSample(f);
         DocumentParserService.ParseResult r = parse(PHYSICS_DOCX);
 
         String text = r.text();
@@ -72,6 +83,7 @@ class DocumentParserServiceTest {
 
     @Test
     void physicsDocxAnchorsFormulaImagesInline() throws IOException {
+        requireSample(Path.of(PHYSICS_DOCX));
         DocumentParserService.ParseResult r = parse(PHYSICS_DOCX);
         String text = r.text();
         //公式缺位：原文"已知紫外光的光子能量大于（公式）"→ 文本中公式处应有 [图片N]（OLE 预览图锚定）
@@ -83,7 +95,7 @@ class DocumentParserServiceTest {
     @Test
     void judgePdfTrailingQuestionNumberSplit() throws IOException {
         Path f = Path.of("sample-ai-files", "专项智能练习（判断推理）(1).pdf");
-        assertTrue(Files.exists(f), "缺少样例文件：" + f.toAbsolutePath());
+        requireSample(f);
         DocumentParserService service = new DocumentParserService();
         DocumentParserService.ParseResult r = service.parse("judge.pdf", Files.readAllBytes(f));
         String text = r.text();

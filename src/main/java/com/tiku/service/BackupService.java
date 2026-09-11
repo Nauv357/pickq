@@ -7,12 +7,14 @@ import org.springframework.stereotype.Service;
 
 import javax.sql.DataSource;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.sql.Connection;
 import java.sql.Statement;
 import java.time.LocalDateTime;
@@ -38,13 +40,22 @@ public class BackupService {
 
     private static final Logger log = LoggerFactory.getLogger(BackupService.class);
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
+    private static final long DEFAULT_MAX_RESTORE_BYTES = 5L * 1024 * 1024 * 1024;
+    private static final int COPY_BUFFER_SIZE = 8192;
 
     private final DataSource dataSource;
     private final String dataDir;
+    private final long maxRestoreBytes;
 
-    public BackupService(DataSource dataSource, @Value("${tiku.data-dir}") String dataDir) {
+    public BackupService(DataSource dataSource,
+                         @Value("${tiku.data-dir}") String dataDir,
+                         @Value("${tiku.backup.max-restore-bytes:" + DEFAULT_MAX_RESTORE_BYTES + "}") long maxRestoreBytes) {
         this.dataSource = dataSource;
         this.dataDir = dataDir;
+        if (maxRestoreBytes <= 0) {
+            throw new IllegalArgumentException("备份解压大小上限必须大于 0");
+        }
+        this.maxRestoreBytes = maxRestoreBytes;
     }
 
     /** 生成备份包写入输出流；临时目录用完即删（异常也会清理）。 */
@@ -71,7 +82,10 @@ public class BackupService {
      * 返回数据目录（壳重启时拼 staged 路径用）。
      */
     public String prepareRestore(byte[] zipBytes) throws IOException {
-        Path restoreDir = Paths.get(dataDir, "restore");
+        if (zipBytes == null || zipBytes.length == 0) {
+            throw new IllegalArgumentException("备份包为空");
+        }
+        Path restoreDir = Paths.get(dataDir, "restore").toAbsolutePath().normalize();
         Path staged = restoreDir.resolve("staged");
         deleteRecursively(restoreDir);
         Files.createDirectories(staged);
@@ -85,9 +99,10 @@ public class BackupService {
                 if (count > 100_000) {
                     throw new IllegalArgumentException("备份包条目过多");
                 }
-                String name = e.getName();
-                if (name.contains("..") || name.startsWith("/") || name.contains("\\")) {
-                    throw new IllegalArgumentException("备份包含非法路径：" + name);
+                String rawName = e.getName();
+                String name = normalizeEntryName(e);
+                if (name == null) {
+                    throw new IllegalArgumentException("备份包含非法路径：" + rawName);
                 }
                 Path target = staged.resolve(name).normalize();
                 if (!target.startsWith(staged)) {
@@ -98,13 +113,9 @@ public class BackupService {
                     continue;
                 }
                 Files.createDirectories(target.getParent());
-                Files.copy(zis, target, StandardCopyOption.REPLACE_EXISTING);
-                total += Files.size(target);
-                if (total > 5L * 1024 * 1024 * 1024) {
-                    throw new IllegalArgumentException("备份包解压后过大");
-                }
+                total = copyZipEntry(zis, target, total);
             }
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
             deleteRecursively(restoreDir);
             throw e;
         }
@@ -121,7 +132,7 @@ public class BackupService {
         log.info("备份：导出 H2 全量脚本 {}", target);
         try (Connection conn = dataSource.getConnection();
              Statement st = conn.createStatement()) {
-            st.execute("SCRIPT TO '" + target + "'");
+            st.execute("SCRIPT TO '" + target.replace("'", "''") + "'");
         } catch (Exception e) {
             throw new IOException("H2 SCRIPT 导出失败：" + e.getMessage(), e);
         }
@@ -149,6 +160,48 @@ public class BackupService {
                 }
             }
         }
+    }
+
+    /**
+     * ZIP 条目名只允许相对的 POSIX 路径。不要仅靠 contains("..")：那会误伤正常文件名，
+     * 也不如逐段校验清晰；最终仍以规范化后的 startsWith 作为第二道边界。
+     */
+    private String normalizeEntryName(ZipEntry entry) {
+        String rawName = entry.getName();
+        if (rawName == null || rawName.isBlank() || rawName.indexOf('\\') >= 0 || rawName.startsWith("/")) {
+            return null;
+        }
+        String name = entry.isDirectory() && rawName.endsWith("/")
+                ? rawName.substring(0, rawName.length() - 1)
+                : rawName;
+        if (name.isBlank() || Path.of(name).isAbsolute()) {
+            return null;
+        }
+        for (String segment : name.split("/", -1)) {
+            if (segment.isBlank() || ".".equals(segment) || "..".equals(segment)) {
+                return null;
+            }
+        }
+        return name;
+    }
+
+    /**
+     * 有界流式解压：在写盘前检查每一块的累计字节数，避免大小上限只在压缩炸弹完全展开后才生效。
+     */
+    private long copyZipEntry(InputStream input, Path target, long currentTotal) throws IOException {
+        long total = currentTotal;
+        byte[] buffer = new byte[COPY_BUFFER_SIZE];
+        try (OutputStream output = Files.newOutputStream(target, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)) {
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                if (read > maxRestoreBytes - total) {
+                    throw new IllegalArgumentException("备份包解压后过大");
+                }
+                output.write(buffer, 0, read);
+                total += read;
+            }
+        }
+        return total;
     }
 
     private void writeRestoreReadme(Path readme) throws IOException {

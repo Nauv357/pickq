@@ -1,0 +1,17 @@
+{
+  "materials": [
+    {
+      "materialKey": "MAT_001",
+      "content": "材料：离线回退后的结构化文本仍可作为材料题来源。"
+    }
+  ],
+  "questions": [
+    {
+      "questionNumber": 1,
+      "type": "SUBJECTIVE",
+      "content": "根据材料概括主要观点。",
+      "materialKey": "MAT_001",
+      "referenceAnswer": "应围绕结构化文本作答。"
+    }
+  ]
+}

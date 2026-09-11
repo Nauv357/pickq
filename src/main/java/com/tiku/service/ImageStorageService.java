@@ -11,6 +11,7 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.Collection;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -25,8 +26,7 @@ import java.util.regex.Pattern;
 @Service
 public class ImageStorageService {
 
-    //name 形如 "260829/ab12.png"（日期目录 + 文件名），允许恰好一层目录；防路径穿越
-    private static final Pattern SAFE_NAME = Pattern.compile("^[a-zA-Z0-9._-]+(?:/[a-zA-Z0-9._-]+)?$");
+    private static final Pattern SAFE_SEGMENT = Pattern.compile("^[a-zA-Z0-9._-]+$");
     private static final long MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
     private final Path imagesDir;
@@ -43,13 +43,9 @@ public class ImageStorageService {
         if (file.getSize() > MAX_IMAGE_BYTES) {
             throw new IllegalArgumentException("图片过大（超过 10MB）");
         }
-        String ext = resolveExtension(file.getOriginalFilename());
-        String date = LocalDate.now().format(DateTimeFormatter.ofPattern("yyMMdd"));
-        String name = date + "/" + UUID.randomUUID().toString().replace("-", "").substring(0, 12) + "." + ext;
-        Path dir = imagesDir.resolve(String.valueOf(bankId)).resolve(date);
+        String name = createGeneratedName(resolveExtension(file.getOriginalFilename()));
         try {
-            Files.createDirectories(dir);
-            Files.write(dir.resolve(name.substring(name.indexOf('/') + 1)), file.getBytes());
+            writeImage(bankId, name, file.getBytes());
         } catch (IOException e) {
             throw new IllegalStateException("图片保存失败", e);
         }
@@ -64,13 +60,9 @@ public class ImageStorageService {
         if (bytes.length > MAX_IMAGE_BYTES) {
             throw new IllegalArgumentException("图片过大（超过 10MB）");
         }
-        String ext = detectExtension(bytes);
-        String date = LocalDate.now().format(DateTimeFormatter.ofPattern("yyMMdd"));
-        String name = date + "/" + UUID.randomUUID().toString().replace("-", "").substring(0, 12) + "." + ext;
-        Path dir = imagesDir.resolve(String.valueOf(bankId)).resolve(date);
+        String name = createGeneratedName(detectExtension(bytes));
         try {
-            Files.createDirectories(dir);
-            Files.write(dir.resolve(name.substring(name.indexOf('/') + 1)), bytes);
+            writeImage(bankId, name, bytes);
         } catch (IOException e) {
             throw new IllegalStateException("图片保存失败", e);
         }
@@ -90,11 +82,7 @@ public class ImageStorageService {
 
     /** 读取图片字节（校验文件名安全，防路径穿越） */
     public byte[] read(Long bankId, String name) {
-        if (name == null || !SAFE_NAME.matcher(name).matches()) {
-            throw new IllegalArgumentException("非法图片名");
-        }
-        //name 形如 "260829/ab12.png"，允许一层日期目录
-        Path path = imagesDir.resolve(String.valueOf(bankId)).resolve(name);
+        Path path = resolveImagePath(bankId, name);
         if (!Files.exists(path)) {
             throw new java.util.NoSuchElementException("图片不存在：" + name);
         }
@@ -109,7 +97,7 @@ public class ImageStorageService {
         if (name == null || !name.contains(".")) {
             return "application/octet-stream";
         }
-        return switch (name.substring(name.lastIndexOf('.') + 1).toLowerCase()) {
+        return switch (name.substring(name.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT)) {
             case "png" -> "image/png";
             case "jpg", "jpeg" -> "image/jpeg";
             case "gif" -> "image/gif";
@@ -127,24 +115,16 @@ public class ImageStorageService {
             return copied;
         }
         for (String name : names) {
-            if (name == null || !SAFE_NAME.matcher(name).matches()) {
+            if (!isSafeImageName(name)) {
                 continue;
             }
-            Path target = imagesDir.resolve(String.valueOf(toBankId)).resolve(name);
+            Path target = resolveImagePath(toBankId, name);
             if (Files.exists(target)) {
                 continue; // 目标已有（同内容引用去重），跳过
             }
             try {
                 byte[] bytes = read(fromBankId, name);
-                int slash = name.indexOf('/');
-                String dirName = slash > 0 ? name.substring(0, slash) : "misc";
-                String fileName = slash > 0 ? name.substring(slash + 1) : name;
-                if (!fileName.matches("[a-zA-Z0-9._-]+")) {
-                    continue;
-                }
-                Path dir = imagesDir.resolve(String.valueOf(toBankId)).resolve(dirName);
-                Files.createDirectories(dir);
-                Files.write(dir.resolve(fileName), bytes);
+                writeImage(toBankId, name, bytes);
                 copied.add(name);
             } catch (Exception ignored) {
                 // 源缺失/读取失败：跳过
@@ -188,21 +168,15 @@ public class ImageStorageService {
         }
         for (Map.Entry<String, String> e : images.entrySet()) {
             String name = e.getKey();
-            if (name == null || !SAFE_NAME.matcher(name).matches()) {
+            if (!isSafeImageName(name)) {
                 continue;
             }
             try {
                 byte[] bytes = java.util.Base64.getDecoder().decode(e.getValue());
-                //name 形如 "260829/ab12.png"（含日期目录）
-                int slash = name.indexOf('/');
-                String dirName = slash > 0 ? name.substring(0, slash) : "misc";
-                String fileName = slash > 0 ? name.substring(slash + 1) : name;
-                if (!fileName.matches("[a-zA-Z0-9._-]+")) {
+                if (bytes.length == 0 || bytes.length > MAX_IMAGE_BYTES) {
                     continue;
                 }
-                Path dir = imagesDir.resolve(String.valueOf(bankId)).resolve(dirName);
-                Files.createDirectories(dir);
-                Files.write(dir.resolve(fileName), bytes);
+                writeImage(bankId, name, bytes);
                 saved.add(name);
             } catch (Exception ignored) {
                 //单张失败不影响其余
@@ -213,11 +187,60 @@ public class ImageStorageService {
 
     private String resolveExtension(String filename) {
         if (filename != null && filename.contains(".")) {
-            String ext = filename.substring(filename.lastIndexOf('.') + 1).toLowerCase();
+            String ext = filename.substring(filename.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT);
             if (ext.matches("png|jpg|jpeg|gif|webp|bmp")) {
                 return ext;
             }
         }
         return "png";
+    }
+
+    private String createGeneratedName(String extension) {
+        String date = LocalDate.now().format(DateTimeFormatter.ofPattern("yyMMdd"));
+        String fileName = UUID.randomUUID().toString().replace("-", "").substring(0, 12) + "." + extension;
+        return date + "/" + fileName;
+    }
+
+    /**
+     * 只接受旧版本兼容的单文件名或“日期目录/文件名”两种引用形式。
+     * 每个路径段单独校验，明确拒绝 . 与 ..，避免正则允许字符却被文件系统解释为路径跳转。
+     */
+    private boolean isSafeImageName(String name) {
+        if (name == null || name.isBlank() || name.indexOf('\\') >= 0 || name.startsWith("/")) {
+            return false;
+        }
+        String[] segments = name.split("/", -1);
+        if (segments.length < 1 || segments.length > 2) {
+            return false;
+        }
+        for (String segment : segments) {
+            if (segment.isBlank() || segment.startsWith(".") || segment.endsWith(".")
+                    || !SAFE_SEGMENT.matcher(segment).matches()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** 在对应题库目录中解析图片引用；即使以后放宽命名规则，仍由 startsWith 作为最终边界。 */
+    private Path resolveImagePath(Long bankId, String name) {
+        if (bankId == null || bankId <= 0) {
+            throw new IllegalArgumentException("题库 ID 不合法");
+        }
+        if (!isSafeImageName(name)) {
+            throw new IllegalArgumentException("非法图片名");
+        }
+        Path bankDir = imagesDir.resolve(String.valueOf(bankId)).toAbsolutePath().normalize();
+        Path target = bankDir.resolve(name).normalize();
+        if (!target.startsWith(bankDir)) {
+            throw new IllegalArgumentException("图片路径越界");
+        }
+        return target;
+    }
+
+    private void writeImage(Long bankId, String name, byte[] bytes) throws IOException {
+        Path target = resolveImagePath(bankId, name);
+        Files.createDirectories(target.getParent());
+        Files.write(target, bytes);
     }
 }

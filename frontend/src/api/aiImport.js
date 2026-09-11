@@ -16,7 +16,7 @@ export const createAiImportJob = (files, bankId, aiSupplement = true, thinking =
   return http.post('/ai-import/jobs', fd)
 }
 
-// 轮询任务状态 → { id, status, stage, progress, fileName, fileType, aiSupplement, questions[], error, ... }
+// 轮询任务状态 → { id, status, stage, progress, fileName, fileType, aiSupplement, questions[], errorCode, error, ... }
 export const getAiImportJob = (jobId) => http.get(`/ai-import/jobs/${jobId}`)
 
 // 进行中的任务列表（全局监控：侧边栏徽标 + 完成通知）

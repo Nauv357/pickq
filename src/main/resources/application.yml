@@ -3,6 +3,10 @@
 tiku:
   data-dir: ${TIKU_DATA_DIR:${user.home}/.tiku}
 
+server:
+  # 本地 API 没有账户鉴权；桌面版与开发态均只允许本机访问。
+  address: 127.0.0.1
+
 spring:
   application:
     name: Tiku

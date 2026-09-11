@@ -77,6 +77,10 @@ public class AiImportJob {
 
     private String error;
 
+    /** 失败类别（例如 MODEL_TIMEOUT / DOCUMENT_PARSE_FAILED）；成功任务为空。 */
+    @TableField("error_code")
+    private String errorCode;
+
     @TableField("created_at")
     private LocalDateTime createdAt;
 

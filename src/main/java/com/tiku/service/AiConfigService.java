@@ -3,12 +3,15 @@ package com.tiku.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tiku.config.AiSettings;
 import com.tiku.util.NetAddress;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 
 /**
  * AI 模型配置存取（BYOK）：
@@ -17,6 +20,8 @@ import java.nio.file.Path;
  */
 @Service
 public class AiConfigService {
+
+    private static final Logger log = LoggerFactory.getLogger(AiConfigService.class);
 
     private final Path configPath;
     private final ObjectMapper objectMapper;
@@ -33,16 +38,37 @@ public class AiConfigService {
         try {
             return objectMapper.readValue(configPath.toFile(), AiSettings.class);
         } catch (IOException e) {
+            log.warn("读取 AI 配置失败，将使用空配置：{}（{}）", configPath, e.getMessage());
             return new AiSettings();
         }
     }
 
     public synchronized void save(AiSettings settings) {
+        Path temporaryPath = null;
         try {
             Files.createDirectories(configPath.getParent());
-            objectMapper.writeValue(configPath.toFile(), settings);
+            temporaryPath = Files.createTempFile(configPath.getParent(), "ai-config-", ".tmp");
+            objectMapper.writeValue(temporaryPath.toFile(), settings);
+            moveAtomically(temporaryPath, configPath);
         } catch (IOException e) {
             throw new IllegalStateException("保存 AI 配置失败", e);
+        } finally {
+            if (temporaryPath != null) {
+                try {
+                    Files.deleteIfExists(temporaryPath);
+                } catch (IOException e) {
+                    log.warn("清理 AI 配置临时文件失败：{}（{}）", temporaryPath, e.getMessage());
+                }
+            }
+        }
+    }
+
+    private void moveAtomically(Path source, Path target) throws IOException {
+        try {
+            Files.move(source, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+            log.debug("文件系统不支持 AI 配置原子替换，使用普通替换：{}", target);
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
         }
     }
 

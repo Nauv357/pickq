@@ -1,0 +1,24 @@
+{
+  "questions": [
+    {
+      "questionNumber": 2,
+      "type": "SINGLE",
+      "content": "第二题的题干内容。",
+      "options": [
+        {"key": "A", "text": "甲"},
+        {"key": "B", "text": "乙"},
+        {"key": "C", "text": "丙"}
+      ]
+    },
+    {
+      "questionNumber": 1,
+      "type": "SINGLE",
+      "content": "第一题的题干内容。",
+      "options": [
+        {"key": "A", "text": "甲"},
+        {"key": "B", "text": "乙"},
+        {"key": "C", "text": "丙"}
+      ]
+    }
+  ]
+}

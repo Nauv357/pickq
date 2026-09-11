@@ -5,6 +5,7 @@ import org.apache.pdfbox.rendering.ImageType;
 import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.pdfbox.text.TextPosition;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 
 import javax.imageio.ImageIO;
@@ -29,6 +30,11 @@ public class GraphPositionProbeTest {
 
     @Test
     public void probe() throws Exception {
+        // 样例 PDF 是版权材料、不入 git（.gitignore 忽略 sample-ai-files/）：
+        // 干净克隆上没有该目录，应跳过而不是抛 NoSuchFile 把 mvn test 弄红。
+        if (!Files.isDirectory(PDF)) {
+            Assumptions.abort("跳过：缺少本地样例目录 " + PDF + "（见 CONTRIBUTING.md 测试一节）");
+        }
         Files.createDirectories(OUT);
         Path pdfFile = null;
         try (var stream = Files.list(PDF)) {
@@ -38,6 +44,9 @@ public class GraphPositionProbeTest {
                     break;
                 }
             }
+        }
+        if (pdfFile == null) {
+            Assumptions.abort("跳过：样例目录中没有预期的判断推理 PDF（按字节数匹配）");
         }
         byte[] bytes = Files.readAllBytes(pdfFile);
         try (PDDocument doc = PDDocument.load(bytes)) {

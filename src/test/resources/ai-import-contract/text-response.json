@@ -1,0 +1,22 @@
+{
+  "questions": [
+    {
+      "questionNumber": 1,
+      "type": "SINGLE",
+      "content": "下列关于重构的说法正确的是？",
+      "options": [
+        {"key": "A", "text": "只改变代码格式"},
+        {"key": "B", "text": "在保持外部行为的前提下改善内部结构"}
+      ],
+      "answerKeys": ["B"],
+      "answerText": "B",
+      "analysis": "模型补充的解析"
+    },
+    {
+      "questionNumber": 2,
+      "type": "JUDGE",
+      "content": "单元测试应可离线重复执行。",
+      "answerKeys": ["A"]
+    }
+  ]
+}

@@ -40,6 +40,7 @@ public class ImageController {
         byte[] bytes = imageStorageService.read(bankId, name);
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_TYPE, imageStorageService.contentType(name))
+                .header("X-Content-Type-Options", "nosniff")
                 .body(bytes);
     }
 }
