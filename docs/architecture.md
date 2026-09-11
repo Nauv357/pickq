@@ -76,13 +76,15 @@ flowchart TB
 | 方向 | 通道 | 端点 / 地址 | 鉴权 | 来源 |
 | --- | --- | --- | --- | --- |
 | SPA → 本地后端 | 同源 HTTP（WebView 内），axios `baseURL: '/api'` | `/api/**` | **无**（只监听回环，见 §4.1） | `frontend/src/api/http.js:11`、`tauri/src-tauri/src/main.rs:172-173` |
-| 本地后端 → 广场 | 服务端到服务端的 HTTP 代理（`HttpURLConnection`） | `/api/center/**` → `{center}/api/**`，`center` 缺省 `https://pickq.cn` | `Authorization: Bearer <token>`（token 由本地后端持有，前端不接触） | `CenterProxyController.java:32`、`CenterPublishController.java:62`、`CenterAuthController.java:41` |
+| 本地后端 → 广场 | 服务端到服务端的 HTTP 代理（`HttpURLConnection`，统一在 `CenterHttpClient`） | `/api/center/**` → `{center}/api/**`，`center` 缺省 `https://pickq.cn` | `Authorization: Bearer <token>`（token 由本地后端持有，前端不接触） | `CenterProxyController`、`CenterPublishController`、`CenterAuthController`、`CenterHttpClient.attachAuth` |
 | WebView → 壳 | Tauri IPC | 10 个命令（见 §4.6） | capabilities `remote.urls = ["http://127.0.0.1:*"]` | `tauri/src-tauri/capabilities/default.json:5-8` |
 | 壳 → 更新频道 | `curl.exe` 拉静态清单 | `https://pickq.cn/updates/latest.json` | 无（HTTPS + SHA256 校验） | `tauri/src-tauri/src/main.rs:19`、`scripts/deploy/pickq-nginx.conf:21-23` |
 | 本地后端 → AI 服务商 | HTTPS（OpenAI 兼容） | 用户自填 `baseUrl`（BYOK） | 用户自己的 Key（或用本机 Ollama 免 Key） | `AiClientService.java`、`AiConfigService.java:102-116` |
 | 本地后端 → 远端配置 | HTTP 透传 + 内存缓存 1h | `https://pickq.cn/config/ai-presets.json` | 无 | `AiPresetService.java`、`docs/release-notes-guide.md:60-73` |
-| 桌面端 → 广场（下载） | 代取字节后直接导入 | `/api/packs/{key}/{version}/file` | 有 token 才带 Bearer | `CenterProxyController.java:186-196` |
-| 桌面端 → 广场（发布） | 手写 multipart 流式转发 | `POST /api/packs/upload` | Bearer（本地无 token 直接拒绝） | `CenterPublishController.java:491-517`、`:110-114` |
+| 桌面端 → 广场（下载） | 代取字节后直接导入 | `/api/packs/{key}/{version}/file` | 有 token 才带 Bearer | `CenterProxyController` 的导入端点 + `CenterHttpClient.getBytes` |
+| 桌面端 → 广场（发布） | 手写 multipart 流式转发 | `POST /api/packs/upload` | Bearer（本地无 token 直接拒绝） | `CenterPublishController.publish` → `CenterPublishService.publish` → `CenterHttpClient.forwardMultipart` |
+
+> 说明：本文件里带 `:行号` 的引用是**写入时的快照**，重构后可能漂移；判断行为请以**符号名（方法 / 常量 / 类）**为准。
 
 **广场域名是硬编码常量，不提供用户自定义**：`frontend/src/utils/center.js:7` 的 `CENTER_URL = 'https://pickq.cn'`（后端的 `center` 参数默认值同样为 `https://pickq.cn`，且只做「http(s) + 不含 `@`」的格式校验，见 `CenterProxyController.java:52-61`）。历史遗留的 localStorage 覆盖值被显式忽略。
 
@@ -261,10 +263,10 @@ sequenceDiagram
 
 | 事实 | 依据 |
 | --- | --- |
-| token 与 username 存**明文 JSON** `{dataDir}/center-auth.json`；类注释明确「风险面与浏览器里的官网会话 cookie 相同（本机可读）」 | `CenterAuthStore.java:11-28` |
-| **前端永远不接触 token**；代理转发时由后端附加 Authorization | `CenterAuthStore.java:13-14`、`CenterProxyController.java:43-49` |
-| `GET /api/center/auth/status` 只回本地是否已保存登录（不发远程请求）；`GET /me` 发现官网会话已失效时会清本地 token | `CenterAuthController.java:229-250` |
-| 退出登录：尽力通知官网，再无条件清本地 | `CenterAuthController.java:216-227` |
+| token 与 username 存**明文 JSON** `{dataDir}/center-auth.json`；类注释明确「风险面与浏览器里的官网会话 cookie 相同（本机可读）」 | `CenterAuthStore` |
+| **前端永远不接触 token**；代理转发时由后端附加 Authorization | `CenterAuthStore.token()`、`CenterHttpClient.attachAuth` |
+| `GET /api/center/auth/status` 只回本地是否已保存登录（不发远程请求）；`GET /me` 发现官网会话已失效时会清本地 token | `CenterAuthController.status` / `.me` |
+| 退出登录：尽力通知官网，再无条件清本地 | `CenterAuthController.logout` |
 
 **广场账号（官网侧）**
 
@@ -411,7 +413,7 @@ sequenceDiagram
   LLM-->>CH: Markdown 模板输出 / JSON
   CH-->>EX: 合并 + MdQuestionParser 确定性解析 + 校验
   EX->>EX: 答案证据校验（aiSupplement=false 时答案必须能在源文找到证据，否则清空）
-  EX->>LB: 写 result_json / stage / progress（条件更新：CANCELED 后不再复活）
+  EX->>LB: 写 result_json / stage / progress / errorCode（条件更新：CANCELED 后不再复活）
   LB-->>SPA: SSE 事件 + 轮询兜底
   SPA->>LB: POST /api/ai-import/jobs/{id}/confirm（可带预览页编辑后的 questions/materials）
   LB->>LB: 二次校验 → 新建/追加题库 → 图片 [图片N] → [图片:正式文件名] 转正落盘
@@ -420,12 +422,13 @@ sequenceDiagram
 | 关键常量 / 行为 | 值 | 依据 |
 | --- | --- | --- |
 | 任务并发 | `aiImportExecutor` core=max=1、queue=20（避免并发触发模型限流）；`aiChunkExecutor` 固定 3 路 daemon | `AsyncConfig.java:16-37` |
-| 文本分块目标 | `CHUNK_TARGET_QUESTIONS = 12`、单块最多 `MAX_CHUNK_IMAGES = 10` 张图、最多 `CHUNK_MAX = 6` 块 | `AiImportService.java:116-123` |
-| MinerU 分块目标 | `CHUNK_TARGET_MINERU = 16`，可用 `-Dtiku.ai-import.chunk-target` 覆盖（8/16/999 做过矩阵实测） | `AiImportService.java:120-127` |
-| 视觉策略 | 图片 ≤ `MAX_SINGLE_CALL_IMAGES = 20` 走单次多模态；超过回退分块，每块 `VISION_CHUNK_PAGES = 2` 页 + 1 页重叠 | `AiImportService.java:59-83` |
-| 引擎语义 | `MINERU` 仅当用户显式勾选才用；`AUTO`/`LOCAL` **永不**自动走 MinerU（实测打字版卷本地直传视觉/文本分块效果更好） | `AiImportService.java:354-388` |
-| 取消语义（两阶段） | 进行中 → 仅标记 `CANCELED`（文件留给执行线程在检查点清理，避免删文件导致线程异常把 CANCELED 覆盖成 FAILED）；终态 → 物理删行 + 清文件目录 | `AiImportService.java:843-867` |
-| 启动自愈 | `recoverInterruptedJobsOnStartup`：上一进程遗留的 PENDING/PROCESSING → 标记 FAILED + 清理文件；终态任务目录超 7 天兜底删除 | `AiImportService.java:174-180` |
+| 文本分块目标 | `CHUNK_TARGET_QUESTIONS = 12`、单块最多 `MAX_CHUNK_IMAGES = 10` 张图、最多 `CHUNK_MAX = 6` 块 | `AiImportService` 的常量区（`CHUNK_TARGET_QUESTIONS` / `MAX_CHUNK_IMAGES` / `CHUNK_MAX`） |
+| MinerU 分块目标 | `CHUNK_TARGET_MINERU = 16`，可用 `-Dtiku.ai-import.chunk-target` 覆盖（8/16/999 做过矩阵实测） | `AiImportService` 的 `CHUNK_TARGET_MINERU` |
+| 视觉策略 | 图片 ≤ `MAX_SINGLE_CALL_IMAGES = 20` 走单次多模态；超过回退分块，每块 `VISION_CHUNK_PAGES = 2` 页 + 1 页重叠 | `AiImportService` 的 `MAX_SINGLE_CALL_IMAGES` / `MAX_VISION_PAGES` / `VISION_CHUNK_PAGES` |
+| 引擎语义 | `MINERU` 仅当用户显式勾选才用；`AUTO`/`LOCAL` **永不**自动走 MinerU（实测打字版卷本地直传视觉/文本分块效果更好） | `AiImportDocumentPipeline`（`mineruEngine` / `wantMineru` 判定与本地解析回退） |
+| 取消语义（两阶段） | 进行中 → 仅标记 `CANCELED`（文件留给执行线程在检查点清理，避免删文件导致线程异常把 CANCELED 覆盖成 FAILED）；终态 → 物理删行 + 清文件目录 | `AiImportService.deleteJob` / `writeTerminal`（`WHERE status <> 'CANCELED'` 条件更新）/ `cleanupCanceledJobFiles` |
+| 启动自愈 | `recoverInterruptedJobsOnStartup`：上一进程遗留的 PENDING/PROCESSING → 标记 FAILED + 清理文件；终态任务目录超 7 天兜底删除 | `AiImportService.recoverInterruptedJobsOnStartup` |
+| 失败可观测性 | `AiImportFailureClassifier` 把超时、限流、连接、响应协议和文档解析问题归为稳定 `errorCode`；落库文案 = 可操作提示 + 脱敏诊断摘要（`sk-…`/`apiKey=` 会被替换为 `***`），日志按任务 ID 写脱敏摘要 | `AiImportFailureClassifier`、`AiImportService`（失败终态写入） |
 | 确认幂等 | `AiImportJobMapper` 行锁读取，串行化「读 confirmed → 导入 → 写 confirmed」，防双击/重放重复导入 | `mapper/AiImportJobMapper.java` |
 | 补答案（另一条链路） | `POST /api/banks/{id}/questions/ai-fill-answers`：串行分批 **10 题/批**思考模式判定；有图题带图；不确定/选项不全/请求失败一律留空 | `AnswerFillService.java` |
 | 单题 AI 解析 | `POST /api/questions/{id}/ai-analysis` 与草稿 `POST /api/questions/ai-analysis-draft`；`QuestionService` 用 `ReentrantLock` 限制并发槽 | `QuestionService.java` |

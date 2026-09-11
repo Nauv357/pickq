@@ -14,7 +14,7 @@
 
 | 库 | 引擎 | 位置 | 迁移机制 | 表数（含迁移记录表） |
 | --- | --- | --- | --- | --- |
-| 本地桌面库 | H2（`MODE=MySQL` 兼容模式） | `${tiku.data-dir}/tiku`（`application.yml`：`jdbc:h2:file:${tiku.data-dir}/tiku;MODE=MySQL`，`sa` / 空密码） | Flyway：`src/main/resources/db/migration/V1..V15*.sql` | 9（+ `flyway_schema_history`，由 Flyway 自动建） |
+| 本地桌面库 | H2（`MODE=MySQL` 兼容模式） | `${tiku.data-dir}/tiku`（`application.yml`：`jdbc:h2:file:${tiku.data-dir}/tiku;MODE=MySQL`，`sa` / 空密码） | Flyway：`src/main/resources/db/migration/V1..V16*.sql` | 9（+ `flyway_schema_history`，由 Flyway 自动建） |
 | 广场库 | SQLite（better-sqlite3） | `$DB_PATH`，默认 `<运行目录>/data/plaza.db`（`web/server/db/migrate.ts` `defaultDbPath()`） | 自管迁移：`MIGRATIONS` 数组 + `schema_migrations` 表 | 10（9 业务表 + `schema_migrations`） |
 
 本地库的模型原则（`V1__init_schema.sql` 头部注释）：**题库 = 内容包在本地的形态**，内容包身份（`package_key` / `version` / 作者 / 来源 / `checksum`）直接挂在 `question_bank` 上，没有独立的 `content_package` / `package_version` 表。
@@ -42,6 +42,7 @@
 | `V13__study_record_self_score.sql` | 加 `self_score`（主观题自由给分） | `study_record` |
 | `V14__export_records.sql` | 建导出记录表 | `export_records` |
 | `V15__widen_contract_columns.sql` | 放宽列宽以对齐内容包契约（见下方说明），老数据不受影响 | `question_bank`、`question`、`study_record`、`export_records` |
+| `V16__ai_import_error_code.sql` | 加 `error_code`（稳定失败分类） | `ai_import_job` |
 
 > `V15` 的动机：发布侧按契约允许 `description` 2000 / `packageKey` 100 / `version` 40 / `questionKey` 100，
 > 而本地列原本只有 500 / 64 / 20 / 64 —— 会出现「合法内容包能发布成功、下载后导入本地却因列超长落库失败」。
@@ -203,6 +204,7 @@
 | `progress` | INT | NOT NULL DEFAULT 0 | 进度百分比 | 前端轮询/SSE |
 | `result_json` | TEXT | 可空 | 解析出的题目数组（`ContentPackageQuestion` 列表 JSON） | `confirmImport` 复用 |
 | `error` | VARCHAR(500) | 可空 | 失败原因 | — |
+| `error_code` | VARCHAR(48) | 可空（V16） | 稳定失败码：`MODEL_TIMEOUT` / `MODEL_RATE_LIMITED` / `MODEL_CONNECTION_FAILED` / `MODEL_RESPONSE_INVALID` / `DOCUMENT_PARSE_FAILED` / `IMPORT_PROCESSING_FAILED` 等 | `AiImportFailureClassifier`、`AiJobResponse.errorCode` |
 | `created_at` | TIMESTAMP | NOT NULL，DEFAULT `CURRENT_TIMESTAMP` | 创建时间 | — |
 | `finished_at` | TIMESTAMP | 可空 | 结束时间 | — |
 | `ai_supplement` | TINYINT | NOT NULL DEFAULT 1（V3） | 是否允许 AI 补充缺失答案/解析 | `AiImportController.createJob` |

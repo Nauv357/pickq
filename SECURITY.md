@@ -134,9 +134,7 @@ your own machine (`~/.tiku` by default).
 - **Reporting**: use **GitHub → Security → Report a vulnerability** (private) for this repository.
   If that is unavailable, open a public issue that says **only** "I have a security issue I would like
   to report privately — please provide a contact channel", with **no** details.
-  *(Maintainer TODO: confirm the repository / advisory link — the release guide records the repo path
-  `Nauv357/pickq` — and add a real security contact address; this document intentionally contains no
-  e-mail address.)*
+  This document intentionally contains no public e-mail address.
 - **Please never disclose vulnerability details publicly** (issues, PRs, discussions, social media)
   before the fix is released and we have agreed on disclosure.
 - **Known design boundaries**: the local backend binds to `127.0.0.1` on a random port and has **no

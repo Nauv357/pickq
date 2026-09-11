@@ -40,6 +40,7 @@
 - **[`../SECURITY.md`](../SECURITY.md)** — 漏洞上报渠道与安全设计边界。
 
 ### 专题与规划
+- **`backend-audit-and-refactoring-plan.md`** — 后端审计与重构路线图：已修复项（图片路径隔离、备份解压限额、AI 配置原子写入、默认只监听本机、失效测试夹具）、已完成的服务拆分、以及下一步（`VisionLayoutContext`、流式导入、失败分类打磨）。
 - **`design-mobile.md`** — Android 端设计稿：技术选型、功能映射、信息架构、数据映射、里程碑、风险、开工材料清单。
 - **`import-issues.md`** — 文档导入解析的已知问题与优先级记录。
 - **`release-notes-guide.md`** — 发版规范、发布检查清单、更新公告写作规则。

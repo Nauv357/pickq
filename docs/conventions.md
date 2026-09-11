@@ -718,7 +718,46 @@ rg -n '[\p{Han}]' frontend/src/views frontend/src/components frontend/src/layout
 
 ---
 
-## 8. 已知债务与待补充
+## 8. 脚本（PowerShell）约定
+
+Windows 上默认的 `powershell.exe` 是 **Windows PowerShell 5.1**，它在读取**没有 BOM 的 `.ps1` 时按 ANSI 解码**。
+只要脚本里有中文，就会出现两类真实故障（本仓库已各踩过一次）：
+
+1. **解析期直接报错**（`字符串缺少终止符` / `意外的标记` / `'<' 运算符保留` 之类）——脚本完全跑不起来；
+2. **运行期中断**：原生命令（`java -version`、`npm run build`、`tauri build`）会把正常日志写进 **stderr**，
+   在 `$ErrorActionPreference = 'Stop'` 下被 PowerShell 当成错误抛出，打包/构建中途失败。
+
+**规则**
+
+- 含中文的 `.ps1` **必须存为 UTF-8 with BOM**（`tauri/build-desktop.ps1` 就是这么存的）。
+  只写 ASCII 的脚本可以不带 BOM，但要在文件头注明「keep this file ASCII-only」（`deploy/publish-update.ps1`）。
+- 调用原生命令一律走包装函数，不要裸调：
+
+  ```powershell
+  function Invoke-Native {
+    param([scriptblock]$Body)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { & $Body 2>&1 | ForEach-Object { Write-Host $_ } } finally { $ErrorActionPreference = $prev }
+    return $LASTEXITCODE
+  }
+  ```
+
+  之后**只按退出码判断成败**（`if ($code -ne 0) { exit 1 }`），不要依赖 `$ErrorActionPreference` 帮忙中止。
+- **改完 `.ps1` 必须复查 BOM**：不少编辑器/工具在保存时会悄悄去掉它（本仓库的 `edit` 工具就会）。
+  一行检查：`$b=[IO.File]::ReadAllBytes($p); '{0:X2}{1:X2}{2:X2}' -f $b[0],$b[1],$b[2]` → 含中文时应为 `EFBBBF`。
+- 语法自检（不必真的执行）：
+
+  ```powershell
+  $e=$null;$t=$null; [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$t,[ref]$e); $e
+  ```
+
+**反例**：`scripts/maven-java21.ps1` 最初既没有 BOM、又裸调了 `java -version`，
+结果在用户机器上（PowerShell 5.1）连解析都失败——两处都修好后才真正可用。
+
+---
+
+## 9. 已知债务与待补充
 
 以下都是**仓库现状**（不是已完成事项），写在这里避免下一个人重复困惑：
 
@@ -734,7 +773,9 @@ rg -n '[\p{Han}]' frontend/src/views frontend/src/components frontend/src/layout
 2. **前端无测试基建**：`frontend/package.json` 只有 `dev` / `build` / `preview`，
    `devDependencies` 里的 `playwright-core` 目前未被任何代码引用。
 3. **后端测试依赖私有样例**：`DocumentParserServiceTest`、`GraphPositionProbeTest` 依赖
-   `sample-ai-files/` 下不入 git 的文件，干净克隆上会失败（详见 `CONTRIBUTING.md` §5）。
+   `sample-ai-files/` 下不入 git 的文件（版权材料）。**2026-09-11 起改为条件跳过**
+   （`Assumptions` 判断文件是否存在）：干净克隆上这两个类标记为 skipped，`mvn test` 全绿。
+   注意这意味着 CI 上这两类断言**不会真正执行**——本地有样例时才跑得到（详见 `CONTRIBUTING.md` §5）。
 4. **Lombok 口径不一致**：见 1.5（现状用 Lombok，与「不使用 Lombok」的期望不符，待定）。
 5. **`tauri/build-desktop.ps1` 的步骤编号**：屏幕输出是 `1/4`、`2/4`、`3/4`、`4/5`、`5/5`，
    编号与注释里的「5 步」不完全对应（功能性无影响，属文案瑕疵）。

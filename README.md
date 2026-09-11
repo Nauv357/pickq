@@ -111,14 +111,17 @@
 
 ### 从源码构建
 
-```bash
+```powershell
 # 1. 前端构建（产物打进后端 jar 的 static/）
 cd frontend && npm install && npm run build
 
 # 2. 后端打包并运行（Java 21 + Maven）
-mvn package -DskipTests
+# Windows 推荐使用脚本：自动选择已安装的 JDK 21，避免 JAVA_HOME 仍指向 JDK 17
+.\scripts\maven-java21.ps1 -MavenArguments @('-DskipTests', 'package')
 java -jar target/Tiku-0.0.1-SNAPSHOT.jar    # http://localhost:8080
 ```
+
+已正确设置 `JAVA_HOME` 为 JDK 21 的其他平台，也可以直接执行 `./mvnw -DskipTests package`。
 
 Windows 桌面版一键打包：
 

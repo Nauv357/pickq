@@ -68,14 +68,15 @@
 
 上传限制：`spring.servlet.multipart.max-file-size=200MB` / `max-request-size=210MB`（`application.yml`）。
 
-> ⚠️ **隐患 1**：本地端「连不上广场」用的也是 `IllegalStateException`（`CenterProxyController`/`CenterAuthController`/`CenterPublishController` 的 `无法连接题库广场：{msg}`、`远程返回错误（HTTP {code}）：…`），因此**远端/网络故障会被表达为本地 500**（语义上更接近 502/504）。前端只能靠 message 文案区分。
+> ⚠️ **隐患 1**：本地端「连不上广场」用的也是 `IllegalStateException`（转发层的 `无法连接题库广场：{msg}`、`题库广场返回错误（HTTP {code}）`），因此**远端/网络故障会被表达为本地 500**（语义上更接近 502/504）。前端只能靠 message 文案区分。
+>   远端错误体是 JSON 时，优先取其中的 `message` → `data.message` → `statusMessage` 作为文案；非 JSON 才回落到 `题库广场返回错误（HTTP {code}）`。
 > ⚠️ **隐患 2**：`IllegalStateException` 一律 500，而其中不少是「客户端配置错误」（如 `请先登录题库广场账号`、`已有人工智能解析正在生成中，请稍候再试`），前端按 500 做通用提示会丢失可操作性。
 
 ## 1.2 本机 API 的鉴权现状（安全边界）
 
 - 本地后端**完全没有登录/令牌机制**：所有 `/api/banks/**`、`/api/questions/**`、`/api/study-records/**`、`/api/exports/**`、`/api/backup/**`、`/api/ai/**`、`/api/stats/**` 均匿名可用（`SECURITY.md` 第 139 行明确列为已知设计边界）。
 - 唯一的「鉴权」是**转发到广场**的写操作：`CenterPublishController.requireLogin()` 在本地无 token 时直接抛 `IllegalStateException("请先登录题库广场账号")`，**不发任何远程请求**；`CenterProxyController` 的只读端点匿名透传（已登录则自动附加 `Authorization: Bearer`，用于返回「我是否收藏/点赞」等个性化字段）。
-- 桌面版把后端限制在 `127.0.0.1` 随机端口（`tauri/src-tauri/src/main.rs`、`CONTRIBUTING.md` 第 124 行）；**开发态 `java -jar` 启动时 `application.yml` 未设置 `server.address`，即默认监听所有网卡 8080**（README.md 第 120 行）——局域网内可被访问且无鉴权（**待确认**是否接受）。
+- 桌面版由 Tauri 以 `127.0.0.1` 随机端口启动；`application.yml` 也显式设置 `server.address=127.0.0.1`，因此开发态 `java -jar` 同样仅监听本机。若未来需要局域网访问，必须另行设计身份验证与 CSRF 防护，不能仅放开监听地址。
 - 广场 token 存 `{data-dir}/center-auth.json`（明文 JSON，`CenterAuthStore` 注释已声明「风险面与浏览器 cookie 相同」）。
 
 ## 1.3 端点清单（按控制器）
@@ -183,7 +184,11 @@
 | 方法 + 路径 | 鉴权 | 请求 | 响应 | 常见错误 |
 | --- | --- | --- | --- | --- |
 | `GET /api/backup` | 无 | — | 流式 zip（`tiku-backup-yyyyMMdd-HHmmss.zip`：`database.sql` + `images/` + `ai-config.json` + `恢复说明.txt`） | 500 `备份打包失败`（日志；IO 异常走全局处理） |
-| `POST /api/backup/restore-prepare` | 无 | multipart `file`（备份 zip） | `{"dataDir":"<数据目录>"}`；桌面壳随后带 `--tiku.restore-stage` 重启后端执行恢复 | 400 `请选择备份文件` / `备份包条目过多` / `备份包含非法路径：{name}` / `备份包路径越界：{name}` / `备份包解压后过大` / `备份包缺少 database.sql，不是有效的拾题备份文件` / `备份文件处理失败：{msg}` |
+| `POST /api/backup/restore-prepare` | 无 | multipart `file`（备份 zip） | `{"dataDir":"<数据目录>"}`；桌面壳随后带 `--tiku.restore-stage` 重启后端执行恢复 | 400 `请选择备份文件` / `备份包为空` / `备份包条目过多` / `备份包含非法路径：{name}` / `备份包路径越界：{name}` / `备份包解压后过大` / `备份包缺少 database.sql，不是有效的拾题备份文件` / `备份文件处理失败：{msg}` |
+
+> 解压安全：条目名按**路径段**校验（拒绝 `..`、`.`、反斜杠与绝对路径），并在归一化后要求仍落在 `restore/staged` 内；
+> 解压总大小上限默认 **5GB**（可用 `tiku.backup.max-restore-bytes` 覆盖），且在**写入过程中**逐块累计判断，
+> 超限立即中止并清理暂存目录——不会先把压缩包完整展开再校验。
 
 > 实测提醒（2026-09-11）：`GET /api/backup` 是**流式 zip**（无 `Content-Length`、分块传输），
 > 用 PowerShell `Invoke-WebRequest -OutFile` 抓会得到一个**截断的坏 zip**（报 "End of Central Directory record could not be found"）。
@@ -216,7 +221,7 @@
 | 方法 + 路径 | 鉴权 | 请求 | 响应 `data` | 常见错误 |
 | --- | --- | --- | --- | --- |
 | `POST /api/ai-import/jobs` | 无 | multipart `files`（多选）+ query `bankId,aiSupplement,thinking,engine` | `Long`（任务 id） | 400 `请至少选择一个文件` / `文件不能为空` / `请先在「设置-AI 配置」中填写模型信息` / `已选择 MinerU 云端解析，但「设置」中未配置 MinerU 解析 API Key` / `文件读取失败：{msg}` / `AI 导入任务较多，请等待进行中的任务完成后再试`；400 `上传文件过大（超过 200MB 限制）` |
-| `GET /api/ai-import/jobs/{id}` | 无 | — | `AiJobResponse{id,status,stage,progress,fileName,fileType,aiSupplement,thinking,engine,processPath,confirmed,fileCount,currentFileIndex,questions[],materials[],warningHint,error,createdAt,finishedAt}` | 404 `任务不存在：{id}`（`NoSuchElementException`） |
+| `GET /api/ai-import/jobs/{id}` | 无 | — | `AiJobResponse{id,status,stage,progress,fileName,fileType,aiSupplement,thinking,engine,processPath,confirmed,fileCount,currentFileIndex,questions[],materials[],warningHint,errorCode,error,createdAt,finishedAt}`；`errorCode` 为稳定失败码，`error` 为可直接展示的安全提示 | 404 `任务不存在：{id}`（`NoSuchElementException`） |
 | `GET /api/ai-import/jobs/active` | 无 | — | `List<AiJobResponse>`（进行中） | 无 |
 | `GET /api/ai-import/jobs/recent?limit=5` | 无 | query `limit` | `List<AiJobResponse>`（未确认导入的最近任务） | 无 |
 | `DELETE /api/ai-import/jobs/{id}` | 无 | — | `null`（进行中 → 标记 `CANCELED`；终态 → 物理删除 + 清文件） | 404 `任务不存在：{id}` |
@@ -257,7 +262,7 @@
 | `POST /api/center/packs/{packageKey}/comments/{commentId}/like` | 同 | query `center`；body 原样透传 | 官网原文 | `POST /api/packs/{k}/comments/{id}/like` |
 | `POST /api/center/authors/{authorId}/follow` | 同 | query `center`；body 原样透传 | 官网原文 | `POST /api/authors/{id}/follow` |
 
-通用错误（全部为本地 500 + 文案，除 400 的地址校验）：400 `广场地址需为 http(s) 链接` / `广场地址不合法` / `下载链接需为 http(s) 链接` / `下载链接不合法` / `广场未返回内容包文件`；500 `无法连接题库广场：{msg}` / `远程返回错误（HTTP {code}）：{body 前 200 字}` / 官网 message 原文 / `广场返回的内容包文件过大`（>512MB）。超时：连接 8s、读 30s（内容包下载 60s）。
+通用错误（全部为本地 500 + 文案，除 400 的地址/参数校验）：400 `广场地址需为 http(s) 链接` / `广场地址不合法` / `广场地址不能包含查询参数或片段` / `下载链接需为 http(s) 链接` / `下载链接不合法` / `外链方式需要提供内容包下载链接（http/https）` / `广场未返回内容包文件`；500 `无法连接题库广场：{msg}` / 官网返回的 message 原文（从远端错误体 `message` → `data.message` → `statusMessage` 依次取，非 JSON 时回落为 `题库广场返回错误（HTTP {code}）`） / `广场返回的内容包文件过大`（>512MB）。超时按请求传入：连接 8s；读 30s（内容包下载 60s；发布与上传 300s）。
 
 ### 1.3.15 `CenterPublishController` — `/api/center`（发布侧，7 个端点，**全部要求已登录广场**）
 
@@ -598,9 +603,9 @@ IP 取值：`getRequestIP(event, { xForwardedFor: true }) ?? 'unknown'`（依赖
 1. **广场错误体形态**：`apiError` 把 `{code,message}` 放在 `error.data`；桌面端两种提取逻辑（`message`/`data.message`/`statusMessage`）说明线上形态可能有差异——生产环境 Nuxt 是否统一回传 `data`？**待确认**。
 2. **405 文案**：广场侧未自定义，由 Nuxt/h3 决定；**待确认**。
 3. **`GET /api/ai-import/jobs/{id}/images/{num}` 的 Content-Type 硬编码为 `image/png`**，即使实际是 jpg/webp（`ImageStorageService.detectExtension` 支持多格式）——前端可能依赖浏览器嗅探；**待确认**是否有意。
-4. **开发态本地后端监听范围**：`application.yml` 未设 `server.address`（默认全网卡 8080）且无鉴权——是否接受？**待确认**。
-5. **`DELETE /api/exports/{id}` 的 `缺少导出记录 ID` 分支在 HTTP 路径下不可达**（冗余代码）——**待确认**是否清理。
-6. **`POST /api/center/publish/inspect` 强制要求广场登录**（`requireLogin`），但它本身是纯本地操作——产品上是否希望「未登录也能先体检」？**待确认**。
-7. **`GET /api/center/packs` 的 `size` 缺省 12** 与广场 `GET /api/packs` 缺省一致，但广场上限 50、桌面未做上限校验（`size` 原样透传）；**待确认**是否需要本地 clamping。
-8. **`POST /api/center/auth/me` 之外的只读代理不做登录校验**：本地任意程序可借 `/api/center/**` 使用已保存的广场 token（本机风险）——**待确认**是否接受（当前 `SECURITY.md` 已把「本地后端无鉴权」列为设计边界）。
-9. **举报/评论等写接口在广场侧无「同一用户/IP 去重」**（仅限流），滥用治理策略**待确认**。
+4. **`DELETE /api/exports/{id}` 的 `缺少导出记录 ID` 分支在 HTTP 路径下不可达**（冗余代码）——**待确认**是否清理。
+5. **`POST /api/center/publish/inspect` 强制要求广场登录**（`requireLogin`），但它本身是纯本地操作——产品上是否希望「未登录也能先体检」？**待确认**。
+6. **`GET /api/center/packs` 的 `size` 缺省 12** 与广场 `GET /api/packs` 缺省一致，但广场上限 50、桌面未做上限校验（`size` 原样透传）；**待确认**是否需要本地 clamping。
+7. **`POST /api/center/auth/me` 之外的只读代理不做登录校验**：本地任意程序可借 `/api/center/**` 使用已保存的广场 token（本机风险）——**待确认**是否接受（当前 `SECURITY.md` 已把「本地后端无鉴权」列为设计边界）。
+8. **举报/评论等写接口在广场侧无「同一用户/IP 去重」**（仅限流），滥用治理策略**待确认**。
+9. **`POST /api/center/publish` 的校验顺序**：当前先校验上传文件、再校验广场地址（基线相反）；两者同时非法时返回的 400 文案不同——**待确认**是否统一为「先地址后文件」。

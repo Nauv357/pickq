@@ -59,6 +59,9 @@ this version of the Java Runtime only recognizes class file versions up to 61.0
 # Windows PowerShell：本次会话内指定 JDK 21
 $env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
 java -version      # 期望输出 21.x
+
+# 或直接用仓库脚本：自动寻找已安装的 JDK 21，再调用 Maven Wrapper
+.\scripts\maven-java21.ps1 test
 ```
 
 `tauri\build-desktop.ps1` 也会优先用 `$env:JAVA_HOME`，取不到时回退到 `C:\Program Files\Java\jdk-21`
@@ -189,7 +192,7 @@ mvn package -DskipTests     # 只关心产物时
 `${java.io.tmpdir}/tiku-test-data`、数据库换成内存 H2——**测试绝不读写 `~/.tiku`**，也不会与正在运行的
 桌面端抢 H2 文件锁（否则会出现 `Database may be already in use`）。
 
-覆盖方向（`src/test/java`，共 19 个测试类，其中 18 个匹配 Surefire 默认命名规则会被执行，实测 115 个用例）：
+覆盖方向（`src/test/java`）：
 
 | 方向 | 代表测试类 |
 | --- | --- |
@@ -203,13 +206,15 @@ mvn package -DskipTests     # 只关心产物时
 
 **已知注意点（请先读，能省你半小时）：**
 
-1. **部分测试依赖不入 git 的私有样例文件**（`sample-ai-files/` 在 `.gitignore` 中）。干净克隆上：
-   - `DocumentParserServiceTest` 会 **failure/error** —— 它读
-     `sample-ai-files/2024安徽高考真题物理（教师版）.docx`、`sample-ai-files/专项智能练习（判断推理）(1).pdf`；
-   - `GraphPositionProbeTest` 会报错 —— 它按「文件字节数 681562」匹配
-     `sample-ai-files/` 下的一张 PDF（一个临时的调研探针，非交付测试）。
+1. **部分测试依赖不入 git 的私有样例文件**（`sample-ai-files/` 在 `.gitignore` 中，含版权材料）。
+   干净克隆上这两处依赖会自动 **skipped（跳过）而不是失败**（用 JUnit `Assumptions` 判断文件是否存在），
+   所以 `mvn test` 在干净克隆上也是绿的；本地放了样例就照常执行完整断言：
+   - `DocumentParserServiceTest` 读 `sample-ai-files/2024安徽高考真题物理.docx`、
+     `sample-ai-files/专项智能练习（判断推理）(1).pdf`；
+   - `GraphPositionProbeTest` 按「文件字节数 681562」匹配 `sample-ai-files/` 下的一张 PDF
+     （一个临时的调研探针，非交付测试）。
 
-   本地无这些样例时可先跳过它们（实测：这样跑 111 个用例全绿）：
+   想连跳过也看不到，可显式排除这两个类：
 
    ```bash
    mvn test -Dtest='!DocumentParserServiceTest,!GraphPositionProbeTest'
@@ -218,8 +223,6 @@ mvn package -DskipTests     # 只关心产物时
    注意：`-Dtest` 一旦指定就会**覆盖** Surefire 的默认包含规则——只给排除项时它会执行测试目录下的
    **全部**类，包括平时不跑的 `GenerateSampleFiles`（于是会在仓库根生成 `sample-ai-files/`，
    该目录不入 git）。
-
-   （维护者待补充：把必要样例脱敏后放进 `src/test/resources`，或给这两个类加条件跳过。）
 2. `GenerateSampleFiles` 虽然带 `@Test`，但类名不匹配 Surefire 默认包含规则（`*Test` / `Test*` / `*Tests` / `*TestCase`），
    **不会**在 `mvn test` 时执行。它是样例生成工具，按需单独跑：`mvn -Dtest=GenerateSampleFiles test`
    （会在仓库根生成 `sample-ai-files/`，该目录不入 git）。

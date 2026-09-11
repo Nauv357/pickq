@@ -2,8 +2,10 @@
 
 > 用途有两个：**贡献者快速定位**「某个功能在哪个文件」，以及 **Android 端移植时逐块对照**。
 >
-> 所有行数为本机工作树的真实行数（含空行；`Get-Content -Encoding UTF8` / `read` 工具口径一致）。
-> 行号与文件大小会随代码演进漂移，**以代码本身为准**；本文件只保证「文件 → 职责」的对应关系是对的。
+> 行数口径：按 `\n` 计数的文件行数（含空行，不含末尾空行），与 `git diff --numstat` / `wc -l` 一致。
+> 注意 PowerShell 的 `Measure-Object -Line` 口径不同（会少算），本文件的数字**不要**用那种方式复核。
+> 行数会随代码演进漂移，**以代码本身为准**；本文件保证的是「文件 → 职责」的对应关系。
+> 表中数字为 2026-09-11 快照；此后各表数字可能滞后，改动过的文件请顺手更新对应行。
 >
 > 相关文档：架构与关键机制 → [`architecture.md`](architecture.md)；业务规则 → [`features.md`](features.md)；
 > 表结构 → [`data-model.md`](data-model.md)；内容包字段 → [`package-format.md`](package-format.md)；
@@ -188,18 +190,18 @@ web/
 
 | 功能 | Controller（文件 / 行数） | 依赖 Service / 工具 | 说明 |
 | --- | --- | --- | --- |
-| **广场只读浏览代理** | `CenterProxyController.java` 335 | `ContentPackageService`、`CenterAuthStore` | `/packs`、`/packs/{key}`、`/packs/{key}/comments`、`/authors/{id}` 原样透传；收藏/评论/点赞/关注走 `forwardJson` 写转发 |
+| **广场只读浏览代理** | `CenterProxyController.java` 144 | `CenterBrowseService` | `/packs`、`/packs/{key}`、`/packs/{key}/comments`、`/authors/{id}` 原样透传；收藏/评论/点赞/关注走 `forwardJson` 写转发 |
 | **拉取即导入** | `CenterProxyController` `/import`、`/import-external` | `ContentPackageService`、`util/PackageContainer.isZipContainer` | 按**魔数**分流 v2/v1；外链仅支持 http(s) 直链（网盘网页链接失败 → 前端回退浏览器下载） |
-| **应用内发布** | `CenterPublishController.java` 739 | `ContentPackageInspector`、`ExportRecordService`、`PackageContainer` | `/publish`（multipart）、`/publish-from-path`（本地路径，不经前端中转）、`/me/packs`、`DELETE /packs/{key}`、`PUT /packs/{key}/{version}[ /file ]` |
+| **应用内发布** | `CenterPublishController.java` 114 | `CenterPublishService`、`CenterHttpClient`、`ContentPackageInspector`、`ExportRecordService` | `/publish`（multipart）、`/publish-from-path`（本地路径，不经前端中转）、`/me/packs`、`DELETE /packs/{key}`、`PUT /packs/{key}/{version}[ /file ]` |
 | **发布性能策略** | 同上 | 内部 `Staged` record | ≤4MB 留内存、更大落临时文件；`setFixedLengthStreamingMode` 定长流式写（200MB 只有 64KB 级内存峰值）；体检与转发**共用同一次暂存** |
-| **广场账号（桌面端）** | `CenterAuthController.java` 403 | `CenterAuthStore.java` 61 | 登录/注册/登出/me/status + GitHub 回环登录（`/github/start`、`/github/callback`）；token 存 `{dataDir}/center-auth.json`，**前端不接触** |
+| **广场账号（桌面端）** | `CenterAuthController.java` 345 | `CenterAuthStore.java` 64、`CenterHttpClient` | 登录/注册/登出/me/status + GitHub 回环登录（`/github/start`、`/github/callback`）；token 存 `{dataDir}/center-auth.json`，**前端不接触** |
 | **AI 模型预设远端化** | `AiConfigController.java` 113（**免登录**） | `AiPresetService.java` 123、`AiModelCatalogService.java` 256 | `GET /api/ai/presets`（原样透传 + 1h 内存缓存）、`POST /api/ai/models`（探测可用模型列表，响应不含 Key） |
 
 ### 2.4 AI 链路
 
 | 功能 | Controller（文件 / 行数） | Service（文件 / 行数） | 关键类 / 辅助 |
 | --- | --- | --- | --- |
-| **AI 导入任务（建/查/列表/删/SSE/确认）** | `AiImportController.java` 168 | `AiImportService.java` **6148** | `model/AiImportJob`、`mapper/AiImportJobMapper`（`FOR UPDATE` 保证 confirm 幂等）；`dto/AiJobResponse`、`AiImportConfirmRequest/Response` |
+| **AI 导入任务（建/查/列表/删/SSE/确认）** | `AiImportController.java` 168 | `AiImportService.java` **4155** + 14 个 `AiImport*` 组件 | `model/AiImportJob`、`mapper/AiImportJobMapper`（`FOR UPDATE` 保证 confirm 幂等）；`dto/AiJobResponse`（含 `errorCode`）、`AiImportConfirmRequest/Response` |
 | **任务事件流（SSE）** | `AiImportController` `/{id}/stream` | `AiJobEventService.java` 75 | 与轮询并存；断开自动回退 |
 | **文档解析（本地，全离线）** | — | `DocumentParserService.java` 814 | txt/md 直读、docx→POI（含 MathType WMF/EMF 预览图转 PNG）、pdf→PDFBox（文本层 + 内嵌图 + 按页渲染）、图片直读 |
 | **MinerU 云端解析** | — | `MineruParseService.java` 1259 | mineru.net Standard API：上传 → 轮询 → 下载 zip → 用 `content_list_v2.json` 重建「增强文本」；失败自动回退本地 |
@@ -433,8 +435,8 @@ web/
 
 | # | 现象 | 位置 | 建议（供讨论） |
 | --- | --- | --- | --- |
-| 1 | **三个 `checkBase()` + 远端错误提取几乎一模一样** | `CenterAuthController`（`:71-81`、`:119-141`）、`CenterProxyController`（`:51-61`、`:250-269`）、`CenterPublishController`（`:97-107`、`:427-446`）、`AiConfigController`（`:102-112`）。前两者用 Jackson 提取 message，后两者用字符串 indexOf 手搓 | 抽一个 `CenterClient`（基址校验 + Bearer 附加 + 错误体解析 + `HttpURLConnection` 超时策略），四个 controller 共用；顺带统一「错误文案」这一契约点 |
-| 2 | **三套 `HttpURLConnection` 转发样板**（`getText` / `jsonOf` / `readResponse` / `getBytes` / `forwardJson` / `forwardMultipart`） | 同上三个 Center 系列 controller | 同上；multipart 流式转发尤其值得单独成类（`Staged` + `MultipartSkeleton` 已经很像一个可复用组件） |
+| 1 | ~~三个 `checkBase()` + 远端错误提取几乎一模一样~~ **已部分解决（2026-09-11）**：Center 三兄弟已共用 `CenterUrlPolicy`（地址校验）+ `CenterHttpClient`（Bearer 附加、超时、远端错误解析、multipart 转发） | 仍各自持有 `checkBase`/`getText` 的是 `AiConfigController` 与 `AiPresetService` | 把这两个也切到 `CenterUrlPolicy` / `CenterHttpClient`，彻底收敛为一份口径 |
+| 2 | ~~三套 `HttpURLConnection` 转发样板~~ **已解决（2026-09-11）**：`getText` / `getBytes` / `forwardJson` / `forwardMultipart` 已统一到 `CenterHttpClient`，multipart 骨架由 `CenterPublishService` 的 `Staged` 复用 | `CenterHttpClient.java`（277）、`CenterPublishService.java`（304） | 保持；后续若有第二个使用方再考虑把 multipart 骨架独立成 `MultipartSkeleton` |
 | 3 | **`NetAddress` 双实现**（Java 与 JS 各一份，需人工保持一致） | `src/main/java/com/tiku/util/NetAddress.java`（117）↔ `frontend/src/utils/netAddress.js`（81） | 要么生成一份共享规则表（JSON）由两端读取，要么在两端各加同一批用例的测试（现状：`NetAddressTest.java` 存在，前端无测试） |
 | 4 | **AI 任务轮询/订阅逻辑分散在 4 处** | `AppLayout.vue`（5s 轮询 + Notification）、`AiImportJobsView.vue`（5s 轮询）、`AiImportDialog.vue`（SSE + 8s 看门狗回退）、`AiImportPreviewView.vue`（轮询兜底） | 抽 `composables/useAiJob(jobId)`（前端目前**没有** `composables/` 目录）；把「SSE 优先 + 看门狗回退轮询 + 终态处理」收口一处 |
 | 5 | **桌面判定 `window.__TAURI_INTERNALS__` 写了三遍** | `utils/updater.js:10`、`utils/external.js:9`、`utils/files.js:20,59` | 统一到一个 `utils/platform.js`（`isDesktop()` / `invoke` 包装）；`files.js` 直接摸 `__TAURI_INTERNALS__` 而不经 `@tauri-apps/api`，Android 端必然要替换这一层 |
@@ -456,19 +458,19 @@ web/
 
 | # | 文件 | 行数 | 职责 | 建议 |
 | --- | --- | --- | --- | --- |
-| 1 | `service/AiImportService.java` | **6148** | AI 导入任务全流程（解析编排、分块策略、提示词、Markdown/JSON 解析、答案证据校验、源文回填、SSE 事件、任务生命周期） | **强烈建议拆分**。已可识别的切面：① `AiImportChunkPlanner`（切块与视觉/文本策略）② `AiImportPromptFactory`（系统提示词模板）③ `AiImportOutputParser`（Markdown/JSON → 题目 + 校验，可并入 `MdQuestionParser`）④ `AiSourceAnswerVerifier`（答案证据收集与判定）⑤ `AiImportJobLifecycle`（任务行状态机、取消、自愈、文件清理）。单文件 6000+ 行已无法整体审阅，且它是**移植到 Android 时最需要读懂的一个文件** |
+| 1 | `service/AiImportService.java` | **4155** | AI 导入高层编排、任务生命周期、确认入库与 PDF 版面算法簇 | 已迁出任务文件、结果编解码、提示词、文档解析、文本结构、源文证据、输出解析、公式、答案、图片引用、视觉质量与缺页补跑组件（新组件合计约 2900 行）；下一步仅在引入不可变 `VisionLayoutContext` 后整体迁移 PDF 坐标/裁剪算法，避免拆出大量可变参数 |
 | 2 | `service/MineruParseService.java` | 1259 | MinerU 客户端：上传、轮询、下载 zip、`content_list_v2.json` → 增强文本（表格 HTML、公式 LaTeX、图片提取） | 建议拆「HTTP 客户端 / 结果重建 / 图片与素材提取」三层 |
 | 3 | `service/DocumentParserService.java` | 814 | 本地解析：txt/md/docx(POI)/pdf(PDFBox)/图片；PDF 文本层清洗（页眉页脚、折行、孤立题号） | 建议按格式拆（`DocxParser` / `PdfParser` / `ImageParser`），清洗规则单独成类并配测试 |
-| 4 | `controller/CenterPublishController.java` | 739 | 发布/体检/补传/我的作品 + 手写 multipart 流式转发 + `Staged` 暂存 + 本地校验 | 建议把「转发基础设施」（multipart 骨架、流式写出、错误提取、暂存）抽到独立类，controller 只留端点 |
+| 4 | `service/CenterPublishService.java` | 304 | 发布/体检/补传/我的作品的业务编排、临时文件与本地校验 | 已由 `CenterHttpClient` 统一流式 HTTP/multipart 与远端错误解析，由 `CenterUrlPolicy` 统一地址规则；`CenterPublishController` 仅保留端点映射 |
 | 5 | `service/StudyRecordService.java` | 611 | 提交作答、判题、错题口径、进度、复习调度、记录导入导出与复习重建 | 建议把「复习调度」与「记录文件导入导出」拆出（两者都可独立测试） |
-| 6 | `service/ContentPackageService.java` | 599 | 导入四态决策、导出身份/版本决策、checksum 规范化、图片收集、材料映射 | 建议把「checksum 规范化」与「导出决策」拆出，便于单测（当前只能整类测） |
+| 6 | `service/ContentPackageService.java` | 613 | 导入四态决策、导出身份/版本决策、checksum 规范化、图片收集、材料映射 | 建议把「checksum 规范化」与「导出决策」拆出，便于单测（当前只能整类测） |
 | 7 | `service/PracticeSessionService.java` | 548 | 六种模式抽题、材料整组、会话详情、交卷报告与用时统计 | 建议把「抽题策略」按 mode 拆成策略类 |
 | 8 | `service/QuestionService.java` | 429 | 题目 CRUD、判题、收藏、图片引用替换、AI 解析（含并发槽） | 建议把 AI 解析相关拆出（它与题目 CRUD 无耦合） |
-| 9 | `controller/CenterAuthController.java` | 403 | 登录/注册/登出/me/status + GitHub 回环登录 + 内联 HTML 结果页 + 自身 HTTP 转发 | 建议把 HTML 结果页模板与转发逻辑拆出 |
+| 9 | `controller/CenterAuthController.java` | 345 | 登录/注册/登出/me/status + GitHub 回环登录 + 内联 HTML 结果页（HTTP 转发已下沉到 `CenterHttpClient`） | 建议把 HTML 结果页模板拆出 |
 | 10 | `service/BankMergeService.java` | 401 | 多库合并：题目/材料/图片复制 + 血缘 + 题号重排 | 可接受；若继续增长可把「图片复制」下沉到 `ImageStorageService` |
 
-> 紧随其后：`MdQuestionParser.java` 340、`CenterProxyController.java` 335、`ContentPackageInspector.java` 335、
-> `StatsService.java` 332、`QuestionBankService.java` 314、`AnswerFillService.java` 307。
+> 紧随其后：`MdQuestionParser.java` 340、`ContentPackageInspector.java` 335、`StatsService.java` 332、
+> `QuestionBankService.java` 321、`AnswerFillService.java` 307、`controller/CenterProxyController.java` 144。
 
 ### 6.2 前端（`frontend/src/**`，前 10）
 
@@ -524,7 +526,7 @@ web/
 | 接口封装 | `frontend/src/api/*.js`（10 个） | Retrofit Service（本地后端那部分**不要移植**，改为直连或本地 Repository） |
 | 广场直连 | `controller/Center*.java`（转发层） | Retrofit + OkHttp 直连 `https://pickq.cn`，Bearer 鉴权；**不移植转发层** |
 | 认证 | `service/CenterAuthStore.java` + `web/server/utils/auth.ts` + `web/server/api/auth/desktop-exchange.post.ts` | EncryptedSharedPreferences 存 token；需官网新增 deep link 回调白名单 |
-| AI 导入 | `service/AiImportService.java`（6148 行）+ `DocumentParserService` + `MineruParseService` + `MdQuestionParser` + `AnswerFillService` | WorkManager + 任务表；提示词与 Markdown 解析规则可搬，**编排要重做**（分块/并发/后台策略） |
+| AI 导入 | `service/AiImportService.java`（高层编排）+ 独立的解析/提示词/结果/答案/视觉组件 + `DocumentParserService` + `MineruParseService` | WorkManager + 任务表；提示词与 Markdown 解析规则可搬，**编排要重做**（分块/并发/后台策略） |
 | 富文本与公式 | `frontend/src/utils/richText.js` + `QuestionService`（图片引用替换） | `AnnotatedString` parser + WebView 内 KaTeX；`[图片:x]` 标记语法必须一致 |
 | i18n 文案 | 18 个组件的 zh-CN/en-US 字典 | 共享 JSON 资源（`design-mobile.md` §3.4） |
 | **不要移植** | `tauri/**`（全 Windows 专属）、`/api/center/**` 与 `/api/exports/**` 与 `/api/backup/**`（桌面代理/目录/重启语义）、H2 + Flyway | — |
