@@ -64,8 +64,6 @@ public class AiImportService {
     private static final int MAX_SINGLE_VISION_PAGES = 15;
     /** 整页渲染 DPI（与扫描件路径一致） */
     private static final int VISION_PAGE_DPI = 150;
-    /** 分析/裁剪用整页渲染 DPI（占位符裁剪、PDF 矢量图兜底裁剪——质量优先，不发模型） */
-    private static final int ANALYSIS_RENDER_DPI = 300;
     /** 整页渲染 JPEG 质量（整页图只作版式参考，压缩控制请求体；10 页约 1.4MB） */
     private static final float VISION_PAGE_JPEG_QUALITY = 0.8f;
     /** 视觉分页页数上限：超过回退旧路径（每块一次多模态调用，页数过多成本/超时不可控） */
@@ -128,6 +126,7 @@ public class AiImportService {
     private final java.util.concurrent.ExecutorService aiChunkExecutor;
     private final AiJobEventService aiJobEventService;
     private final AiImportJobStorageService jobStorageService;
+    private final AiImportVisionLayoutService visionLayout;
 
     public AiImportService(AiImportJobMapper jobMapper,
                            AiConfigService aiConfigService,
@@ -154,7 +153,8 @@ public class AiImportService {
                            @Qualifier("aiImportExecutor") Executor aiImportExecutor,
                            @Qualifier("aiChunkExecutor") java.util.concurrent.ExecutorService aiChunkExecutor,
                            AiJobEventService aiJobEventService,
-                           AiImportJobStorageService jobStorageService) {
+                           AiImportJobStorageService jobStorageService,
+                           AiImportVisionLayoutService visionLayout) {
         this.jobMapper = jobMapper;
         this.aiConfigService = aiConfigService;
         this.aiClientService = aiClientService;
@@ -181,6 +181,7 @@ public class AiImportService {
         this.aiChunkExecutor = aiChunkExecutor;
         this.aiJobEventService = aiJobEventService;
         this.jobStorageService = jobStorageService;
+        this.visionLayout = visionLayout;
     }
 
     /**
@@ -510,7 +511,7 @@ public class AiImportService {
             //PDF 直传图题兜底归位（配图以"模型看图主导"——块输入含整页截图+块内图，模型按截图引用 [图片N]；
             //本步只对模型未引用的图形题按版面坐标补图，模型已引用的题一律不动）
             if (pdfDirect && parsedResult != null && !parsedResult.questions().isEmpty()) {
-                parsedResult = assignPdfFigureImages(parsedResult, pageTexts, extracted, jobDir, names[0], jobId);
+                parsedResult = visionLayout.assignPdfFigureImages(parsedResult, pageTexts, extracted, jobDir, names[0], jobId);
             }
 
             //残留公式图 LaTeX 转写兜底（docx 公式路径）：模型整理时可能漏转公式图 [图片N]
@@ -602,7 +603,7 @@ public class AiImportService {
             //又不会把 API Key 之类的凭据写进数据库（分类器已按 sk-…/apiKey= 规则脱敏）。
             String failureMessage = failure.diagnosticSummary().isBlank()
                     ? failure.userMessage()
-                    : truncate(failure.userMessage() + "（诊断：" + failure.diagnosticSummary() + "）", 500);
+                    : AiImportTexts.truncate(failure.userMessage() + "（诊断：" + failure.diagnosticSummary() + "）", 500);
             if (!writeTerminal(jobId, "FAILED", failureMessage, failure.code(), null)) {
                 cleanupCanceledJobFiles(jobId);
                 return;
@@ -1039,17 +1040,6 @@ public class AiImportService {
         return resultParser.parseJson(aiOutput, aiSupplement, sourceText, enableMaterials, skipSourceRepair);
     }
 
-    /** 剥离 markdown 代码块（```json ... ```） */
-    private String stripCodeFence(String output) {
-        String normalized = output == null ? "" : output.trim();
-        int start = normalized.indexOf('{');
-        int end = normalized.lastIndexOf('}');
-        if (start >= 0 && end > start) {
-            return normalized.substring(start, end + 1);
-        }
-        return normalized;
-    }
-
     /** 模型输出是否为 JSON 形态（无思考重试 + json_object 响应格式时模型可能输出旧版 JSON 结构） */
     private boolean looksLikeJson(String out) {
         return resultParser.looksLikeJson(out);
@@ -1063,8 +1053,6 @@ public class AiImportService {
 
     // ==================== 分块并行（文本路径加速） ====================
 
-    /** 图片引用标记：[图片N] */
-    private static final Pattern IMAGE_REF = Pattern.compile("\\[图片(\\d+)]");
 
     /**
      * 文本路径 AI 整理（Markdown 输出管线）：按题号边界切块并行调用，模型按标准 MD 模板输出，
@@ -1199,7 +1187,7 @@ public class AiImportService {
                     List<DocumentParserService.ExtractedImage> blockImages = new ArrayList<>();
                     int firstNum = 0;
                     int lastNum = 0;
-                    Matcher m = IMAGE_REF.matcher(chunks.get(i));
+                    Matcher m = AiImportTexts.IMAGE_REF.matcher(chunks.get(i));
                     while (m.find()) {
                         int n = Integer.parseInt(m.group(1));
                         if (n >= 1 && n <= extracted.size()) {
@@ -1216,8 +1204,8 @@ public class AiImportService {
                     imageChunks.add(new ImageChunk(blockImages, firstNum, lastNum));
                 } else {
                     //每块 → 页范围 → 本块图片（编号 = extracted 顺序 index+1，页连续 → 编号连续）
-                    int firstPage = pageIndexOf(pageStarts, chunkRanges.get(i)[0]);
-                    int lastPage = pageIndexOf(pageStarts, chunkRanges.get(i)[1]);
+                    int firstPage = AiImportTexts.pageIndexOf(pageStarts, chunkRanges.get(i)[0]);
+                    int lastPage = AiImportTexts.pageIndexOf(pageStarts, chunkRanges.get(i)[1]);
                     List<DocumentParserService.ExtractedImage> blockImages = new ArrayList<>();
                     for (DocumentParserService.ExtractedImage e : extracted) {
                         if (e.pageNo() >= firstPage && e.pageNo() <= lastPage) {
@@ -1236,8 +1224,8 @@ public class AiImportService {
         int[] chunkLastPage = new int[chunks.size()];
         if (pageRenders != null && !pageRenders.isEmpty() && pageStarts != null) {
             for (int i = 0; i < chunks.size(); i++) {
-                int firstPage = pageIndexOf(pageStarts, chunkRanges.get(i)[0]);
-                int lastPage = Math.min(pageRenders.size() - 1, pageIndexOf(pageStarts, chunkRanges.get(i)[1]));
+                int firstPage = AiImportTexts.pageIndexOf(pageStarts, chunkRanges.get(i)[0]);
+                int lastPage = Math.min(pageRenders.size() - 1, AiImportTexts.pageIndexOf(pageStarts, chunkRanges.get(i)[1]));
                 chunkFirstPage[i] = firstPage;
                 chunkLastPage[i] = lastPage;
                 chunkPageImages.add(firstPage <= lastPage
@@ -1289,7 +1277,7 @@ public class AiImportService {
             }
             //诊断日志：块 prompt 全文（定位模型输入问题）
             log.info("AI 导入任务 {} 块 {}/{} prompt（{} 字符）：{}",
-                    jobId, i + 1, chunks.size(), sb.length(), truncate(sb.toString().replaceAll("\\R+", " | "), 3000));
+                    jobId, i + 1, chunks.size(), sb.length(), AiImportTexts.truncate(sb.toString().replaceAll("\\R+", " | "), 3000));
             prompts.add(sb.toString());
         }
 
@@ -1338,7 +1326,7 @@ public class AiImportService {
                 String out = futures.get(i).get(6, TimeUnit.MINUTES);
                 //诊断日志：模型原始输出（定位缺题在模型层还是解析层）
                 log.info("AI 导入任务 {} 块 {}/{} 模型原始输出（{} 字符）：{}",
-                        jobId, i + 1, futures.size(), out.length(), truncate(out.replaceAll("\\R+", " | "), 1600));
+                        jobId, i + 1, futures.size(), out.length(), AiImportTexts.truncate(out.replaceAll("\\R+", " | "), 1600));
                 //Markdown 输出管线：确定性解析（题号取自标题）；材料块合并（跨块去重见末尾归一）
                 AiImportResult blockResult = mdParseResult(out, aiSupplement);
                 if (blockResult.questions().isEmpty() && looksLikeJson(out)) {
@@ -1499,7 +1487,7 @@ public class AiImportService {
                         q.setQuestionNumber(num);
                     }
                 } else {
-                    log.warn("AI 导入任务 {} 题号回填定位失败 content={}", jobId, truncate(content, 40));
+                    log.warn("AI 导入任务 {} 题号回填定位失败 content={}", jobId, AiImportTexts.truncate(content, 40));
                 }
             }
         }
@@ -1576,378 +1564,12 @@ public class AiImportService {
     }
 
 
-    /** 按题干内容在源文定位题号（主观题卷末答案恢复用；定位失败返回 null） */
-    private Integer locateNumberByContent(String fullSource, ContentPackageQuestion q) {
-        if (fullSource == null || fullSource.isBlank() || q.getContent() == null || q.getContent().isBlank()) {
-            return null;
-        }
-        String[] lines = fullSource.split("\\R", -1);
-        int line = sourceTextService.locateContentLine(lines, stripImageRefs(q.getContent()));
-        if (line < 0) {
-            return null;
-        }
-        int num = sourceTextService.findQuestionNumber(lines, line, true);
-        return num > 0 ? num : null;
-    }
-
-    /**
-     * 思考模式补充答案/解析（分批并行）。批内题目带 [图片N] 标记 → 对应图随消息提供。
-     * 材料作为作答上下文附加（材料题必须看材料才能作答；不输出材料文字、不修改题目引用——
-     * 材料与题目的关联由预览页用户拖入完成，AI 不自动关联）。
-     * 补充结果直接写回批内题目对象；校验 answerKeys 必须来自选项 key（无效丢弃留空，预览页用户补）。
-     */
-    private void supplementAnswers(List<ContentPackageQuestion> missing, AiSettings settings, Long jobId,
-                                   List<DocumentParserService.ExtractedImage> extracted,
-                                   List<ContentPackageMaterial> materials) {
-        //强制思考模式（补充答案值得思考；不动原 settings 对象）
-        AiSettings think = new AiSettings();
-        think.setBaseUrl(settings.getBaseUrl());
-        think.setApiKey(settings.getApiKey());
-        think.setModel(settings.getModel());
-        think.setVisionModel(settings.getVisionModel());
-        think.setThinking(true);
-        int batchSize = 10;
-        List<Future<Void>> futures = new ArrayList<>();
-        for (int start = 0; start < missing.size(); start += batchSize) {
-            List<ContentPackageQuestion> batch = missing.subList(start, Math.min(missing.size(), start + batchSize));
-            futures.add(aiChunkExecutor.submit(() -> {
-                supplementBatch(batch, think, jobId, extracted, materials);
-                return null;
-            }));
-        }
-        for (Future<Void> f : futures) {
-            try {
-                f.get(5, TimeUnit.MINUTES);
-            } catch (Exception e) {
-                log.warn("AI 导入任务 {} 答案补充批次失败：{}", jobId, e.getMessage());
-            }
-        }
-    }
-
-    /** 单批补充：构建题目列表 prompt → 思考模式调用 → 解析答案数组 → 回填到批内题目 */
-    private void supplementBatch(List<ContentPackageQuestion> batch, AiSettings think, Long jobId,
-                                 List<DocumentParserService.ExtractedImage> extracted,
-                                 List<ContentPackageMaterial> materials) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("你是题库答案助手。下面是 ").append(batch.size())
-                .append(" 道题目（题干+选项），请为每道题给出正确答案和简要解析。\n")
-                .append("严格输出一个 JSON 对象：{\"answers\":[{\"index\":1,\"answerKeys\":[\"B\"],\"analysis\":\"...\"}]}\n")
-                .append("规则：index 从 1 开始对应题目顺序；answerKeys 必须是选项 key（单选/判断一个，多选多个）；")
-                .append("判断题选项固定 A=正确/B=错误；题目是图片时用 [图片N] 标记引用；")
-                .append("无法确定答案时 answerKeys 返回空数组 []，不要编造；解析简明即可。\n\n");
-        List<AiClientService.ImageData> imgs = new ArrayList<>();
-        //共享材料作为作答上下文（资料分析/阅读材料题）：仅用于判断答案，不要输出/转写材料文字，
-        //不要修改题目内容——材料与题目的关联由预览页用户拖入完成
-        if (materials != null && !materials.isEmpty()) {
-            sb.append("【共享材料（供作答参考，本文档部分题目依赖以下材料才能作答；仅用于判断答案，不要输出材料文字）】\n");
-            for (ContentPackageMaterial m : materials) {
-                sb.append(m.getContent()).append('\n');
-                if (extracted != null && m.getContent() != null) {
-                    Matcher mat = IMAGE_REF.matcher(m.getContent());
-                    while (mat.find()) {
-                        int num = Integer.parseInt(mat.group(1));
-                        if (num >= 1 && num <= extracted.size()) {
-                            AiClientService.ImageData img = extracted.get(num - 1).image();
-                            if (!imgs.contains(img)) {
-                                imgs.add(img);
-                            }
-                        }
-                    }
-                }
-            }
-            sb.append("\n\n");
-        }
-        for (int i = 0; i < batch.size(); i++) {
-            ContentPackageQuestion q = batch.get(i);
-            sb.append(i + 1).append(". ").append(q.getContent() == null ? "" : q.getContent()).append('\n');
-            if (q.getOptions() != null) {
-                for (OptionItem o : q.getOptions()) {
-                    sb.append("   ").append(o.key()).append(". ").append(o.text()).append('\n');
-                }
-            }
-            sb.append('\n');
-            if (extracted != null && q.getContent() != null) {
-                Matcher m = IMAGE_REF.matcher(q.getContent());
-                while (m.find()) {
-                    int num = Integer.parseInt(m.group(1));
-                    if (num >= 1 && num <= extracted.size()) {
-                        AiClientService.ImageData img = extracted.get(num - 1).image();
-                        if (!imgs.contains(img)) {
-                            imgs.add(img);
-                        }
-                    }
-                }
-            }
-        }
-        try {
-            String out = imgs.isEmpty()
-                    ? aiClientService.chat(think, promptFactory.buildSystemPrompt(true, false), sb.toString(), true)
-                    : aiClientService.chatWithImages(promptFactory.buildVisionSettings(think), promptFactory.buildSystemPrompt(true, false), sb.toString(), imgs, true);
-            JsonNode root = objectMapper.readTree(stripCodeFence(out));
-            JsonNode answers = root.path("answers");
-            if (!answers.isArray()) {
-                log.warn("AI 导入任务 {} 答案补充输出格式异常（无 answers 数组），批次留空", jobId);
-                return;
-            }
-            for (JsonNode item : answers) {
-                int index = item.path("index").asInt() - 1;
-                if (index < 0 || index >= batch.size()) {
-                    continue;
-                }
-                ContentPackageQuestion q = batch.get(index);
-                List<String> keys = new ArrayList<>();
-                JsonNode keysNode = item.path("answerKeys");
-                if (keysNode.isArray()) {
-                    for (JsonNode k : keysNode) {
-                        keys.add(k.asText().trim().toUpperCase());
-                    }
-                } else if (keysNode.isTextual() && !keysNode.asText().isBlank()) {
-                    for (char c : keysNode.asText().toUpperCase().toCharArray()) {
-                        String v = String.valueOf(c);
-                        if (v.matches("[A-H]")) {
-                            keys.add(v);
-                        }
-                    }
-                }
-                //校验：答案必须在选项 key 内
-                if (q.getOptions() != null && !q.getOptions().isEmpty()) {
-                    List<String> optionKeys = q.getOptions().stream().map(OptionItem::key).map(String::toUpperCase).toList();
-                    keys.removeIf(k -> !optionKeys.contains(k));
-                }
-                if (!keys.isEmpty()) {
-                    q.setAnswerKeys(keys);
-                    q.setAnswerSource("AI_SUPPLEMENT");
-                }
-                if (item.hasNonNull("analysis")) {
-                    q.setAnalysis(item.path("analysis").asText(null));
-                }
-                if (item.hasNonNull("answerText")) {
-                    q.setAnswerText(item.path("answerText").asText(null));
-                }
-                if (item.hasNonNull("referenceAnswer")
-                        && (q.getReferenceAnswer() == null || q.getReferenceAnswer().isBlank())) {
-                    //已从卷末【N题答案】恢复的参考答案（ORIGINAL）优先保留，AI 补充不覆盖
-                    q.setReferenceAnswer(item.path("referenceAnswer").asText(null));
-                }
-            }
-        } catch (Exception e) {
-            log.warn("AI 导入任务 {} 答案补充批次失败：{}", jobId, e.getMessage());
-        }
-    }
-
     /** 块内图片信息：图片列表 + 全局编号范围（[图片firstNum]~[图片lastNum]） */
     private record ImageChunk(List<DocumentParserService.ExtractedImage> images, int firstNum, int lastNum) {
     }
 
     /** 材料组：key（m1/m2…）+ 本地截取内容 + 覆盖的题号区间 [numStart, numEnd]（位置自动关联用） */
     private record MaterialGroup(String key, String content, Integer numStart, Integer numEnd) {
-    }
-
-    /**
-     * 材料检测专用的"块边界题号行"：题号行 + 行尾非句号/分号。
-     * 材料段落被 MinerU 拆行时可能产生"4.万个，比上年下降1.2%…。"（"40.6万个"残片）——
-     * 行首 "4." 满足题号行但行尾是句号（陈述句材料行）→ 不是题号行，否则材料被腰斩漏检。
-     */
-    private boolean isMaterialBoundaryLine(String t) {
-        if (!isQuestionNumberLine(t)) {
-            return false;
-        }
-        String s = t.trim();
-        return !s.endsWith("。") && !s.endsWith(";") && !s.endsWith("；");
-    }
-
-    /**
-     * 材料组本地检测（资料分析/阅读材料题，多组支持）：
-     * 以题号行为分隔，收集所有"题号行之间的连续无题号文本块"，过滤封面噪声/答案列表/
-     * 无题号题的题干（选项行/问号行/冒号结尾过半/单行），按文档顺序编号 m1、m2…
-     * 每组的题号区间 = 该材料块后出现的题号行（到下一个材料块前），用于位置自动关联题目。
-     * 材料由后端本地截取（保真、跨块一致）：整理阶段不送 Agent，作为素材供预览页展示/自动关联。
-     */
-    private List<MaterialGroup> detectMaterialGroups(String fullSource) {
-        List<MaterialGroup> groups = new ArrayList<>();
-        if (fullSource == null || fullSource.isBlank()) {
-            return groups;
-        }
-        String[] lines = fullSource.split("\\R", -1);
-        List<String> current = new ArrayList<>();
-        int currentStart = -1;
-        int keyIdx = 1;
-        int lastGroupIdx = -1;
-        for (int i = 0; i < lines.length; i++) {
-            String t = lines[i].trim();
-            if (t.isEmpty()) {
-                continue;
-            }
-            if (isMaterialBoundaryLine(t)) {
-                //当前累积块完成判定（题号行出现 → 之前的无题号文本是一个候选块）
-                //关键：块内可能混入"上一题的残留"（选项行/题干"？"行/嵌入题号行）——
-                //整块排除会漏检真材料（行测材料前的上一题选项行污染实测）；
-                //改为先修剪残留行，剩余陈述行再判材料
-                if (!current.isEmpty()) {
-                    List<String> materialLines = pruneResidualLines(current);
-                    if (isMaterialBlock(materialLines)) {
-                        MaterialGroup g = new MaterialGroup("m" + keyIdx++, String.join("\n", materialLines),
-                                null, null);
-                        groups.add(g);
-                        lastGroupIdx = groups.size() - 1;
-                    }
-                    current = new ArrayList<>();
-                    currentStart = -1;
-                }
-                //行首 [图片N] 前缀（材料图表与题号同行，如 "[图片1][图片2]6.2012-2022年…"）：
-                //前缀图片是前置材料（纯图表材料组），该题号及后续题归属它；
-                //要求前缀图片数 ≥2（单个 [图片N] 是题干图/选项图，不是材料组）
-                if (t.matches("^(\\[图片\\d+]){2,}.*")) {
-                    String stripped = t.replaceAll("^(\\[图片\\d+])+", "").trim();
-                    String prefix = t.substring(0, t.length() - stripped.length()).trim();
-                    MaterialGroup imgGroup = new MaterialGroup("m" + keyIdx++, prefix, null, null);
-                    groups.add(imgGroup);
-                    lastGroupIdx = groups.size() - 1;
-                }
-                //题号行归属最近的材料组（更新 numStart/numEnd）
-                if (lastGroupIdx >= 0) {
-                    int num = parseLeadingNumber(t);
-                    MaterialGroup g = groups.get(lastGroupIdx);
-                    if (g.numStart() == null) {
-                        groups.set(lastGroupIdx, new MaterialGroup(g.key(), g.content(), num, num));
-                    } else {
-                        groups.set(lastGroupIdx, new MaterialGroup(g.key(), g.content(), g.numStart(), num));
-                    }
-                }
-            } else {
-                //封面/引导噪声（粉笔模板）——不是材料
-                if (t.contains("专项智能练习") || t.contains("听课刷题") || t.contains("扫描二维码")
-                        || t.contains("粉笔") || t.contains("打开客户端") || t.contains("提交答案后")) {
-                    continue;
-                }
-                if (currentStart < 0) {
-                    currentStart = i;
-                }
-                current.add(t);
-            }
-        }
-        //末尾块（最后一个题号行之后）：卷末答案列表等，无后续题号 → 不关联题（同样先修剪残留）
-        if (!current.isEmpty()) {
-            List<String> materialLines = pruneResidualLines(current);
-            if (isMaterialBlock(materialLines)) {
-                MaterialGroup g = new MaterialGroup("m" + keyIdx++, String.join("\n", materialLines), null, null);
-                groups.add(g);
-            }
-        }
-        return groups;
-    }
-
-    /**
-     * 修剪材料候选块中的"上一题残留"行（剔除后不整块排除）：
-     * 行首选项行（"A.①③④…"）、行内含选项标记（题干+选项同行）、行尾问号（题干）、
-     * 含嵌入题号（"…有几项？11.要…"）、答案列表行、部分引导语（"一. 常识判断"/"根据题目要求"）、
-     * 冒号结尾（题干开头）。
-     * 剩余陈述行（句号/数字/百分号结尾）→ 材料候选。matches() 是全串匹配，规则正则带结尾 .*。
-     */
-    private List<String> pruneResidualLines(List<String> block) {
-        List<String> kept = new ArrayList<>();
-        for (String t : block) {
-            if (t.matches("^[A-Da-d]\\s*[.．、)）].*")) {
-                continue; //选项行
-            }
-            if (t.matches(".*[A-Da-d]\\s*[.．、)].*")) {
-                continue; //行内含选项标记（题干+选项同行）
-            }
-            if (t.endsWith("？") || t.endsWith("?") || t.endsWith("?。")) {
-                continue; //题干疑问句
-            }
-            if (t.matches(".*(?<![\\d.．])\\d{1,3}\\s*[.．、](?![\\d.．]).*")) {
-                continue; //嵌入题号（"1.5倍/10.2%"小数不匹配）
-            }
-            if (ANSWER_LINE.matcher(t).matches() || AiAnswerFormat.RANGE_ANSWER.matcher(t).matches()) {
-                continue; //答案列表行
-            }
-            if (t.matches("^[一二三四五六七八九十]+[.、].*") || t.contains("根据题目要求")) {
-                continue; //部分引导语
-            }
-            if (t.endsWith("：") || t.endsWith(":")) {
-                continue; //题干冒号结尾
-            }
-            kept.add(t);
-        }
-        return kept;
-    }
-
-    /**
-     * 候选块是否为材料（行测整卷实测收紧）：
-     * - 行数≥2、总长≥60、冒号结尾行不过半（题干特征）；
-     * - 排除项（任一命中即非材料）：行首选项行；答案列表行；问号结尾（题干）；
-     *   行内含选项标记（题干+选项同行）；行内含嵌入题号；部分引导语；
-     * - 单行例外：≥60 字符的"陈述句单行"（MinerU 常把整段材料合成一行，实测法律热线材料单行被漏检）
-     *   或含 <table 的长行（表格 HTML 单行）算材料；陈述句 = 无问号/冒号结尾、无选项标记、无题号；
-     *   纯图片标记行不算材料（图形题图组误检）。
-     */
-    private boolean isMaterialBlock(List<String> block) {
-        if (block.isEmpty()) {
-            return false;
-        }
-        if (block.size() == 1) {
-            String only = block.get(0).trim();
-            if (only.length() < 60) {
-                return false; //过短：残留/图标
-            }
-            if (only.matches("^\\[图片\\d+].*")) {
-                return false; //行首图片标记（图形题图区/图片路径行）不是材料；材料图表走"图片前缀组"
-            }
-            if (only.contains("<table")) {
-                return true; //表格 HTML 单行
-            }
-            //陈述句单行：无问号/冒号结尾、无选项标记、无嵌入题号、非答案行 → 材料段落（MinerU 整段合成一行）
-            if (only.endsWith("？") || only.endsWith("?") || only.endsWith("：") || only.endsWith(":")) {
-                return false; //题干
-            }
-            if (only.matches(".*[A-Da-d]\\s*[.．、)].*")) {
-                return false; //题干+选项同行
-            }
-            if (only.matches(".*(?<![\\d.．])\\d{1,3}\\s*[.．、](?![\\d.．]).*")) {
-                return false; //嵌入题号（"…有几项？11.要…"）
-            }
-            return true;
-        }
-        int total = 0;
-        int colonEnd = 0;
-        for (String t : block) {
-            total += t.length();
-            //matches() 是全串匹配，行首规则必须带结尾 .*（"C.福建…D.山东…"选项同行也排除）
-            if (t.matches("^[A-Da-d]\\s*[.．、)）].*")) {
-                return false; //选项行
-            }
-            if (ANSWER_LINE.matcher(t).matches() || AiAnswerFormat.RANGE_ANSWER.matcher(t).matches()) {
-                return false; //答案列表行
-            }
-            if (t.endsWith("？") || t.endsWith("?") || t.endsWith("?。")) {
-                return false; //题干疑问句
-            }
-            //matches() 是全串匹配，规则正则必须带结尾 .*（否则匹配到目标后还有剩余字符 → 整体 false）
-            if (t.matches(".*[A-Da-d]\\s*[.．、)].*")) {
-                return false; //行内含选项标记（"…A.普惠金融…"题干+选项同行）
-            }
-            if (t.matches(".*(?<![\\d.．])\\d{1,3}\\s*[.．、](?![\\d.．]).*")) {
-                return false; //行内含嵌入题号（"…有几项？11.要…"）；"1.5倍/10.2%"等小数不匹配
-            }
-            if (t.matches("^[一二三四五六七八九十]+[.、].*") || t.contains("根据题目要求")) {
-                return false; //部分引导语（"一. 常识判断…"/"根据题目要求…"）
-            }
-            if (t.endsWith("：") || t.endsWith(":")) {
-                colonEnd++;
-            }
-        }
-        if (total < 60) {
-            return false; //过短：封面文字/引导语
-        }
-        return colonEnd * 2 <= block.size();
-    }
-
-    /** 提取行首题号（isQuestionNumberLine 已保证匹配；兼容行首 [图片N] 标记前缀） */
-    private int parseLeadingNumber(String t) {
-        String s = t.replaceAll("^(\\[图片\\d+])+", "").trim();
-        Matcher m = Pattern.compile("^(\\d{1,3})").matcher(s);
-        return m.find() ? Integer.parseInt(m.group(1)) : -1;
     }
 
     /**
@@ -2001,20 +1623,6 @@ public class AiImportService {
             result.add(String.join("\n", out));
         }
         return result;
-    }
-
-    /** 二分页偏移表：字符位置所在页（最后一个 start <= pos 的索引） */
-    private int pageIndexOf(int[] pageStarts, int pos) {
-        int lo = 0, hi = pageStarts.length - 1;
-        while (lo < hi) {
-            int mid = (lo + hi + 1) >>> 1;
-            if (pageStarts[mid] <= pos) {
-                lo = mid;
-            } else {
-                hi = mid - 1;
-            }
-        }
-        return lo;
     }
 
     /**
@@ -2130,7 +1738,7 @@ public class AiImportService {
         //带图补漏（MinerU 路径）：片段中的 [图片N] 标记 → 对应图随消息提供
         List<AiClientService.ImageData> imgs = new ArrayList<>();
         if (extracted != null && !extracted.isEmpty()) {
-            Matcher refM = IMAGE_REF.matcher(cleanFrag);
+            Matcher refM = AiImportTexts.IMAGE_REF.matcher(cleanFrag);
             while (refM.find()) {
                 int num = Integer.parseInt(refM.group(1));
                 if (num >= 1 && num <= extracted.size()) {
@@ -2150,7 +1758,7 @@ public class AiImportService {
                         ? aiClientService.chat(rs, systemPrompt, user, true)
                         : aiClientService.chatWithImages(promptFactory.buildVisionSettings(rs), systemPrompt, user, imgs, true);
                 log.info("AI 导入任务 {} 补漏第 {} 题原始输出（{} 字符）：{}",
-                        jobId, n, out.length(), truncate(out.replaceAll("\\R+", " | "), 900));
+                        jobId, n, out.length(), AiImportTexts.truncate(out.replaceAll("\\R+", " | "), 900));
                 List<ContentPackageQuestion> parsed = mdParseQuestions(out, aiSupplement);
                 //补漏结果必须对应目标题号：content 定位 → 题号 == n，否则丢弃。
                 //（模型劣化时可能输出其他题的内容——"角误差+乱配选项"实测——校验只查源文存在性查不出）
@@ -2206,19 +1814,6 @@ public class AiImportService {
 
 
 
-    private String stripOutOfRangeRefs(String text, int firstNum, int lastNum) {
-        Matcher m = Pattern.compile("\\[图片(\\d+)\\]").matcher(text);
-        StringBuilder sb = new StringBuilder();
-        while (m.find()) {
-            int n = Integer.parseInt(m.group(1));
-            if (n < firstNum || n > lastNum) {
-                m.appendReplacement(sb, "");
-            }
-        }
-        m.appendTail(sb);
-        return sb.toString();
-    }
-
     /** 视觉路径合并后按源文位置排序（还原文档顺序；补漏题按源文行归位，不再追加在末尾） */
     private List<ContentPackageQuestion> sortBySourceOrder(List<ContentPackageQuestion> questions, String fullSource) {
         if (fullSource == null || fullSource.isBlank()) {
@@ -2227,8 +1822,8 @@ public class AiImportService {
         String[] lines = fullSource.split("\\R", -1);
         List<ContentPackageQuestion> sorted = new ArrayList<>(questions);
         sorted.sort((a, b) -> {
-            int la = sourceTextService.locateContentLine(lines, stripImageRefs(a.getContent() == null ? "" : a.getContent()));
-            int lb = sourceTextService.locateContentLine(lines, stripImageRefs(b.getContent() == null ? "" : b.getContent()));
+            int la = sourceTextService.locateContentLine(lines, AiImportTexts.stripImageRefs(a.getContent() == null ? "" : a.getContent()));
+            int lb = sourceTextService.locateContentLine(lines, AiImportTexts.stripImageRefs(b.getContent() == null ? "" : b.getContent()));
             if (la < 0 && lb < 0) {
                 return 0;
             }
@@ -2244,410 +1839,6 @@ public class AiImportService {
     }
 
     // ==================== 视觉单次路径（主路径：简化 prompt + 整份 PDF 单次调用） ====================
-
-    /**
-     * PDF-MD 矢量图兜底：无 [图片N] 引用的题（图形题的图是矢量绘制、无内嵌位图，粉笔公考 PDF 常见）
-     * → 按题干在源文中的页内位置，从 300 DPI 整页渲染中裁剪"题干下方第一个图形块"，就地追加 [图片N]。
-     * 只做题干图（不塞选项）；定位失败/无图形块 → 保持原样（预览人工补图）。
-     */
-    private AiImportResult resolvePdfStemImages(AiImportResult parsed, List<String> pageTexts,
-                                                List<DocumentParserService.ExtractedImage> extracted,
-                                                Path jobDir, String pdfFileName, Long jobId) {
-        try {
-            byte[] pdfBytes = Files.readAllBytes(jobDir.resolve("0-" + pdfFileName));
-            List<AiClientService.ImageData> pageImages = documentParserService.renderAllPages(pdfBytes, ANALYSIS_RENDER_DPI);
-            List<List<DocumentParserService.LinePos>> linePositions = documentParserService.collectLinePositions(pdfBytes);
-            float scale = ANALYSIS_RENDER_DPI / 72f;
-            float pageHeightPt = 842f;
-            try {
-                BufferedImage img0 = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(pageImages.get(0).data()));
-                if (img0 != null) {
-                    pageHeightPt = img0.getHeight() / scale;
-                }
-            } catch (Exception ignored) {
-            }
-            //源文行 → 页 映射（fullSource = 逐页文本拼接，行结构与 pageTexts 一致）
-            String source = String.join("", pageTexts);
-            String[] lines = source.split("\\R", -1);
-            int[] lineStarts = new int[lines.length];
-            int acc = 0;
-            for (int i = 0; i < lines.length; i++) {
-                lineStarts[i] = acc;
-                acc += lines[i].length() + 1;
-            }
-            int[] pageStarts = new int[pageTexts.size() + 1];
-            acc = 0;
-            for (int i = 0; i < pageTexts.size(); i++) {
-                pageStarts[i] = acc;
-                acc += pageTexts.get(i).length();
-            }
-            pageStarts[pageTexts.size()] = acc;
-            Map<Integer, List<float[]>> blocksByPage = new HashMap<>();
-            int nextImageNo = extracted.size() + 1;
-            List<ContentPackageQuestion> out = new ArrayList<>(parsed.questions());
-            //垃圾块过滤：无题号且题干（剥离图片引用后）为空——模型在块首臆造的图片题残块（实测判断推理块首
-            //"[图片1]+空选项"垃圾块），丢弃（真正的题必有序号或题干文字）
-            out.removeIf(q -> q.getQuestionNumber() == null
-                    && stripImageRefs(q.getContent() == null ? "" : q.getContent()).replaceAll("[^\\p{L}\\p{N}]", "").isEmpty());
-            log.info("AI 导入任务 {} 矢量图兜底：内嵌图页号分布 [{}]，共 {} 题",
-                    jobId, extracted.stream().map(x -> String.valueOf(x.pageNo()))
-                            .collect(java.util.stream.Collectors.joining(",")), out.size());
-            //第一遍：为每道无图题定位题干行 y（游标推进——相同引导语的题如 Q19/Q20 按出现顺序归位，
-            //否则都定位到第一处，第二题会裁到第一题的图）
-            Map<Integer, List<float[]>> located = new HashMap<>(); // page -> {contentY}（与 out 顺序对应存索引）
-            List<Integer> order = new ArrayList<>(); // 可处理题在 out 中的索引
-            List<Float> ys = new ArrayList<>();
-            List<Integer> pages = new ArrayList<>();
-            List<Integer> locLines = new ArrayList<>(); // 各题定位到的源文行（判断"选项是否为图形"用）
-            Map<String, Integer> probeCursor = new HashMap<>();
-            int lastGlobalLine = -1; // 上一道已定位题的源文全局行（内容空题回填题干时从这里往后找题号行）
-            for (int qi = 0; qi < out.size(); qi++) {
-                ContentPackageQuestion q = out.get(qi);
-                //题干文字回填：模型偶尔只输出 [图片N] 或把引导语整个丢掉（图形题引导语在题号行），
-                //从源文按题号行回填引导语文字（先回填，后面 locateContentLine 才能定位 → 矢量图兜底裁剪）
-                String textOnly = stripImageRefs(q.getContent() == null ? "" : q.getContent());
-                if (textOnly.replaceAll("[^\\p{L}\\p{N}]", "").isEmpty() && q.getQuestionNumber() != null) {
-                    String stem = backfillStemLine(lines, Math.max(0, lastGlobalLine + 1), q.getQuestionNumber());
-                    if (stem != null && !stem.isBlank()) {
-                        String imgs = (q.getContent() == null ? "" : q.getContent()).replaceAll("[^\\[\\]\\d图片]", "");
-                        imgs = (imgs == null || imgs.isBlank()) ? "" : "\n" + imgs.trim();
-                        q.setContent(stem + imgs);
-                        log.info("AI 导入任务 {} 题干回填：题号 {} 从源文回填引导语（{} 字符）",
-                                jobId, q.getQuestionNumber(), stem.length());
-                    }
-                }
-                if (q.getContent() == null || textOnly.isBlank()) {
-                    continue;
-                }
-                int line = sourceTextService.locateContentLine(lines, textOnly);
-                if (line < 0) {
-                    continue;
-                }
-                int page = pageIndexOf(pageStarts, lineStarts[line]);
-                if (page < 0 || page >= pageImages.size() || page >= linePositions.size()) {
-                    continue;
-                }
-                String probe = stripImageRefs(q.getContent()).split("\\R", 2)[0].replaceAll("\\s+", "");
-                if (probe.length() > 8) {
-                    probe = probe.substring(0, 8);
-                }
-                if (probe.isBlank()) {
-                    continue;
-                }
-                List<DocumentParserService.LinePos> lps = linePositions.get(page);
-                int from = probeCursor.getOrDefault(probe, 0);
-                int best = -1;
-                for (int li = Math.max(0, from); li < lps.size(); li++) {
-                    if (lps.get(li).text().replaceAll("\\s+", "").contains(probe)) {
-                        best = li;
-                        break;
-                    }
-                }
-                if (best < 0 && from > 0) {
-                    for (int li = 0; li < lps.size(); li++) { //跨页游标失效兜底
-                        if (lps.get(li).text().replaceAll("\\s+", "").contains(probe)) {
-                            best = li;
-                            break;
-                        }
-                    }
-                }
-                if (best < 0) {
-                    continue;
-                }
-                probeCursor.put(probe, best + 1);
-                lastGlobalLine = line;
-                order.add(qi);
-                pages.add(page);
-                ys.add(lps.get(best).y());
-                locLines.add(line);
-            }
-            Map<Integer, List<Integer>> byPage = new HashMap<>();
-            for (int i = 0; i < order.size(); i++) {
-                byPage.computeIfAbsent(pages.get(i), k -> new ArrayList<>()).add(i);
-            }
-            //第二遍：按页（升序）、页内按 y 排序 → 每题带 = [自身 y, 下一题 y)（页内最后一题到页底）。
-            //图形题确定性配图（不信任模型引用）：选项是图形 → 按文档顺序分配未用内嵌图 / 带内裁剪；
-            //题干图（图形推理/六图分类/问号题）→ 带内图形块裁剪，相邻图形题各裁各的带。
-            Set<Integer> usedEmbedded = new HashSet<>();
-            for (ContentPackageQuestion q : out) {
-                String stem = stripImageRefs(q.getContent() == null ? "" : q.getContent());
-                if (FIGURE_STEM.matcher(stem).find()) {
-                    continue; //图形题不占用内嵌图编号（模型引用会被重配）
-                }
-                Matcher refM = IMAGE_REF.matcher(q.getContent() == null ? "" : q.getContent());
-                while (refM.find()) {
-                    usedEmbedded.add(Integer.parseInt(refM.group(1)));
-                }
-                if (q.getOptions() != null) {
-                    for (OptionItem o : q.getOptions()) {
-                        Matcher om = IMAGE_REF.matcher(o.text() == null ? "" : o.text());
-                        while (om.find()) {
-                            usedEmbedded.add(Integer.parseInt(om.group(1)));
-                        }
-                    }
-                }
-            }
-            List<Map.Entry<Integer, List<Integer>>> pageOrder = new ArrayList<>(byPage.entrySet());
-            pageOrder.sort(Map.Entry.comparingByKey());
-            for (Map.Entry<Integer, List<Integer>> e : pageOrder) {
-                int page = e.getKey();
-                List<Integer> idxs = e.getValue();
-                idxs.sort(java.util.Comparator.comparingDouble(i -> ys.get(i)));
-                List<float[]> blocks = blocksByPage.get(page);
-                float pageWidthPt = pageHeightPt;
-                if (blocks == null) {
-                    List<DocumentParserService.LinePos> textLines = linePositions.get(page);
-                    try {
-                        BufferedImage pageImg = javax.imageio.ImageIO.read(
-                                new java.io.ByteArrayInputStream(pageImages.get(page).data()));
-                        if (pageImg != null) {
-                            pageWidthPt = pageImg.getWidth() / scale;
-                            blocks = detectGraphBlocks(pageImg, scale, pageHeightPt, textLines);
-                        } else {
-                            blocks = List.of();
-                        }
-                    } catch (Exception ex) {
-                        blocks = List.of();
-                    }
-                    blocksByPage.put(page, blocks);
-                }
-                Set<String> usedBlocks = new HashSet<>(); // 本页已配给某题的图形块（同页双题共用合并簇时防重复认领）
-                for (int si = 0; si < idxs.size(); si++) {
-                    int qi = order.get(idxs.get(si));
-                    ContentPackageQuestion q = out.get(qi);
-                    String stemText = stripImageRefs(q.getContent() == null ? "" : q.getContent()).trim();
-                    boolean isFigure = FIGURE_STEM.matcher(stemText).find();
-                    float bandTop = ys.get(idxs.get(si));
-                    float bandBot = si + 1 < idxs.size() ? ys.get(idxs.get(si + 1)) : pageHeightPt - 10;
-                    if (bandBot - bandTop < 10) {
-                        continue;
-                    }
-                    //带内图形块（整块落在带内的才算——相邻题图形簇相连时各归各的带；已配给其他题的块跳过）
-                    List<float[]> inBand = new ArrayList<>();
-                    for (float[] b : blocks) {
-                        if (b[0] >= bandTop - 5 && b[1] <= bandBot + 2 && !usedBlocks.contains(blockKey(b))) {
-                            inBand.add(b);
-                        }
-                    }
-                    log.info("AI 导入任务 {} 配图调试：题号 {} 页 {} y={} band=[{}..{}] isFigure={} 全页块[{}] 带内块[{}]",
-                            jobId, q.getQuestionNumber(), page, String.format("%.1f", ys.get(idxs.get(si))),
-                            String.format("%.1f", bandTop), String.format("%.1f", bandBot), isFigure,
-                            blocks.stream().map(b -> String.format("%.0f-%.0f", b[0], b[1]))
-                                    .collect(java.util.stream.Collectors.joining(" ")),
-                            inBand.stream().map(b -> String.format("%.0f-%.0f", b[0], b[1]))
-                                    .collect(java.util.stream.Collectors.joining(" ")));
-                    //选项是否为图形：源文题干行之后、下一题之前没有文字选项行 → 选项是图形（俯视图/展开图等）。
-                    //停步：下一题号行 / 下一题设问行（结尾 ：？ 或行尾题号"…8."）/ 设问引导词行。
-                    int locLine = locLines.get(idxs.get(si));
-                    boolean sourceHasTextOpts = false;
-                    for (int li = locLine + 1; li < lines.length; li++) {
-                        String t = lines[li].trim();
-                        if (t.isEmpty()) {
-                            continue;
-                        }
-                        if (t.matches("^\\d{1,3}\\s*[.．、)）].*")
-                                || t.matches(".*[：:？?]$")
-                                || t.matches(".*\\d{1,3}\\s*[.．、]$")
-                                || t.matches("^(根据上述定义|下列|要使|据此|由此|以下|上述|从所给|若|如果|除非).*")) {
-                            break; //下一题开始
-                        }
-                        if (t.matches("^[A-Ha-h]\\s*[.．、].*")) {
-                            sourceHasTextOpts = true;
-                            break;
-                        }
-                    }
-                    int optionSlots = q.getOptions() == null ? 0 : q.getOptions().size();
-                    boolean optsImageOnly = optionSlots > 0 && q.getOptions().stream().allMatch(o -> {
-                        String t = o.text() == null ? "" : o.text().trim();
-                        return t.isEmpty() || t.matches("\\[图片\\d+\\]");
-                    });
-                    boolean figureImgOpts = isFigure && !sourceHasTextOpts && (optionSlots == 0 || optsImageOnly);
-                    if (figureImgOpts) {
-                        //题干图（"上图"/引图）与选项图组分离：带内 ≥2 个图形块时最上块为题干图，最下块为选项图组
-                        float[] stemBlock = null;
-                        float[] gridBlock = null;
-                        if (inBand.size() >= 2) {
-                            stemBlock = inBand.get(0);
-                            gridBlock = inBand.get(inBand.size() - 1);
-                        } else if (inBand.size() == 1) {
-                            gridBlock = inBand.get(0);
-                        }
-                        int need = Math.max(optionSlots, 4);
-                        List<String> assigned = new ArrayList<>();
-                        //1) 未用内嵌图（页号 ≥ 本题页，按文档顺序）——选项图跨页时内嵌图按页归属拆散，此处全量找回
-                        for (int idx = 0; idx < extracted.size() && assigned.size() < need; idx++) {
-                            int n = idx + 1;
-                            if (usedEmbedded.contains(n)) {
-                                continue;
-                            }
-                            if (extracted.get(idx).pageNo() >= page) {
-                                assigned.add("[图片" + n + "]");
-                                usedEmbedded.add(n);
-                            }
-                        }
-                        //2) 不足 → 选项图组网格拆分（x/y 暗像素投影聚类，1x4 / 2x2 排版均适用；聚类失败退化为 2x2 四分）
-                        boolean gridSplitUsed = false;
-                        if (assigned.size() < need && gridBlock != null) {
-                            float cropTop = Math.max(gridBlock[0], bandTop - 2);
-                            float cropBot = Math.min(gridBlock[1], bandBot + 2);
-                            if (cropBot - cropTop >= 24) {
-                                List<float[]> cells = List.of();
-                                try {
-                                    BufferedImage gridImg = javax.imageio.ImageIO.read(
-                                            new java.io.ByteArrayInputStream(pageImages.get(page).data()));
-                                    if (gridImg != null) {
-                                        cells = detectGridCells(gridImg, scale, cropTop, cropBot,
-                                                40f, pageWidthPt - 40f, need - assigned.size());
-                                    }
-                                } catch (Exception ignored) {
-                                }
-                                if (cells.size() < 2) {
-                                    float midY = (cropTop + cropBot) / 2;
-                                    float midX = pageWidthPt / 2;
-                                    cells = new ArrayList<>();
-                                    cells.add(new float[]{cropTop, midY, 40f, midX});
-                                    cells.add(new float[]{cropTop, midY, midX, pageWidthPt - 40f});
-                                    cells.add(new float[]{midY, cropBot, 40f, midX});
-                                    cells.add(new float[]{midY, cropBot, midX, pageWidthPt - 40f});
-                                }
-                                log.info("AI 导入任务 {} 配图调试：题号 {} 选项图组网格 {}-{}pt 拆出 {} 格（前 2 格 [{},{},{},{}]）",
-                                        jobId, q.getQuestionNumber(), String.format("%.1f", cropTop),
-                                        String.format("%.1f", cropBot), cells.size(),
-                                        cells.isEmpty() ? "-" : String.format("%.0f", cells.get(0)[0]),
-                                        cells.isEmpty() ? "-" : String.format("%.0f", cells.get(0)[1]),
-                                        cells.isEmpty() ? "-" : String.format("%.0f", cells.get(0)[2]),
-                                        cells.isEmpty() ? "-" : String.format("%.0f", cells.get(0)[3]));
-                                for (float[] c : cells) {
-                                    if (assigned.size() >= need) {
-                                        break;
-                                    }
-                                    String num = cropBand(c[0], c[1], c[2], c[3], false, scale, page,
-                                            Map.of(), pageImages, jobDir, nextImageNo);
-                                    if (num != null) {
-                                        assigned.add("[图片" + num + "]");
-                                        nextImageNo = Integer.parseInt(num) + 1;
-                                        gridSplitUsed = true;
-                                    }
-                                }
-                                if (gridSplitUsed) {
-                                    usedBlocks.add(blockKey(gridBlock));
-                                }
-                            }
-                        }
-                        if (assigned.size() >= 2) {
-                            List<OptionItem> newOpts = new ArrayList<>();
-                            String[] labels = {"A", "B", "C", "D"};
-                            for (int k = 0; k < Math.min(assigned.size(), labels.length); k++) {
-                                newOpts.add(new OptionItem(labels[k], assigned.get(k)));
-                            }
-                            q.setContent(stemText);
-                            q.setOptions(newOpts);
-                            q.setType("SINGLE");
-                            log.info("AI 导入任务 {} 选项图配图：题号 {} 分配 {} 张选项图",
-                                    jobId, q.getQuestionNumber(), newOpts.size());
-                        }
-                        //题干图（"上图"/引图）裁剪：带内 ≥2 块取最上块；单块且选项图已由内嵌图覆盖（未用于拆分）时该块即题干图
-                        if (stemBlock != null || (assigned.size() >= need && inBand.size() == 1 && !gridSplitUsed)) {
-                            float[] sb = stemBlock != null ? stemBlock : inBand.get(0);
-                            float cropTop = Math.max(sb[0], bandTop - 2);
-                            float cropBot = Math.min(sb[1], bandBot + 2);
-                            if (cropBot - cropTop >= 12) {
-                                String num = cropBand(cropTop, cropBot, 40f, -1f, false, scale, page,
-                                        Map.of(), pageImages, jobDir, nextImageNo);
-                                if (num != null) {
-                                    q.setContent(q.getContent() + "\n[图片" + num + "]");
-                                    byte[] png = Files.readAllBytes(jobDir.resolve("images").resolve(num + ".png"));
-                                    extracted.add(new DocumentParserService.ExtractedImage(page, 40f, cropTop, pageHeightPt,
-                                            new AiClientService.ImageData("image/png", png)));
-                                    nextImageNo = Integer.parseInt(num) + 1;
-                                    usedBlocks.add(blockKey(sb));
-                                }
-                            }
-                        }
-                        continue;
-                    }
-                    //题干图：带内图形块裁剪（六图分类簇/问号题图形；相邻题按带切割）。
-                    //带内无块时图形题放宽：同页双题图形簇相邻/双栏错位，后一题图形块可能在题干行上方
-                    //（Q20 六图簇在文本上方 35pt）→ 找最近的未用块（向题干行上方回探 150pt）；
-                    //页内仍无 → 末题图形跨页（在下一页顶部）时取下一页第一个未用块
-                    float[] stemBlockSel = null;
-                    int cropPage = page;
-                    boolean stemAboveText = false; // 图形块整体在题干行上方（双栏错位）→ 从块顶裁剪
-                    if (!inBand.isEmpty()) {
-                        stemBlockSel = inBand.get(0);
-                    } else if (isFigure) {
-                        for (float[] b : blocks) {
-                            if (!usedBlocks.contains(blockKey(b)) && b[1] >= bandTop - 150 && b[0] <= bandBot + 2) {
-                                stemBlockSel = b;
-                                stemAboveText = b[1] < bandTop - 5;
-                                break;
-                            }
-                        }
-                        //跨页兜底仅限整份文档最后一题（下一页顶部块只可能是它的续图；其他情况
-                        //下一页顶部块多半属于下一页第一题，禁止挪用）
-                        if (stemBlockSel == null && qi == out.size() - 1 && page + 1 < pageImages.size()) {
-                            List<float[]> np = blocksByPage.get(page + 1);
-                            if (np == null) {
-                                try {
-                                    BufferedImage nImg = javax.imageio.ImageIO.read(
-                                            new java.io.ByteArrayInputStream(pageImages.get(page + 1).data()));
-                                    np = nImg == null ? List.of()
-                                            : detectGraphBlocks(nImg, scale, pageHeightPt, linePositions.get(page + 1));
-                                } catch (Exception ex) {
-                                    np = List.of();
-                                }
-                                blocksByPage.put(page + 1, np);
-                            }
-                            for (float[] b : np) {
-                                if (b[0] < pageHeightPt / 2) { // 下一页顶部区域（多半是本题续图）
-                                    stemBlockSel = b;
-                                    cropPage = page + 1;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    if (stemBlockSel == null) {
-                        continue;
-                    }
-                    if (!isFigure && q.getContent() != null && q.getContent().contains("[图片")) {
-                        continue; //非图形题已有模型引用（照片/图表），不再裁剪
-                    }
-                    //裁剪区间：块整体在题干行上方（stemAboveText）时从块顶裁到带底，不向题干行收敛
-                    //（否则 cropTop=题干行 > cropBot=块底 → 区间倒置被丢弃，Q20 六图簇在文本上方 35pt 即此情况）
-                    float cropTop;
-                    if (cropPage != page) {
-                        cropTop = stemBlockSel[0];
-                    } else if (stemAboveText) {
-                        cropTop = stemBlockSel[0];
-                    } else {
-                        cropTop = Math.max(stemBlockSel[0], bandTop - 2);
-                    }
-                    float cropBot = cropPage != page ? stemBlockSel[1] : Math.min(stemBlockSel[1], bandBot + 2);
-                    if (cropBot - cropTop < 12) {
-                        continue;
-                    }
-                    String num = cropBand(cropTop, cropBot, 40f, -1f, false, scale, cropPage,
-                            Map.of(), pageImages, jobDir, nextImageNo);
-                    if (num == null) {
-                        continue;
-                    }
-                    q.setContent(stemText + "\n[图片" + num + "]");
-                    //同步扩展 extracted：确认导入时 [图片N] → images/{N}.png 映射依赖
-                    byte[] png = Files.readAllBytes(jobDir.resolve("images").resolve(num + ".png"));
-                    extracted.add(new DocumentParserService.ExtractedImage(cropPage, 40f, cropTop, pageHeightPt,
-                            new AiClientService.ImageData("image/png", png)));
-                    nextImageNo = Integer.parseInt(num) + 1;
-                    usedBlocks.add(blockKey(stemBlockSel));
-                    log.info("AI 导入任务 {} 矢量图兜底：题号 {} 裁剪题干图 [图片{}]", jobId, q.getQuestionNumber(), num);
-                }
-            }
-            return new AiImportResult(out, parsed.materials());
-        } catch (Exception e) {
-            log.warn("AI 导入任务 {} PDF 矢量图兜底失败：{}", jobId, e.getMessage());
-            return parsed;
-        }
-    }
 
     /**
      * PDF 直传图题归位（v2，替代矢量裁剪兜底）：
@@ -2675,210 +1866,6 @@ public class AiImportService {
         }
     }
 
-    private AiImportResult assignPdfFigureImages(AiImportResult parsed, List<String> pageTexts,
-                                                 List<DocumentParserService.ExtractedImage> extracted,
-                                                 Path jobDir, String pdfFileName, Long jobId) {
-        try {
-            byte[] pdfBytes = Files.readAllBytes(jobDir.resolve("0-" + pdfFileName));
-            List<List<DocumentParserService.LinePos>> linePositions = documentParserService.collectLinePositions(pdfBytes);
-            //源文行 → 页映射
-            String source = String.join("", pageTexts);
-            String[] lines = source.split("\\R", -1);
-            int[] lineStarts = new int[lines.length];
-            int acc = 0;
-            for (int i = 0; i < lines.length; i++) {
-                lineStarts[i] = acc;
-                acc += lines[i].length() + 1;
-            }
-            int[] pageStarts = new int[pageTexts.size() + 1];
-            acc = 0;
-            for (int i = 0; i < pageTexts.size(); i++) {
-                pageStarts[i] = acc;
-                acc += pageTexts.get(i).length();
-            }
-            pageStarts[pageTexts.size()] = acc;
-            List<ContentPackageQuestion> out = new ArrayList<>(parsed.questions());
-            //垃圾块过滤：无题号且题干（剥离图片引用后）为空
-            out.removeIf(q -> q.getQuestionNumber() == null
-                    && stripImageRefs(q.getContent() == null ? "" : q.getContent()).replaceAll("[^\\p{L}\\p{N}]", "").isEmpty());
-            //题干回填 + 每题定位（题干行 y 为 top-origin pt，与图锚点同坐标系）
-            List<Integer> order = new ArrayList<>();
-            List<Float> ys = new ArrayList<>();
-            List<Integer> pages = new ArrayList<>();
-            Map<String, Integer> probeCursor = new HashMap<>();
-            int lastGlobalLine = -1;
-            for (int qi = 0; qi < out.size(); qi++) {
-                ContentPackageQuestion q = out.get(qi);
-                String textOnly = stripImageRefs(q.getContent() == null ? "" : q.getContent());
-                if (textOnly.replaceAll("[^\\p{L}\\p{N}]", "").isEmpty() && q.getQuestionNumber() != null) {
-                    String stem = backfillStemLine(lines, Math.max(0, lastGlobalLine + 1), q.getQuestionNumber());
-                    if (stem != null && !stem.isBlank()) {
-                        String imgs = (q.getContent() == null ? "" : q.getContent()).replaceAll("[^\\[\\]\\d图片]", "");
-                        imgs = (imgs == null || imgs.isBlank()) ? "" : "\n" + imgs.trim();
-                        q.setContent(stem + imgs);
-                        log.info("AI 导入任务 {} 题干回填：题号 {} 从源文回填引导语（{} 字符）",
-                                jobId, q.getQuestionNumber(), stem.length());
-                    }
-                }
-                String s2 = stripImageRefs(q.getContent() == null ? "" : q.getContent());
-                if (s2.isBlank()) {
-                    continue;
-                }
-                int line = sourceTextService.locateContentLine(lines, s2);
-                if (line < 0) {
-                    continue;
-                }
-                int page = pageIndexOf(pageStarts, lineStarts[line]);
-                if (page < 0 || page >= linePositions.size()) {
-                    continue;
-                }
-                String probe = s2.split("\\R", 2)[0].replaceAll("\\s+", "");
-                if (probe.length() > 8) {
-                    probe = probe.substring(0, 8);
-                }
-                if (probe.isBlank()) {
-                    continue;
-                }
-                List<DocumentParserService.LinePos> lps = linePositions.get(page);
-                int from = probeCursor.getOrDefault(probe, 0);
-                int best = -1;
-                for (int li = Math.max(0, from); li < lps.size(); li++) {
-                    if (lps.get(li).text().replaceAll("\\s+", "").contains(probe)) {
-                        best = li;
-                        break;
-                    }
-                }
-                if (best < 0 && from > 0) {
-                    for (int li = 0; li < lps.size(); li++) {
-                        if (lps.get(li).text().replaceAll("\\s+", "").contains(probe)) {
-                            best = li;
-                            break;
-                        }
-                    }
-                }
-                if (best < 0) {
-                    continue;
-                }
-                probeCursor.put(probe, best + 1);
-                lastGlobalLine = line;
-                order.add(qi);
-                ys.add(lps.get(best).y());
-                pages.add(page);
-            }
-            //模型引用占用收集：模型看图主导——所有题（含图形题）的 [图片N] 引用都保留并占用编号；
-            //越界/悬空编号由落库时保留原标记（预览可见可改），不在此清理
-            Set<Integer> used = new HashSet<>();
-            for (ContentPackageQuestion q : out) {
-                Matcher m = IMAGE_REF.matcher((q.getContent() == null ? "" : q.getContent())
-                        + (q.getOptions() == null ? "" : q.getOptions().stream()
-                        .map(o -> o.text() == null ? "" : o.text())
-                        .collect(java.util.stream.Collectors.joining())));
-                while (m.find()) {
-                    used.add(Integer.parseInt(m.group(1)));
-                }
-            }
-            //兜底候选：仅对"模型未在题干引用任何图"的图形题，按版面坐标就近配同页未用图
-            //（模型漏配时补救；程序坐标在题干重复/定位失败时不可靠，故只作兜底不主导）
-            List<Object[]> cand = new ArrayList<>(); // {题索引, 图序号(1..N), 距离}
-            for (int i = 0; i < order.size(); i++) {
-                int qi = order.get(i);
-                ContentPackageQuestion q = out.get(qi);
-                String stemText = stripImageRefs(q.getContent() == null ? "" : q.getContent()).trim();
-                if (!FIGURE_STEM.matcher(stemText).find()) {
-                    continue;
-                }
-                String rawContent = q.getContent() == null ? "" : q.getContent();
-                if (IMAGE_REF.matcher(rawContent).find()) {
-                    continue; //模型已为本题题干引用图形 → 保留模型归属，不兜底覆盖
-                }
-                float bandTop = ys.get(i);
-                float bandBot = i + 1 < order.size() ? ys.get(i + 1) : 100000f;
-                //注意：带按文档顺序未必页内连续——同页内才比较（不同页候选由页匹配天然隔离）
-                if (i + 1 < order.size() && !pages.get(i).equals(pages.get(i + 1))) {
-                    bandBot = 100000f;
-                }
-                for (int idx = 0; idx < extracted.size(); idx++) {
-                    DocumentParserService.ExtractedImage im = extracted.get(idx);
-                    if (im.pageNo() != pages.get(i)) {
-                        continue;
-                    }
-                    if (used.contains(idx + 1)) {
-                        continue;
-                    }
-                    float anchor = im.pageHeight() - im.sortY(); // 图底边距页顶（top-origin pt）
-                    if (anchor > bandBot + 20 || anchor < bandTop - 300) {
-                        continue;
-                    }
-                    float d = Math.abs(anchor - bandTop);
-                    cand.add(new Object[]{qi, idx + 1, d});
-                }
-            }
-            cand.sort(java.util.Comparator.comparingDouble(o -> (Float) o[2]));
-            int assigned = 0;
-            Set<Integer> done = new HashSet<>();
-            for (Object[] c : cand) {
-                int qi = (Integer) c[0];
-                int num = (Integer) c[1];
-                if (done.contains(qi) || used.contains(num)) {
-                    continue;
-                }
-                ContentPackageQuestion q = out.get(qi);
-                q.setContent(q.getContent() + "\n[图片" + num + "]");
-                used.add(num);
-                done.add(qi);
-                assigned++;
-                log.info("AI 导入任务 {} 图题归位：题号 {} 内嵌图 [图片{}]", jobId, q.getQuestionNumber(), num);
-            }
-            log.info("AI 导入任务 {} 图题归位：{} 题配图完成（未配图图形题由预览页人工补图）", jobId, assigned);
-            return new AiImportResult(out, parsed.materials());
-        } catch (Exception e) {
-            log.warn("AI 导入任务 {} PDF 图题归位失败：{}", jobId, e.getMessage());
-            return parsed;
-        }
-    }
-
-
-    /** 图形题题干特征：几何图形/俯视图/展开图/问号题/图形分类等。
-     *  这类题的图形由程序按版面位置确定性裁剪配图，模型不引用 [图片N]（模型数图/归属不可靠）。 */
-    private static final Pattern FIGURE_STEM = Pattern.compile("图形|俯视|展开图|问号|规律性|填入|折叠|折成|截面|纸盒");
-
-    /**
-     * 空题干回填：从源文 lines[from..] 中找"题号行"（N. / N．/ N、），取题号后的引导语文字。
-     * 题号行本身为空时并入下一行（引导语换行版式）；下一行是选项/下一题时放弃。
-     */
-    private String backfillStemLine(String[] lines, int from, int questionNumber) {
-        Pattern qno = Pattern.compile("^\\s*" + questionNumber + "\\s*[.．、)）]\\s*(.*)$");
-        for (int i = from; i < lines.length; i++) {
-            Matcher m = qno.matcher(lines[i]);
-            if (!m.find()) {
-                continue;
-            }
-            String rest = m.group(1) == null ? "" : m.group(1).trim();
-            //答案表行（如 "19.C"）或纯编号行 → 并入下一非空行；下一行是选项/下一题号 → 放弃
-            boolean restRich = rest.replaceAll("[^\\p{L}\\p{N}]", "").length() >= 6;
-            if (!restRich) {
-                String next = "";
-                for (int j = i + 1; j < lines.length && j <= i + 3; j++) {
-                    String t = lines[j].trim();
-                    if (t.isEmpty()) {
-                        continue;
-                    }
-                    if (t.matches("^[A-Da-d]\\s*[.．、].*") || t.matches("^\\d{1,3}\\s*[.．、)）].*")
-                            || t.contains("答案")) {
-                        break;
-                    }
-                    next = t;
-                    break;
-                }
-                rest = (rest + " " + next).trim();
-                if (rest.replaceAll("[^\\p{L}\\p{N}]", "").length() < 6) {
-                    return null;
-                }
-            }
-            return rest;
-        }
-        return null;
-    }
 
     /**
      * 视觉单次路径（实测定稿）：整页渲染（JPEG 压缩）+ 页文本层 + 简化 prompt → 单次多模态调用。
@@ -2896,7 +1883,7 @@ public class AiImportService {
         byte[] pdfBytes = Files.readAllBytes(jobDir.resolve("0-" + pdfFileName));
         List<AiClientService.ImageData> pageImages = documentParserService.renderAllPages(
                 pdfBytes, VISION_PAGE_DPI, VISION_PAGE_JPEG_QUALITY);
-        List<AiClientService.ImageData> analysisImages = documentParserService.renderAllPages(pdfBytes, ANALYSIS_RENDER_DPI, 0f);
+        List<AiClientService.ImageData> analysisImages = documentParserService.renderAllPages(pdfBytes, AiImportVisionLayoutService.ANALYSIS_RENDER_DPI, 0f);
         int pages = Math.min(pageTexts.size(), pageImages.size());
         if (pageTexts.size() != pageImages.size()) {
             log.warn("AI 导入任务 {} 文本页数 {} 与渲染页数 {} 不一致，取较小值 {}", jobId, pageTexts.size(), pageImages.size(), pages);
@@ -2933,904 +1920,11 @@ public class AiImportService {
         questions = visionQualityService.sortBySourceOrder(questions, fullSource);
         List<List<DocumentParserService.LinePos>> linePositions =
                 documentParserService.collectLinePositions(Files.readAllBytes(jobDir.resolve("0-" + pdfFileName)));
-        resolvePlaceholders(questions, pageTexts, extracted, analysisImages, linePositions, jobDir);
+        visionLayout.resolvePlaceholders(questions, pageTexts, extracted, analysisImages, linePositions, jobDir);
         return new AiImportResult(questions, parsed.materials());
     }
 
-    /** 题干图块顶部距题干行最大间距（pt）：超过说明块不属于本题（相邻图形题被漏掉时的无主块），跳过防错插 */
-    private static final float STEM_IMAGE_MAX_GAP_PT = 80f;
-    /** 块 0 距题干行超过此值（pt）→ 块 0 判定为第一个选项图（题干下方有引导语/空白，如太师椅 4 图竖排）而非题干图 */
-    private static final float STEM_IMAGE_FAR_GAP_PT = 40f;
-    /** 块 0 与块 1 间距（pt）超过此值 → 块 0 判定为第一个选项图（选项全图垂直排列，如太师椅 4 图竖排）而非题干图 */
-    private static final float OPTION_VERTICAL_GAP_PT = 30f;
 
-    /**
-     * 位置占位符 → 图片（[图片N]）：
-     * 1. 带内位图优先：该页内嵌位图（CTM 区域）与占位带重叠 → 直接用提取的位图（清晰、精确）；
-     * 2. 否则从整页渲染图按带裁剪（题干带 / 选项带），白边裁剪后落盘（矢量图也能拿到）。
-     * 裁剪图写入 imports/{jobId}/images/{N}.png（编号接在内嵌图之后），confirm 时统一落盘。
-     * 定位失败/裁剪异常 → 占位符保留原文（预览页手动补图）。
-     */
-    private void resolvePlaceholders(List<ContentPackageQuestion> questions, List<String> pageTexts,
-                                     List<DocumentParserService.ExtractedImage> extracted,
-                                     List<AiClientService.ImageData> pageImages,
-                                     List<List<DocumentParserService.LinePos>> linePositions,
-                                     Path jobDir) {
-        if (questions.isEmpty() || pageImages == null || pageImages.isEmpty()) {
-            return;
-        }
-        //渲染参数（150 DPI，与 VISION_PAGE_DPI 一致）
-        float scale = ANALYSIS_RENDER_DPI / 72f;
-        float pageHeightPt = 842f;
-        try {
-            var img0 = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(pageImages.get(0).data()));
-            if (img0 != null) {
-                pageHeightPt = img0.getHeight() / scale;
-            }
-        } catch (Exception ignored) {
-        }
-        //页内位图区域（CTM 从底 → 渲染从顶）：pageNo → [yTop, yBot, xLeft, xRight, 全局编号]
-        Map<Integer, List<long[]>> bitmapBoxesByPage = new HashMap<>();
-        for (int i = 0; i < extracted.size(); i++) {
-            DocumentParserService.ExtractedImage e = extracted.get(i);
-            float yTop = (pageHeightPt - (e.sortY() + 60f)) * scale;
-            float yBot = (pageHeightPt - e.sortY()) * scale;
-            //图宽未知：CTM x 起，估计 200pt 宽（匹配时按 x 重叠粗筛）
-            float xLeft = e.sortX() * scale - 10;
-            float xRight = (e.sortX() + 200f) * scale;
-            bitmapBoxesByPage.computeIfAbsent(e.pageNo(), k -> new ArrayList<>())
-                    .add(new long[]{Math.round(yTop), Math.round(yBot), Math.round(xLeft), Math.round(xRight), i});
-        }
-        //源文行 → 页（content 定位）
-        String source = String.join("", pageTexts);
-        String[] lines = source.split("\\R", -1);
-        int[] lineStarts = new int[lines.length];
-        int acc = 0;
-        for (int i = 0; i < lines.length; i++) {
-            lineStarts[i] = acc;
-            acc += lines[i].length() + 1;
-        }
-        int[] pageStarts = new int[pageTexts.size() + 1];
-        acc = 0;
-        for (int i = 0; i < pageTexts.size(); i++) {
-            pageStarts[i] = acc;
-            acc += pageTexts.get(i).length();
-        }
-        pageStarts[pageTexts.size()] = acc;
-
-        int nextImageNo = extracted.size() + 1;
-        //第一步：逐题定位 content 行 y（游标推进，处理共用引导语）→ 每题 (q, page, contentY)
-        //游标键用 probe（前 8 字）：相同引导语的题（如多条"从所给的四个选项中…"）共享游标按出现顺序归位，
-        //否则独立游标会让后出现的题定位到第一处（区间重叠 → 图分配失败）
-        List<Object[]> located = new ArrayList<>(); // {ContentPackageQuestion, Integer page, Float contentY}
-        Map<String, Integer> locateCursor = new HashMap<>();
-        for (ContentPackageQuestion q : questions) {
-            String contentProbe = stripImageRefs(q.getContent() == null ? "" : q.getContent()).split("\\R", 2)[0]
-                    .replaceAll("\\s+", "");
-            int page = -1;
-            float contentY = -1;
-            if (!contentProbe.isEmpty()) {
-                String probe = contentProbe.length() > 8 ? contentProbe.substring(0, 8) : contentProbe;
-                int from = locateCursor.getOrDefault(probe, 0);
-                int bestLine = -1;
-                for (int li = from; li < lines.length; li++) {
-                    if (lines[li].replaceAll("\\s+", "").contains(probe)) {
-                        bestLine = li;
-                        locateCursor.put(probe, li + 1);
-                        break;
-                    }
-                }
-                if (bestLine >= 0) {
-                    page = pageIndexOf(pageStarts, lineStarts[bestLine]);
-                    if (page >= 0 && page < linePositions.size()) {
-                        for (DocumentParserService.LinePos lp : linePositions.get(page)) {
-                            if (lp.text().replaceAll("\\s+", "").contains(probe)) {
-                                contentY = lp.y();
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-            located.add(new Object[]{q, page, contentY});
-        }
-        //第二步：每页图形块检测（整页扫描连续非白行段 ≥ 阈值；排除页眉/页脚）
-        Map<Integer, List<float[]>> blocksByPage = new HashMap<>();
-        for (int p = 0; p < pageImages.size(); p++) {
-            try {
-                BufferedImage pageImg = javax.imageio.ImageIO.read(
-                        new java.io.ByteArrayInputStream(pageImages.get(p).data()));
-                if (pageImg != null) {
-                    blocksByPage.put(p, detectGraphBlocks(pageImg, scale, pageHeightPt,
-                            p < linePositions.size() ? linePositions.get(p) : null));
-                }
-            } catch (Exception ignored) {
-            }
-        }
-        if (log.isDebugEnabled()) {
-            for (Object[] loc : located) {
-                ContentPackageQuestion q = (ContentPackageQuestion) loc[0];
-                log.debug("resolvePlaceholders located page={} y={} probe={}", loc[1], loc[2],
-                        truncate(stripImageRefs(q.getContent() == null ? "" : q.getContent()), 26));
-            }
-        }
-        //第三步：按页分组、按 contentY 排序 → 区间 [contentY_i, contentY_{i+1}) → 块归属
-        Map<Integer, List<Object[]>> byPage = new LinkedHashMap<>();
-        for (Object[] loc : located) {
-            int page = (Integer) loc[1];
-            if (page >= 0) {
-                byPage.computeIfAbsent(page, k -> new ArrayList<>()).add(loc);
-            }
-        }
-        for (Map.Entry<Integer, List<Object[]>> entry : byPage.entrySet()) {
-            int page = entry.getKey();
-            List<Object[]> pageQs = entry.getValue();
-            pageQs.sort((a, b) -> Float.compare((Float) a[2], (Float) b[2]));
-            List<float[]> blocks = blocksByPage.getOrDefault(page, List.of());
-            //下一页第一题 contentY（跨页归属用：页底题的图可能在下一页顶部）
-            float nextFirstY = -1;
-            List<Object[]> nextPageQs = byPage.get(page + 1);
-            if (nextPageQs != null && !nextPageQs.isEmpty()) {
-                float minY = Float.MAX_VALUE;
-                for (Object[] nq : nextPageQs) {
-                    minY = Math.min(minY, (Float) nq[2]);
-                }
-                nextFirstY = minY;
-            }
-            for (int i = 0; i < pageQs.size(); i++) {
-                ContentPackageQuestion q = (ContentPackageQuestion) pageQs.get(i)[0];
-                float startY = (Float) pageQs.get(i)[2];
-                float endY = i + 1 < pageQs.size() ? (Float) pageQs.get(i + 1)[2] : pageHeightPt - 10;
-                //该题块 = 中心在 [startY, endY) 的图形块（y 排序）；块统一为 [yTop, yBot, xLeft, xRight]
-                List<float[]> qBlocks = new ArrayList<>();
-                for (float[] b : blocks) {
-                    float center = (b[0] + b[1]) / 2;
-                    if (center >= startY && center < endY) {
-                        qBlocks.add(new float[]{b[0], b[1], 40f, -1f, page});
-                    }
-                }
-                //跨页归属：页内最后一题且题干在页底（y > 页高-200pt）→ 收集下一页顶部块
-                //（块完全位于下一页第一题题干上方，如页 2 底部六图分类题的六边形簇在页 3 顶部；
-                //  也可能是页底题"选项图在下一页顶部"，如 Q14 的 2x2 选项图——按空壳选项归属）
-                List<float[]> crossPageBlocks = new ArrayList<>();
-                if (i == pageQs.size() - 1 && startY > pageHeightPt - 200 && nextFirstY > 0) {
-                    for (float[] b : blocksByPage.getOrDefault(page + 1, List.of())) {
-                        if (b[1] < nextFirstY - 10) {
-                            crossPageBlocks.add(new float[]{b[0], b[1], 40f, -1f, page + 1});
-                        }
-                    }
-                }
-                int shellCount = 0;
-                if (q.getOptions() != null) {
-                    for (OptionItem o : q.getOptions()) {
-                        String key = o.key() == null ? "" : o.key().trim();
-                        if (isEmptyOptionShell(o.text()) && key.matches("[A-Da-d]")) {
-                            shellCount++;
-                        }
-                    }
-                }
-                //本页无块 → 跨页块归属：有空壳选项 → 全部进选项池（页底题选项图跨页，如 Q14 的 2x2 选项图）；
-                //无空壳选项（选项是文字）→ 跨页块合并为题干图（六图分类题）
-                if (qBlocks.isEmpty() && !crossPageBlocks.isEmpty() && shellCount == 0) {
-                    qBlocks.addAll(crossPageBlocks);
-                    crossPageBlocks.clear();
-                    qBlocks.sort((a, b) -> Float.compare(a[0], b[0]));
-                }
-                //纯跨页选项场景（本页无块、有跨页块、有空壳选项）：题干图无 → 跨页块全部进选项池直接分配
-                //（跨页块自带 imgPage=page+1，切分/裁剪用正确渲染页）
-                if (qBlocks.isEmpty() && !crossPageBlocks.isEmpty() && shellCount > 0) {
-                    nextImageNo = assignOptionPool(q, crossPageBlocks, shellCount, scale, page + 1,
-                            bitmapBoxesByPage, pageImages, jobDir, nextImageNo);
-                    continue;
-                }
-                if (qBlocks.isEmpty() || q.getContent() == null) {
-                    continue;
-                }
-                //块 0 语义判定：
-                //  - 通常块 0 = 题干图（题干下方紧贴的图形区），其余块分配给空壳选项 A-D
-                //  - 但"选项全部是图"的题（如太师椅：4 张椅子图竖排，块间大间距或距题干较远）没有题干图，
-                //    块 0 实际是选项 A 的图 → 块 0 也参与选项分配
-                float[] stemBlock = qBlocks.get(0);
-                boolean firstIsOption = qBlocks.size() > 1
-                        && (qBlocks.get(1)[0] - stemBlock[1] > OPTION_VERTICAL_GAP_PT
-                        || stemBlock[0] - startY > STEM_IMAGE_FAR_GAP_PT);
-                //块顶部距题干行过远（>80pt）说明该块不属于本题（相邻图形题被漏掉时的无主块，
-                //或纯文字题下方是别题的图形区）→ 跳过防错插
-                if (stemBlock[0] - startY > STEM_IMAGE_MAX_GAP_PT) {
-                    continue;
-                }
-                //题干图 + 选项池统一处理：
-                // - 题干块可能含"题干图 + 选项图同行"（如 Q7：3D 图左侧 + 4 截面图右侧同一行）→
-                //   按列间隙切分，仅当"该题只有这一个块"（无独立选项块）且切出子块数 == 空壳选项数+1 且首块较窄时。
-                //   注意：题干图本身可能是多图连排（如 Q2 的问号序列 5 图一行、六边形簇 ①-⑥），
-                //   若题目另有独立选项块，题干块整块作为题干图，切分只用于选项块。
-                List<float[]> optionPool = new ArrayList<>();
-                if (!firstIsOption) {
-                    float[] stemCrop = stemBlock;
-                    //题干图合并近邻块（间隙 < 30pt）：跨页连续图形区（如六边形簇 ①-⑥ + 选项图 ④⑤⑥ 连排）应合并为一张题干图。
-                    //仅当无空壳选项时合并（选项是文字 = 图形区都属题干）；有空壳选项时近邻块是独立选项块，不能合并
-                    if (qBlocks.size() > 1 && shellCount == 0) {
-                        float end = stemBlock[1];
-                        int k = 1;
-                        while (k < qBlocks.size() && qBlocks.get(k)[0] - end < 30) {
-                            end = Math.max(end, qBlocks.get(k)[1]);
-                            k++;
-                        }
-                        if (k > 1) {
-                            stemCrop = new float[]{stemBlock[0], end, stemBlock[2], stemBlock[3], stemBlock[4]};
-                            for (int rm = k - 1; rm >= 1; rm--) {
-                                qBlocks.remove(rm);
-                            }
-                            log.info("题干块合并近邻块：page={} → [{} - {}]", page,
-                                    Math.round(stemCrop[0]), Math.round(stemCrop[1]));
-                        }
-                    }
-                    //题干块同行切分仅当"无独立选项块"（qBlocks 只剩题干块本身）
-                    if (shellCount > 0 && qBlocks.size() == 1) {
-                        try {
-                            BufferedImage pageImg = javax.imageio.ImageIO.read(
-                                    new java.io.ByteArrayInputStream(pageImages.get((int) stemBlock[4]).data()));
-                            if (pageImg != null) {
-                                List<float[]> slices = sliceOptionBlockByGaps(pageImg, scale, stemBlock, shellCount + 1);
-                                if (slices.size() == shellCount + 1
-                                        && (slices.get(0)[3] - slices.get(0)[2]) * scale < pageImg.getWidth() * 0.35f) {
-                                    //题干图 + 选项图同行 → 首块题干图，其余进选项池
-                                    stemCrop = new float[]{slices.get(0)[0], slices.get(0)[1], slices.get(0)[2],
-                                            slices.get(0)[3], stemBlock[4]};
-                                    for (int si = 1; si < slices.size(); si++) {
-                                        optionPool.add(new float[]{slices.get(si)[0], slices.get(si)[1],
-                                                slices.get(si)[2], slices.get(si)[3], stemBlock[4]});
-                                    }
-                                    log.info("题干块同行切分：page={} block=[{}-{}] → {} 子块（题干+{} 选项）",
-                                            page, Math.round(stemBlock[0]), Math.round(stemBlock[1]), slices.size(), shellCount);
-                                }
-                            }
-                        } catch (Exception ex) {
-                            log.warn("题干块切分失败 page={}：{}", page, ex.getMessage());
-                        }
-                    }
-                    String stemNum = cropBand(stemCrop[0], stemCrop[1], stemCrop[2], stemCrop[3], true, scale,
-                            (int) stemCrop[4], bitmapBoxesByPage, pageImages, jobDir, nextImageNo);
-                    if (stemNum != null) {
-                        log.info("题干块插入图片：page={} block=[{}-{}] num=[图片{}] content={}", page,
-                                Math.round(stemCrop[0]), Math.round(stemCrop[1]), stemNum,
-                                truncate(stripImageRefs(q.getContent()), 40));
-                        q.setContent(q.getContent() + "\n[图片" + stemNum + "]");
-                        nextImageNo = Math.max(nextImageNo, Integer.parseInt(stemNum) + 1);
-                    }
-                    for (int bi = 1; bi < qBlocks.size(); bi++) {
-                        optionPool.add(qBlocks.get(bi));
-                    }
-                } else {
-                    optionPool.addAll(qBlocks);
-                }
-                //跨页块进选项池（页底题选项图在下一页顶部；题干图无壳时已在上面并入 qBlocks）
-                optionPool.addAll(crossPageBlocks);
-                //选项池切分补充 + 分配（空壳选项 A-D 按视觉顺序；块自带 imgPage）
-                nextImageNo = assignOptionPool(q, optionPool, shellCount, scale, page,
-                        bitmapBoxesByPage, pageImages, jobDir, nextImageNo);
-            }
-        }
-    }
-
-    /**
-     * 选项池切分补充 + 分配：空壳选项 A-D 按视觉顺序取块；池不足时逐块做列间隙切分
-     * （同行 4 图并排 / 2x2 选项图只检测成一块或两块）。块为 5 元素 [yTop,yBot,xLeft,xRight,imgPage]
-     * （跨页块 imgPage = page+1）。返回更新后的 nextImageNo。
-     */
-    private int assignOptionPool(ContentPackageQuestion q, List<float[]> optionPool, int shellCount,
-                                 float scale, int fallbackPage, Map<Integer, List<long[]>> bitmapBoxesByPage,
-                                 List<AiClientService.ImageData> pageImages, Path jobDir, int nextImageNo) {
-        if (q.getOptions() == null || shellCount <= 0 || optionPool.isEmpty()) {
-            return nextImageNo;
-        }
-        //选项池不足时：逐块做列间隙切分补充（同行 4 图并排 / 2x2 选项图只检测成一块或两块）
-        if (shellCount > optionPool.size()) {
-            try {
-                int guard = 0;
-                while (shellCount > optionPool.size() && guard++ < 8) {
-                    //选最宽（或 x 全宽）的块切分
-                    int widestIdx = -1;
-                    float widestW = -1;
-                    for (int pi = 0; pi < optionPool.size(); pi++) {
-                        float[] b = optionPool.get(pi);
-                        float bw = b[3] < 0 ? Float.MAX_VALUE : (b[3] - b[2]);
-                        if (bw > widestW) {
-                            widestW = bw;
-                            widestIdx = pi;
-                        }
-                    }
-                    if (widestIdx < 0) {
-                        break;
-                    }
-                    float[] widest = optionPool.get(widestIdx);
-                    BufferedImage pageImg = javax.imageio.ImageIO.read(
-                            new java.io.ByteArrayInputStream(pageImages.get((int) widest[4]).data()));
-                    if (pageImg == null) {
-                        break;
-                    }
-                    List<float[]> sliced = sliceOptionBlockByGaps(pageImg, scale, widest, shellCount);
-                    if (sliced.size() <= 1) {
-                        break;
-                    }
-                    optionPool.remove(widestIdx);
-                    for (float[] s : sliced) {
-                        optionPool.add(widestIdx, new float[]{s[0], s[1], s[2], s[3], widest[4]});
-                        widestIdx++;
-                    }
-                }
-                if (shellCount <= optionPool.size()) {
-                    log.info("选项切分完成：{} 份（列间隙分析）", optionPool.size());
-                }
-            } catch (Exception ex) {
-                log.warn("选项列间隙切分失败：{}", ex.getMessage());
-            }
-        }
-        //选项分配（空壳选项 A-D 按视觉顺序）
-        log.info("选项分配：content={} pool={} shell={}", truncate(stripImageRefs(q.getContent()), 25),
-                optionPool.size(), shellCount);
-        List<OptionItem> fixed = new ArrayList<>();
-        int poolIdx = 0;
-        for (OptionItem o : q.getOptions()) {
-            String key = o.key() == null ? "" : o.key().trim();
-            if (isEmptyOptionShell(o.text()) && key.matches("[A-Da-d]")) {
-                if (poolIdx < optionPool.size()) {
-                    float[] optBlock = optionPool.get(poolIdx);
-                    String num = cropBand(optBlock[0], optBlock[1], optBlock[2], optBlock[3], false, scale,
-                            (int) optBlock[4], bitmapBoxesByPage, pageImages, jobDir, nextImageNo);
-                    if (num != null) {
-                        fixed.add(new OptionItem(o.key(), "[图片" + num + "]"));
-                        nextImageNo = Math.max(nextImageNo, Integer.parseInt(num) + 1);
-                        poolIdx++;
-                        continue;
-                    }
-                }
-                fixed.add(o);
-            } else {
-                fixed.add(o);
-            }
-        }
-        q.setOptions(fixed);
-        return nextImageNo;
-    }
-
-    /**
-     * 同行选项图 x 切分（渲染图列间隙分析）：块内统计每列非白像素数，
-     * 列非白 < 带高 15% 且连续 ≥4px 的列为"间隙"，用间隙中点切分块 → 子块 [yTop,yBot,xLeft,xRight]。
-     * 注意：不能用 PDF 文本层的选项字母 x（实测 TextPosition 坐标与渲染位置存在矩阵变换偏移）。
-     */
-    private List<float[]> sliceOptionBlockByGaps(BufferedImage pageImg, float scale, float[] block, int maxParts) {
-        int yTop = Math.round(block[0] * scale);
-        int yBot = Math.min(Math.round(block[1] * scale), pageImg.getHeight());
-        int w = pageImg.getWidth();
-        int h = yBot - yTop;
-        if (h <= 0 || w <= 0) {
-            return List.of();
-        }
-        int[] colCount = new int[w];
-        for (int y = yTop; y < yBot; y++) {
-            for (int x = 0; x < w; x++) {
-                int rgb = pageImg.getRGB(x, y);
-                int r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
-                if (r < 240 || g < 240 || b < 240) {
-                    colCount[x]++;
-                }
-            }
-        }
-        //间隙段：列非白数 < 带高 15%，连续 ≥ 4px；合并相邻间隙（中间非间隙段 < 8px——图间装饰线打断的间隙）
-        List<int[]> gaps = new ArrayList<>();
-        boolean inGap = false;
-        int gs = 0;
-        int threshold = Math.max(2, (int) (h * 0.15));
-        for (int x = 0; x < w; x++) {
-            boolean gap = colCount[x] < threshold;
-            if (gap && !inGap) {
-                inGap = true;
-                gs = x;
-            } else if (!gap && inGap) {
-                if (x - gs >= 4) {
-                    gaps.add(new int[]{gs, x - 1});
-                }
-                inGap = false;
-            }
-        }
-        if (inGap && w - gs >= 4) {
-            gaps.add(new int[]{gs, w - 1});
-        }
-        List<int[]> mergedGaps = new ArrayList<>();
-        for (int[] g : gaps) {
-            if (!mergedGaps.isEmpty() && g[0] - mergedGaps.get(mergedGaps.size() - 1)[1] < 8) {
-                mergedGaps.get(mergedGaps.size() - 1)[1] = g[1];
-            } else {
-                mergedGaps.add(new int[]{g[0], g[1]});
-            }
-        }
-        //内容区 = 去掉左右边缘空白间隙；仅内部间隙（两侧都有内容）参与切分
-        int contentL = 0;
-        if (!mergedGaps.isEmpty() && mergedGaps.get(0)[0] <= 0) {
-            contentL = mergedGaps.get(0)[1] + 1;
-        }
-        int contentR = w - 1;
-        if (!mergedGaps.isEmpty() && mergedGaps.get(mergedGaps.size() - 1)[1] >= w - 1) {
-            contentR = mergedGaps.get(mergedGaps.size() - 1)[0] - 1;
-        }
-        if (contentR - contentL < 40) {
-            return List.of();
-        }
-        //间隙中点 → 子块边界
-        List<Integer> bounds = new ArrayList<>();
-        bounds.add(contentL);
-        for (int[] g : mergedGaps) {
-            if (g[0] > contentL && g[1] < contentR) {
-                bounds.add((g[0] + g[1]) / 2);
-            }
-        }
-        bounds.add(contentR);
-        List<float[]> out = new ArrayList<>();
-        for (int i = 0; i + 1 < bounds.size() && out.size() < maxParts; i++) {
-            int x1 = bounds.get(i);
-            int x2 = bounds.get(i + 1);
-            if (x2 - x1 >= 40) {
-                out.add(new float[]{block[0], block[1], x1 / scale, x2 / scale});
-            }
-        }
-        return out;
-    }
-
-    /**
-     * 整页图形块检测：扫描渲染图，找"连续非白行段"（y 步长 2，x 全采样）≥ 阈值 的段。
-     * 文字行段 ~12px（行间空白分隔），图形块 60-120px；排除页眉（y<70pt）页脚（y>页高-50pt）。
-     * 文字行覆盖的 y（LinePos 坐标 ± 缓冲）直接跳过——防止"密集文字段落"（题干+选项连排、
-     * 行间空隙 < 采样步长）被误判成图形块；图形内部的文字标签（①②③/A/B/C/D）被跳过不影响图形主体。
-     * 返回块列表 [yTopPt, yBotPt]（按 y 升序）。
-     */
-    private List<float[]> detectGraphBlocks(BufferedImage pageImg, float scale, float pageHeightPt,
-                                            List<DocumentParserService.LinePos> textLines) {
-        //文字行覆盖区间（pt，从顶）：行高 + 上下缓冲（行距 ~7.7pt，缓冲取 ±3pt 防相邻行区间重叠吞掉图形）
-        float[][] textRanges = null;
-        if (textLines != null && !textLines.isEmpty()) {
-            List<float[]> ranges = new ArrayList<>();
-            for (DocumentParserService.LinePos lp : textLines) {
-                float top = lp.y() - 3f;
-                float bot = lp.y() + lp.height() + 3f;
-                if (bot > top) {
-                    ranges.add(new float[]{top, bot});
-                }
-            }
-            ranges.sort((a, b) -> Float.compare(a[0], b[0]));
-            //合并重叠区间（相邻行行距 < 缓冲时连成一段）
-            List<float[]> mergedRanges = new ArrayList<>();
-            for (float[] r : ranges) {
-                if (!mergedRanges.isEmpty() && r[0] - mergedRanges.get(mergedRanges.size() - 1)[1] < 2) {
-                    float[] last = mergedRanges.get(mergedRanges.size() - 1);
-                    last[1] = Math.max(last[1], r[1]);
-                } else {
-                    mergedRanges.add(new float[]{r[0], r[1]});
-                }
-            }
-            textRanges = mergedRanges.toArray(new float[0][]);
-        }
-        List<float[]> blocks = new ArrayList<>();
-        int run = 0, runStart = 0;
-        for (int y = 0; y < pageImg.getHeight(); y += 2) {
-            float yPt = y / scale;
-            if (textRanges != null && inTextRange(textRanges, yPt)) {
-                //文字行覆盖：视为空白（不参与 run，也断开 run）
-                if (run * 2 >= IMAGE_MIN_RUN_PX) {
-                    blocks.add(new float[]{runStart / scale, y / scale});
-                }
-                run = 0;
-                continue;
-            }
-            boolean has = false;
-            for (int x = 0; x < pageImg.getWidth(); x++) {
-                int rgb = pageImg.getRGB(x, y);
-                int r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
-                if (r < 220 || g < 220 || b < 220) {
-                    has = true;
-                    break;
-                }
-            }
-            if (has) {
-                if (run == 0) {
-                    runStart = y;
-                }
-                run++;
-            } else {
-                if (run * 2 >= IMAGE_MIN_RUN_PX) {
-                    blocks.add(new float[]{runStart / scale, (y) / scale});
-                }
-                run = 0;
-            }
-        }
-        if (run * 2 >= IMAGE_MIN_RUN_PX) {
-            blocks.add(new float[]{runStart / scale, pageImg.getHeight() / scale});
-        }
-        //排除页眉/页脚块
-        List<float[]> filtered = new ArrayList<>();
-        for (float[] b : blocks) {
-            if (b[1] > 70 && b[0] < pageHeightPt - 50) {
-                filtered.add(b);
-            }
-        }
-        //合并相邻块（间隙 < 12pt：图形块间的小空隙）
-        List<float[]> merged = new ArrayList<>();
-        for (float[] b : filtered) {
-            if (!merged.isEmpty() && b[0] - merged.get(merged.size() - 1)[1] < 12) {
-                float[] last = merged.get(merged.size() - 1);
-                last[1] = Math.max(last[1], b[1]);
-            } else {
-                merged.add(new float[]{b[0], b[1]});
-            }
-        }
-        return merged;
-    }
-
-    /** yPt 是否落在任一文字行覆盖区间内 */
-    private boolean inTextRange(float[][] textRanges, float yPt) {
-        //区间按 y 升序，二分查找
-        int lo = 0, hi = textRanges.length - 1;
-        while (lo <= hi) {
-            int mid = (lo + hi) >>> 1;
-            if (yPt < textRanges[mid][0]) {
-                hi = mid - 1;
-            } else if (yPt > textRanges[mid][1]) {
-                lo = mid + 1;
-            } else {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /** 图形块占用键（同页多题共用相邻簇时，已配给前题的块不重复认领） */
-    private static String blockKey(float[] b) {
-        return String.format("%.0f_%.0f", b[0], b[1]);
-    }
-
-    /** 选项图组网格拆分：x/y 暗像素投影聚类出网格单元（行优先序），1x4 / 2x2 排版通用。
-     *  返回每个单元 {top, bot, left, right}（pt）；聚类不足 2 单元时返回空（调用方退化为 2x2 四分）。 */
-    private List<float[]> detectGridCells(BufferedImage img, float scale, float topPt, float botPt,
-                                          float leftPt, float rightPt, int need) {
-        int x0 = Math.max(0, Math.round(leftPt * scale));
-        int x1 = Math.min(img.getWidth(), Math.round(rightPt * scale));
-        int y0 = Math.max(0, Math.round(topPt * scale));
-        int y1 = Math.min(img.getHeight(), Math.round(botPt * scale));
-        if (x1 - x0 < 30 || y1 - y0 < 24) {
-            return List.of();
-        }
-        //多档间隙阈值尝试（图间空隙可能小于整页 1/40，逐档收紧直到格数够用）
-        List<int[]> bestCols = null;
-        List<int[]> bestRows = null;
-        int bestCells = 0;
-        for (int denom : new int[]{20, 40, 80, 160, 320}) {
-            int gap = Math.max(4, (x1 - x0) / denom);
-            List<int[]> cols = clusterProjection(img, x0, x1, y0, y1, true, gap);
-            List<int[]> rows = clusterProjection(img, y0, y1, x0, x1, false, gap);
-            if (cols.isEmpty() || rows.isEmpty()) {
-                continue;
-            }
-            int cells = Math.min(cols.size() * rows.size(), need);
-            if (cells > bestCells) {
-                bestCells = cells;
-                bestCols = cols;
-                bestRows = rows;
-            }
-            if (cells >= need) {
-                break; // 已够用
-            }
-        }
-        if (bestCols == null || bestRows == null || bestCells < 2) {
-            return List.of();
-        }
-        //聚类不足 need：图与图紧贴（无白色间隙）时投影只出 r×c 格 → 把较宽维度均分补足
-        //（如 1×4 排版的图两两紧贴 → 2 列各均分成 2 → 4 格，行优先序仍为 A B C D）
-        int r = bestRows.size();
-        int c = bestCols.size();
-        if (r * c < need) {
-            int factor = Math.max(2, (int) Math.ceil((double) need / (r * c)));
-            if (c >= r) {
-                List<int[]> finer = new ArrayList<>();
-                for (int[] col : bestCols) {
-                    int w = col[1] - col[0];
-                    for (int k = 0; k < factor; k++) {
-                        finer.add(new int[]{col[0] + w * k / factor, col[0] + w * (k + 1) / factor});
-                    }
-                }
-                bestCols = finer;
-            } else {
-                List<int[]> finer = new ArrayList<>();
-                for (int[] row : bestRows) {
-                    int h = row[1] - row[0];
-                    for (int k = 0; k < factor; k++) {
-                        finer.add(new int[]{row[0] + h * k / factor, row[0] + h * (k + 1) / factor});
-                    }
-                }
-                bestRows = finer;
-            }
-        }
-        List<float[]> cells = new ArrayList<>();
-        for (int[] row : bestRows) {
-            for (int[] col : bestCols) {
-                cells.add(new float[]{row[0] / scale, row[1] / scale, col[0] / scale, col[1] / scale});
-                if (cells.size() >= need) {
-                    return cells;
-                }
-            }
-        }
-        return cells;
-    }
-
-    /** 沿 a 轴的暗像素投影聚类：axisX=true 聚类 x 列（每列在 [b0,b1] 内是否有暗像素），否则聚类 y 行。
-     *  合并窄间隙（图形内部笔画空隙），保留大间隙（图与图之间），过滤过窄噪声单元并外扩 2px 白边。 */
-    private List<int[]> clusterProjection(BufferedImage img, int a0, int a1, int b0, int b1, boolean axisX,
-                                          int gapThreshold) {
-        List<int[]> runs = new ArrayList<>();
-        int runStart = -1, runEnd = -1;
-        for (int a = a0; a < a1; a++) {
-            boolean dark = false;
-            for (int b = b0; b < b1; b++) {
-                int rgb = axisX ? img.getRGB(a, b) : img.getRGB(b, a);
-                int r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, bl = rgb & 0xFF;
-                if (r < 220 || g < 220 || bl < 220) {
-                    dark = true;
-                    break;
-                }
-            }
-            if (dark) {
-                if (runStart < 0) {
-                    runStart = a;
-                }
-                runEnd = a;
-            } else if (runStart >= 0) {
-                runs.add(new int[]{runStart, runEnd + 1});
-                runStart = -1;
-            }
-        }
-        if (runStart >= 0) {
-            runs.add(new int[]{runStart, runEnd + 1});
-        }
-        List<int[]> merged = new ArrayList<>();
-        for (int[] run : runs) {
-            if (!merged.isEmpty() && run[0] - merged.get(merged.size() - 1)[1] < gapThreshold) {
-                int[] last = merged.get(merged.size() - 1);
-                last[1] = Math.max(last[1], run[1]);
-            } else {
-                merged.add(new int[]{run[0], run[1]});
-            }
-        }
-        int minWidth = Math.max(10, (a1 - a0) / 60);
-        List<int[]> out = new ArrayList<>();
-        for (int[] run : merged) {
-            if (run[1] - run[0] >= minWidth) {
-                out.add(new int[]{Math.max(a0, run[0] - 2), Math.min(a1, run[1] + 2)});
-            }
-        }
-        return out;
-    }
-
-    /** 带内取图：位图重叠（allowBitmap）或裁剪（块已确认有图，直接裁剪 + 白边） */
-    private String cropBand(float topPt, float botPt, float leftPt, float rightPt, boolean allowBitmap,
-                            float scale, int page, Map<Integer, List<long[]>> bitmapBoxesByPage,
-                            List<AiClientService.ImageData> pageImages, Path jobDir, int nextImageNo) {
-        if (page < 0 || page >= pageImages.size() || botPt <= topPt) {
-            return null;
-        }
-        int yTop = Math.max(0, Math.round(topPt * scale));
-        int yBot = Math.round(botPt * scale);
-        int xLeft = Math.max(0, Math.round(leftPt * scale));
-        int xRight = rightPt < 0 ? Integer.MAX_VALUE : Math.round(rightPt * scale);
-        //位图优先（独立块场景：一行一图 y 不重叠）
-        if (allowBitmap) {
-            List<long[]> boxes = bitmapBoxesByPage.get(page);
-            if (boxes != null) {
-                long[] best = null;
-                long bestOverlap = -1;
-                for (long[] b : boxes) {
-                    long overlapY = Math.min(b[1], yBot) - Math.max(b[0], yTop);
-                    long overlapX = Math.min(b[3], xRight) - Math.max(b[2], xLeft);
-                    if (overlapY > 0 && overlapX > 0 && overlapY > bestOverlap) {
-                        best = b;
-                        bestOverlap = overlapY;
-                    }
-                }
-                if (best != null) {
-                    return String.valueOf((int) best[4] + 1);
-                }
-            }
-        }
-        //裁剪 + 白边
-        try {
-            BufferedImage pageImg = javax.imageio.ImageIO.read(
-                    new java.io.ByteArrayInputStream(pageImages.get(page).data()));
-            if (pageImg == null) {
-                return null;
-            }
-            yBot = Math.min(yBot, pageImg.getHeight());
-            int x1 = Math.min(xLeft, pageImg.getWidth() - 1);
-            int x2 = Math.min(xRight == Integer.MAX_VALUE ? pageImg.getWidth() : xRight, pageImg.getWidth());
-            int w = x2 - x1 - 10;
-            if (yBot <= yTop || w <= 0) {
-                return null;
-            }
-            BufferedImage trimmed = trimWhite(pageImg.getSubimage(x1, yTop, w, yBot - yTop));
-            if (trimmed == null) {
-                return null;
-            }
-            byte[] png = toPngBytes(trimmed);
-            java.nio.file.Files.write(jobDir.resolve("images").resolve(nextImageNo + ".png"), png);
-            return String.valueOf(nextImageNo);
-        } catch (Exception e) {
-            log.warn("块裁剪失败 page={} block=[{}-{}]：{}", page, topPt, botPt, e.getMessage());
-            return null;
-        }
-    }
-
-    /** 空壳选项：模型输出 "A." / "A" / 空（无实际内容，可被图片替换） */
-    private boolean isEmptyOptionShell(String text) {
-        if (text == null) {
-            return true;
-        }
-        String t = text.trim();
-        return t.isEmpty() || t.matches("[A-Da-d][.．、]?");
-    }
-
-
-    /**
-     * 带内图片检测（后端版式分析，不依赖模型位置判断）：
-     * 1. 位图重叠（allowBitmap 时）→ 返回位图编号；
-     * 2. 否则"最长连续非白行段" ≥ 阈值 → 渲染图裁剪 + 白边裁剪落盘 → 新编号；
-     *    （形态指标：文字行段 ~12px，图形块 ~60-120px——密度阈值无法区分"多行文字"与"图形"）
-     * 3. 否则 null（无图）。
-     */
-    private String detectImageInBand(float topPt, float botPt, float leftPt, float rightPt, boolean allowBitmap,
-                                     float scale, int page, Map<Integer, List<long[]>> bitmapBoxesByPage,
-                                     List<AiClientService.ImageData> pageImages, Path jobDir,
-                                     int nextImageNo, float densityThreshold, boolean useCoverage) {
-        if (page < 0 || page >= pageImages.size()) {
-            return null;
-        }
-        int yTop = Math.max(0, Math.round(topPt * scale));
-        int yBot = Math.round(botPt * scale);
-        int xLeft = Math.max(0, Math.round(leftPt * scale));
-        int xRight = rightPt < 0 ? Integer.MAX_VALUE : Math.round(rightPt * scale);
-        //1. 位图优先（仅独立选项行/题干带：一行一图 y 不重叠）
-        if (allowBitmap) {
-            List<long[]> boxes = bitmapBoxesByPage.get(page);
-            if (boxes != null) {
-                long[] best = null;
-                long bestOverlap = -1;
-                for (long[] b : boxes) {
-                    long overlapY = Math.min(b[1], yBot) - Math.max(b[0], yTop);
-                    long overlapX = Math.min(b[3], xRight) - Math.max(b[2], xLeft);
-                    if (overlapY > 0 && overlapX > 0 && overlapY > bestOverlap) {
-                        best = b;
-                        bestOverlap = overlapY;
-                    }
-                }
-                if (best != null) {
-                    return String.valueOf((int) best[4] + 1);
-                }
-            }
-        }
-        //2. 渲染图形态检测 + 裁剪
-        try {
-            BufferedImage pageImg = javax.imageio.ImageIO.read(
-                    new java.io.ByteArrayInputStream(pageImages.get(page).data()));
-            if (pageImg == null) {
-                return null;
-            }
-            yBot = Math.min(yBot, pageImg.getHeight());
-            int x1 = Math.min(xLeft, pageImg.getWidth() - 1);
-            int x2 = Math.min(xRight == Integer.MAX_VALUE ? pageImg.getWidth() : xRight, pageImg.getWidth());
-            int w = x2 - x1 - 10;
-            if (yBot <= yTop || w <= 0) {
-                return null;
-            }
-            BufferedImage band = pageImg.getSubimage(x1, yTop, w, yBot - yTop);
-            //最长连续非白行段（px）：文字行 ~12px，图形块 ~60-120px
-            int run = maxNonWhiteRun(band, 220);
-            log.info("带内检测 page={} band=[{}-{}]pt run={}px x=[{}-{}]px", page,
-                    Math.round(topPt), Math.round(botPt), run, x1, x2);
-            if (run < IMAGE_MIN_RUN_PX) {
-                return null;
-            }
-            BufferedImage trimmed = trimWhite(band);
-            if (trimmed == null) {
-                return null;
-            }
-            int no = nextImageNo;
-            byte[] png = toPngBytes(trimmed);
-            java.nio.file.Files.write(jobDir.resolve("images").resolve(no + ".png"), png);
-            return String.valueOf(no);
-        } catch (Exception e) {
-            log.warn("带内图片检测失败 page={} band=[{}-{}]：{}", page, topPt, botPt, e.getMessage());
-            return null;
-        }
-    }
-
-    /** 图形块最小连续非白行段（渲染像素；150DPI 下文字行 ~12px、图形块 60-120px） */
-    private static final int IMAGE_MIN_RUN_PX = 36;
-
-    /** 最长连续"有非白像素的行"段（px）；x 全采样（细线条图形 1-3px，大步长会漏检） */
-    private int maxNonWhiteRun(BufferedImage img, int threshold) {
-        int run = 0, maxRun = 0;
-        for (int y = 0; y < img.getHeight(); y += 2) {
-            boolean has = false;
-            for (int x = 0; x < img.getWidth(); x++) {
-                int rgb = img.getRGB(x, y);
-                int r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
-                if (r < threshold || g < threshold || b < threshold) {
-                    has = true;
-                    break;
-                }
-            }
-            if (has) {
-                run++;
-            } else {
-                if (run > maxRun) {
-                    maxRun = run;
-                }
-                run = 0;
-            }
-        }
-        if (run > maxRun) {
-            maxRun = run;
-        }
-        return maxRun * 2;
-    }
-
-    /** 题号行判定（行坐标用）：孤立题号行（"11."）、行首题号（"11. 题干…"）或行尾题号（"宜居带：液态水13."）；排除小数/答案行 */
-    private boolean isNumberLine(String text) {
-        if (text == null) {
-            return false;
-        }
-        String t = text.trim();
-        if (t.matches("^\\d{1,3}\\s*[.．、)）]\\s*$")) {
-            return true;
-        }
-        if (t.matches("^\\d{1,3}\\s*[.．、)）].*") && !isDecimalLikeLine(t)
-                && !ANSWER_LINE.matcher(t).matches()) {
-            return true;
-        }
-        //行尾题号："宜居带：液态水13." / "…规律性：14."（排除小数结尾 "…15.8" 与答案行 "1.B"）
-        if (ANSWER_LINE.matcher(t).matches()) {
-            return false;
-        }
-        return t.matches(".*\\d{1,2}\\s*[.．、)）]\\s*$");
-    }
-
-    /** 白边裁剪：按非白像素边界框裁剪（容忍带定位偏差，去除空白边缘） */
-    private BufferedImage trimWhite(BufferedImage img) {
-        int w = img.getWidth(), h = img.getHeight();
-        int minX = w, minY = h, maxX = -1, maxY = -1;
-        for (int y = 0; y < h; y++) {
-            for (int x = 0; x < w; x++) {
-                int rgb = img.getRGB(x, y);
-                int r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
-                if (r < 250 || g < 250 || b < 250) {
-                    if (x < minX) minX = x;
-                    if (x > maxX) maxX = x;
-                    if (y < minY) minY = y;
-                    if (y > maxY) maxY = y;
-                }
-            }
-        }
-        if (maxX < 0) {
-            return null; //全白
-        }
-        int bw = maxX - minX + 1, bh = maxY - minY + 1;
-        if (bw < 4 || bh < 4) {
-            return null; //太小（噪声）
-        }
-        return img.getSubimage(minX, minY, bw, bh);
-    }
-
-    private byte[] toPngBytes(BufferedImage img) throws java.io.IOException {
-        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
-        javax.imageio.ImageIO.write(img, "png", out);
-        return out.toByteArray();
-    }
 
     // ==================== 视觉分页路径（思考模式 + 单文件 PDF 有文本层） ====================
 
@@ -4113,11 +2207,6 @@ public class AiImportService {
         return textStructure.imageChunkNumbers(chunkText);
     }
 
-    /** 剥离 AI 输出中的图片编号标记（[图片N]）——文本定位/去重时用（标记不在源文文本中） */
-    private String stripImageRefs(String text) {
-        return textStructure.stripImageRefs(text);
-    }
-
     // ==================== 工具 ====================
 
     private AiImportJob findByIdOrThrow(Long id) {
@@ -4138,18 +2227,10 @@ public class AiImportService {
         return "TXT";
     }
 
-    private boolean isDocxType(String fileName) {
-        return fileName != null && fileName.toLowerCase().endsWith(".docx");
-    }
-
     private String fileBaseName(String fileName) {
         int dot = fileName.lastIndexOf('.');
         String base = dot > 0 ? fileName.substring(0, dot) : fileName;
         return base.length() > 100 ? base.substring(0, 100) : base;
     }
 
-    private String truncate(String s, int max) {
-        if (s == null) return null;
-        return s.length() <= max ? s : s.substring(0, max);
-    }
 }
