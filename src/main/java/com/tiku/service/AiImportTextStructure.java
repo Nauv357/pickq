@@ -233,7 +233,8 @@ public class AiImportTextStructure {
     }
 
     public String stripImageRefs(String text) {
-        return text == null ? null : text.replaceAll("\\[图片\\d+\\]", " ");
+        //实现集中在 AiImportTexts（主服务编排与版面算法两侧共用同一份，避免两处实现漂移）
+        return AiImportTexts.stripImageRefs(text);
     }
 
     public int pageIndexOf(int[] pageStarts, int position) {
