@@ -458,19 +458,35 @@ web/
 
 | # | 文件 | 行数 | 职责 | 建议 |
 | --- | --- | --- | --- | --- |
-| 1 | `service/AiImportService.java` | **4155** | AI 导入高层编排、任务生命周期、确认入库与 PDF 版面算法簇 | 已迁出任务文件、结果编解码、提示词、文档解析、文本结构、源文证据、输出解析、公式、答案、图片引用、视觉质量与缺页补跑组件（新组件合计约 2900 行）；下一步仅在引入不可变 `VisionLayoutContext` 后整体迁移 PDF 坐标/裁剪算法，避免拆出大量可变参数 |
-| 2 | `service/MineruParseService.java` | 1259 | MinerU 客户端：上传、轮询、下载 zip、`content_list_v2.json` → 增强文本（表格 HTML、公式 LaTeX、图片提取） | 建议拆「HTTP 客户端 / 结果重建 / 图片与素材提取」三层 |
-| 3 | `service/DocumentParserService.java` | 814 | 本地解析：txt/md/docx(POI)/pdf(PDFBox)/图片；PDF 文本层清洗（页眉页脚、折行、孤立题号） | 建议按格式拆（`DocxParser` / `PdfParser` / `ImageParser`），清洗规则单独成类并配测试 |
-| 4 | `service/CenterPublishService.java` | 304 | 发布/体检/补传/我的作品的业务编排、临时文件与本地校验 | 已由 `CenterHttpClient` 统一流式 HTTP/multipart 与远端错误解析，由 `CenterUrlPolicy` 统一地址规则；`CenterPublishController` 仅保留端点映射 |
-| 5 | `service/StudyRecordService.java` | 611 | 提交作答、判题、错题口径、进度、复习调度、记录导入导出与复习重建 | 建议把「复习调度」与「记录文件导入导出」拆出（两者都可独立测试） |
+| 1 | `service/MineruParseService.java` | 1259 | MinerU 客户端：上传、轮询、下载 zip、`content_list_v2.json` → 增强文本（表格 HTML、公式 LaTeX、图片提取） | 建议拆「HTTP 客户端 / 结果重建 / 图片与素材提取」三层 |
+| 2 | `service/AiImportModelCallService.java` | **1128** | AI 导入的三条模型调用路径（文本分块 `chatChunked` / 视觉单次 `chatVisionSingle` / 视觉分页 `chatVisionPages`）：分块规划、并行调用、重试与合并 | 2026-09-12 从 `AiImportService` 迁出；若继续拆，建议按「文本路径 / 视觉路径」分两个类 |
+| 3 | `service/AiImportService.java` | **947** | AI 导入**编排**：`executeJob`（310 行流程编排）、`confirmImport`（确认入库）、`createJob`（建任务并提交执行器）、预览校验、控制器门面 | 已是编排层：新增业务规则请落在对应协作组件，不要再往这里堆 |
+| 4 | `service/AiImportVisionLayoutService.java` | **905** | PDF 版面算法：图形块检测、坐标换算、按带裁剪、选项格切分、占位符→图片分配 | 2026-09-12 从 `AiImportService` 迁出；只做版面计算（不读任务表、不发 AI 请求），可脱离模型单测 |
+| 5 | `service/DocumentParserService.java` | 814 | 本地解析：txt/md/docx(POI)/pdf(PDFBox)/图片；PDF 文本层清洗（页眉页脚、折行、孤立题号） | 建议按格式拆（`DocxParser` / `PdfParser` / `ImageParser`），清洗规则单独成类并配测试 |
 | 6 | `service/ContentPackageService.java` | 613 | 导入四态决策、导出身份/版本决策、checksum 规范化、图片收集、材料映射 | 建议把「checksum 规范化」与「导出决策」拆出，便于单测（当前只能整类测） |
-| 7 | `service/PracticeSessionService.java` | 548 | 六种模式抽题、材料整组、会话详情、交卷报告与用时统计 | 建议把「抽题策略」按 mode 拆成策略类 |
-| 8 | `service/QuestionService.java` | 429 | 题目 CRUD、判题、收藏、图片引用替换、AI 解析（含并发槽） | 建议把 AI 解析相关拆出（它与题目 CRUD 无耦合） |
-| 9 | `controller/CenterAuthController.java` | 345 | 登录/注册/登出/me/status + GitHub 回环登录 + 内联 HTML 结果页（HTTP 转发已下沉到 `CenterHttpClient`） | 建议把 HTML 结果页模板拆出 |
+| 7 | `service/StudyRecordService.java` | 611 | 提交作答、判题、错题口径、进度、复习调度、记录导入导出与复习重建 | 建议把「复习调度」与「记录文件导入导出」拆出（两者都可独立测试） |
+| 8 | `service/PracticeSessionService.java` | 548 | 六种模式抽题、材料整组、会话详情、交卷报告与用时统计 | 建议把「抽题策略」按 mode 拆成策略类 |
+| 9 | `service/QuestionService.java` | 429 | 题目 CRUD、判题、收藏、图片引用替换、AI 解析（含并发槽） | 建议把 AI 解析相关拆出（它与题目 CRUD 无耦合） |
 | 10 | `service/BankMergeService.java` | 401 | 多库合并：题目/材料/图片复制 + 血缘 + 题号重排 | 可接受；若继续增长可把「图片复制」下沉到 `ImageStorageService` |
 
-> 紧随其后：`MdQuestionParser.java` 340、`ContentPackageInspector.java` 335、`StatsService.java` 332、
-> `QuestionBankService.java` 321、`AnswerFillService.java` 307、`controller/CenterProxyController.java` 144。
+> 紧随其后：`controller/CenterAuthController.java` 345、`service/MdQuestionParser.java` 340、
+> `service/ContentPackageInspector.java` 335、`service/StatsService.java` 332、`service/QuestionBankService.java` 321、
+> `service/AnswerFillService.java` 307、`service/CenterPublishService.java` 304、`service/AiImportJobLifecycleService.java` 281。
+
+### 6.1.1 AI 导入链路的分层（2026-09-12 拆分后）
+
+| 类 | 行数 | 只做这件事 |
+| --- | --- | --- |
+| `AiImportService` | 947 | 编排：建任务 → 跑流程 → 确认入库 + 控制器门面 |
+| `AiImportModelCallService` | 1128 | 调模型：分块、并行、重试、合并（三条路径） |
+| `AiImportVisionLayoutService` | 905 | 版面计算：图形块/坐标/裁剪/选项切分 |
+| `AiImportJobLifecycleService` | 281 | 任务行与临时文件的生命周期、取消语义、SSE 快照 |
+| `AiImportJobStorageService` | 237 | 任务目录/输入文件/图片素材落盘与清理 |
+| `AiImportTextStructure` / `AiImportTexts` | 264 / 44 | 文本结构分析（题号、切块、修剪）与纯文本小工具 |
+| `AiImportPromptFactory` / `AiImportResultParser` / `AiImportResultCodec` | 291 / 178 / 71 | 提示词、模型输出解析、结果序列化 |
+| `AiImportAnswerService` / `AiImportFormulaService` / `AiImportSourceTextService` | 316 / 264 / 419 | 答案证据与补充、公式转写、源文定位回填 |
+| `AiImportVisionQualityService` / `AiImportVisionMissingPageService` / `AiImportImageReferenceService` | 145 / 177 / 81 | 视觉结果去重与残题过滤、缺页补跑、临时图→正式图引用 |
+| `AiImportDocumentPipeline` / `AiImportFailureClassifier` | 190 / 74 | 文档解析与 MinerU 回退、失败分类 |
 
 ### 6.2 前端（`frontend/src/**`，前 10）
 

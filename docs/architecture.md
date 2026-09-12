@@ -422,13 +422,13 @@ sequenceDiagram
 | 关键常量 / 行为 | 值 | 依据 |
 | --- | --- | --- |
 | 任务并发 | `aiImportExecutor` core=max=1、queue=20（避免并发触发模型限流）；`aiChunkExecutor` 固定 3 路 daemon | `AsyncConfig.java:16-37` |
-| 文本分块目标 | `CHUNK_TARGET_QUESTIONS = 12`、单块最多 `MAX_CHUNK_IMAGES = 10` 张图、最多 `CHUNK_MAX = 6` 块 | `AiImportService` 的常量区（`CHUNK_TARGET_QUESTIONS` / `MAX_CHUNK_IMAGES` / `CHUNK_MAX`） |
-| MinerU 分块目标 | `CHUNK_TARGET_MINERU = 16`，可用 `-Dtiku.ai-import.chunk-target` 覆盖（8/16/999 做过矩阵实测） | `AiImportService` 的 `CHUNK_TARGET_MINERU` |
-| 视觉策略 | 图片 ≤ `MAX_SINGLE_CALL_IMAGES = 20` 走单次多模态；超过回退分块，每块 `VISION_CHUNK_PAGES = 2` 页 + 1 页重叠 | `AiImportService` 的 `MAX_SINGLE_CALL_IMAGES` / `MAX_VISION_PAGES` / `VISION_CHUNK_PAGES` |
+| 文本分块目标 | `CHUNK_TARGET_QUESTIONS = 12`、单块最多 `MAX_CHUNK_IMAGES = 10` 张图、最多 `CHUNK_MAX = 6` 块 | `AiImportModelCallService` 的常量区 |
+| MinerU 分块目标 | `CHUNK_TARGET_MINERU = 16`，可用 `-Dtiku.ai-import.chunk-target` 覆盖（8/16/999 做过矩阵实测） | `AiImportModelCallService.CHUNK_TARGET_MINERU` / `CHUNK_TARGET_MINERU_OVERRIDE` |
+| 视觉策略 | 图片 ≤ `MAX_SINGLE_CALL_IMAGES = 20` 走单次多模态；超过回退分块，每块 `VISION_CHUNK_PAGES = 2` 页 + 1 页重叠 | `AiImportModelCallService` 的 `MAX_SINGLE_CALL_IMAGES` / `MAX_VISION_PAGES` / `VISION_CHUNK_PAGES` |
 | 引擎语义 | `MINERU` 仅当用户显式勾选才用；`AUTO`/`LOCAL` **永不**自动走 MinerU（实测打字版卷本地直传视觉/文本分块效果更好） | `AiImportDocumentPipeline`（`mineruEngine` / `wantMineru` 判定与本地解析回退） |
-| 取消语义（两阶段） | 进行中 → 仅标记 `CANCELED`（文件留给执行线程在检查点清理，避免删文件导致线程异常把 CANCELED 覆盖成 FAILED）；终态 → 物理删行 + 清文件目录 | `AiImportService.deleteJob` / `writeTerminal`（`WHERE status <> 'CANCELED'` 条件更新）/ `cleanupCanceledJobFiles` |
-| 启动自愈 | `recoverInterruptedJobsOnStartup`：上一进程遗留的 PENDING/PROCESSING → 标记 FAILED + 清理文件；终态任务目录超 7 天兜底删除 | `AiImportService.recoverInterruptedJobsOnStartup` |
-| 失败可观测性 | `AiImportFailureClassifier` 把超时、限流、连接、响应协议和文档解析问题归为稳定 `errorCode`；落库文案 = 可操作提示 + 脱敏诊断摘要（`sk-…`/`apiKey=` 会被替换为 `***`），日志按任务 ID 写脱敏摘要 | `AiImportFailureClassifier`、`AiImportService`（失败终态写入） |
+| 取消语义（两阶段） | 进行中 → 仅标记 `CANCELED`（文件留给执行线程在检查点清理，避免删文件导致线程异常把 CANCELED 覆盖成 FAILED）；终态 → 物理删行 + 清文件目录 | `AiImportJobLifecycleService.deleteJob` / `writeTerminal`（`WHERE status <> 'CANCELED'` 条件更新）/ `cleanupCanceledJobFiles` |
+| 启动自愈 | `recoverInterruptedJobsOnStartup`（`@PostConstruct`）：上一进程遗留的 PENDING/PROCESSING → 标记 FAILED + 清理文件；终态任务目录超 7 天兜底删除 | `AiImportJobLifecycleService.recoverInterruptedJobsOnStartup` |
+| 失败可观测性 | `AiImportFailureClassifier` 把超时、限流、连接、响应协议和文档解析问题归为稳定 `errorCode`；落库文案 = 可操作提示 + 脱敏诊断摘要（`sk-…`/`apiKey=` 会被替换为 `***`），日志按任务 ID 写脱敏摘要 | `AiImportFailureClassifier`、`AiImportModelCallService`（失败分类）→ `AiImportJobLifecycleService.writeTerminal`（落库） |
 | 确认幂等 | `AiImportJobMapper` 行锁读取，串行化「读 confirmed → 导入 → 写 confirmed」，防双击/重放重复导入 | `mapper/AiImportJobMapper.java` |
 | 补答案（另一条链路） | `POST /api/banks/{id}/questions/ai-fill-answers`：串行分批 **10 题/批**思考模式判定；有图题带图；不确定/选项不全/请求失败一律留空 | `AnswerFillService.java` |
 | 单题 AI 解析 | `POST /api/questions/{id}/ai-analysis` 与草稿 `POST /api/questions/ai-analysis-draft`；`QuestionService` 用 `ReentrantLock` 限制并发槽 | `QuestionService.java` |
