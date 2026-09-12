@@ -425,7 +425,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import TikuIcon from '../components/TikuIcon.vue'
 import { centerPacksUrl, getCenterUrl } from '../utils/center'
 import { openExternal } from '../utils/external'
@@ -526,6 +526,8 @@ const { t } = useI18n({
       msgNeedPassword: '请输入密码',
       msgPosted: '评论已发表',
       msgDelOk: '评论已删除',
+      delCommentAsk: '删除后不可恢复，确定删除这条评论吗？',
+      delCommentTitle: '删除评论',
       fav: '收藏',
       favOn: '已收藏',
       commentPh: '说说这份题库哪里好用…',
@@ -639,6 +641,8 @@ const { t } = useI18n({
       msgNeedPassword: 'Please enter your password',
       msgPosted: 'Comment posted',
       msgDelOk: 'Comment deleted',
+      delCommentAsk: 'This cannot be undone. Delete this comment?',
+      delCommentTitle: 'Delete comment',
       fav: 'Favorite',
       favOn: 'Favorited',
       commentPh: 'Share what makes this bank useful…',
@@ -1239,6 +1243,16 @@ async function postComment() {
 async function delComment(c) {
   const key = detail.value?.latest?.packageKey
   if (!key || delBusyId.value) return
+  try {
+    await ElMessageBox.confirm(t('delCommentAsk'), t('delCommentTitle'), {
+      type: 'warning',
+      confirmButtonText: t('delCommentTitle'),
+      cancelButtonText: t('cancel'),
+      confirmButtonClass: 'el-button--danger'
+    })
+  } catch {
+    return
+  }
   delBusyId.value = c.id
   try {
     await http.delete(`/center/packs/${encodeURIComponent(key)}/comments/${c.id}`, { skipErrorMessage: true })

@@ -769,9 +769,16 @@ Windows 上默认的 `powershell.exe` 是 **Windows PowerShell 5.1**，它在读
      改动引入的编辑区未走字典，见 3.1 的反例）；
    - `document.title` 仍是中文硬编码（`router/index.js:87`、`DiscoverView.vue:805,836`）；
    - `QuestionFormPanel.vue:558` 的 `typeLabels` 是中文常量；
-   - **没有自动化的 i18n 校验脚本**（见第 7 节）。
-2. **前端无测试基建**：`frontend/package.json` 只有 `dev` / `build` / `preview`，
-   `devDependencies` 里的 `playwright-core` 目前未被任何代码引用。
+   - **模板硬编码中文合计约 240 行 / 10 个文件**（`npm run check:i18n` 可列出，
+     最多的是题库详情 92 行）；页面专有文案之外的冲突已收敛到全局 `common.*` 词表；
+   - i18n 校验脚本已于 2026-09-12 补齐（`check-i18n-dup.mjs` / `check-i18n-keys.mjs` /
+     `check-pseudo-interp.mjs`，见 `npm run check:ui`）；**新增文案后请跑一遍**，
+     `check-i18n-keys.mjs` 专抓"用了但没定义"的裸 key（历史上 14 个）。
+2. **前端测试基建（部分补齐）**：`frontend/package.json` 在 `dev` / `build` / `preview` 之外
+   新增 `check:ui` / `check:i18n` / `smoke:editor`；`playwright-core` 已用于
+   `scripts/smoke-editor-dialog.mjs`（只驱动本机 Chrome/Edge，不下载内核）。
+   **仍无单测框架**（Vitest + Vue Test Utils 尚未引入）。界面位置约定见
+   [`docs/design-ui.md`](design-ui.md)。
 3. **后端测试依赖私有样例**：`DocumentParserServiceTest`、`GraphPositionProbeTest` 依赖
    `sample-ai-files/` 下不入 git 的文件（版权材料）。**2026-09-11 起改为条件跳过**
    （`Assumptions` 判断文件是否存在）：干净克隆上这两个类标记为 skipped，`mvn test` 全绿。

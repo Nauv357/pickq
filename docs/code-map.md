@@ -85,12 +85,21 @@ frontend/src/
 ├── App.vue                     根组件：el-config-provider + router-view + 两个 Teleport（图片灯箱、更新进度弹窗）
 ├── router/index.js             12 条路由，全部懒加载；只有 afterEach 设 document.title（无鉴权守卫）
 ├── api/                        薄封装（10）：http.js（唯一 axios 实例）+ 按后端资源分文件
-├── components/                 复用组件（7）——见 §3.2 与 §5.2
-├── i18n/                       index.js（建实例，全局字典为空）+ lang.js（切换/持久化/Element Plus 联动）
+├── components/                 复用组件（10）——见 §3.2 与 §3.3
+├── composables/                useConfirm.js（统一确认框；界面规范见 docs/design-ui.md）
+├── i18n/                       index.js（建实例 + 全局 common.* 词表）+ lang.js（切换/持久化/Element Plus 联动）
 ├── layouts/AppLayout.vue       唯一外壳：侧栏导航 + AI 任务全局监控（5s 轮询 + Notification）
-├── styles/main.css             设计令牌与全局样式（502 行）
+├── styles/main.css             设计令牌与全局样式；含 .editor-dialog（编辑大弹窗外框/滚动容器）
 ├── utils/                      纯函数与平台适配（9）——见 §5.1
 └── views/                      路由页面（11）——见 §3.1
+
+frontend/scripts/              前端检查与冒烟（`npm run check:ui` / `check:i18n` / `smoke:editor`）
+├── check-pseudo-interp.mjs     属性值伪插值、双冒号属性
+├── check-i18n-dup.mjs          词典重复键
+├── check-i18n-keys.mjs         t() 用了但没定义的 key（eval 词典再展开 a.b.c）
+├── check-hardcoded-zh.mjs      模板里未走 t() 的中文清单
+├── smoke-editor-dialog.mjs     编辑大弹窗 Playwright 冒烟（需先起 dev server）
+└── shot-routes.mjs             批量路由截图（假数据，人工核对骨架）
 ```
 
 ### 1.4 `tauri/`
@@ -257,7 +266,20 @@ web/
 | `App.vue` | 519 | 根组件：`<el-config-provider>` + `<router-view>` + 2 个 `Teleport to="body"`（图片灯箱、更新下载弹窗）；文档级事件委托（外链→系统浏览器、`img.rich-img`→灯箱）；启动后自动检查更新（`tiku:skip-update-version` 可跳过） |
 | `main.js` | 26 | 注册 Element Plus / i18n / router；`initTheme()` → `initLang()` |
 
-### 3.3 复用组件（`frontend/src/components/`，7 个，合计 3330 行）
+### 3.3 复用组件（`frontend/src/components/`，10 个）
+
+界面位置约定与规则见 [`docs/design-ui.md`](design-ui.md)。
+
+**界面骨架组件（2026-09-12 新增，迁移中逐步替换各页手写结构）**
+
+| 文件 | 职责 | 接口 |
+| --- | --- | --- |
+| `PageHeader.vue` | 统一页头：可选返回入口 → 标题(+标签) → 一句话说明 → 摘要行；右侧说明文字 + 操作（主操作最右） | props `title`(必填)/`desc`/`backTo`/`backText`/`note`；slots `title-extra`/`meta`/`actions` |
+| `EmptyState.vue` | 统一空态：图标 + 为什么空 + 一条出路（不允许只有"暂无数据"） | props `icon`/`title`/`desc`/`compact`；默认插槽放出路按钮 |
+| `Pager.vue` | 统一分页条（`total > size` 才渲染），居中 | props `page`/`size`/`total`/`pageSizes`/`small`；emits `update:page`/`update:size`/`change` |
+| `useConfirm()`（`composables/`） | 统一确认框：危险操作红色确认按钮、按钮文案=动作名、点遮罩不算确认 | `useConfirm(t)` → `{ confirm, confirmDanger }`，返回 `Promise<boolean>` |
+
+**业务组件**
 
 | 文件 | 行数 | 职责 | 接口 |
 | --- | --- | --- | --- |
@@ -441,12 +463,12 @@ web/
 | 4 | **AI 任务轮询/订阅逻辑分散在 4 处** | `AppLayout.vue`（5s 轮询 + Notification）、`AiImportJobsView.vue`（5s 轮询）、`AiImportDialog.vue`（SSE + 8s 看门狗回退）、`AiImportPreviewView.vue`（轮询兜底） | 抽 `composables/useAiJob(jobId)`（前端目前**没有** `composables/` 目录）；把「SSE 优先 + 看门狗回退轮询 + 终态处理」收口一处 |
 | 5 | **桌面判定 `window.__TAURI_INTERNALS__` 写了三遍** | `utils/updater.js:10`、`utils/external.js:9`、`utils/files.js:20,59` | 统一到一个 `utils/platform.js`（`isDesktop()` / `invoke` 包装）；`files.js` 直接摸 `__TAURI_INTERNALS__` 而不经 `@tauri-apps/api`，Android 端必然要替换这一层 |
 | 6 | **视图绕过 `api/` 直连**：`DiscoverView.vue` 13 处、`MyWorksView.vue` 15 处 `import http` 调 `/center/*` 与 `/exports/*` | 两个视图文件 | 补 `api/center.js`、`api/exports.js`（`utils/center.js` 只有 URL 常量）。这违反 `conventions.md` §3.3 的「一个后端资源一个文件」 |
-| 7 | **i18n 字典无共享出口**：18 个组件的局部字典、约 1034 个 zh key + 等量 en key，无自动校验 | 全部 `*.vue` | 生成共享 JSON 资源 + 一个 key 集合对比脚本（`conventions.md` §7 明确把这件事列为「很受欢迎的贡献」） |
+| 7 | **i18n 字典无共享出口**：18 个组件的局部字典 + 一份全局 `common.*` 词表（跨页面复用词已收口） | 全部 `*.vue` + `i18n/index.js` | 已补 3 个静态校验脚本（`check-i18n-dup` / `check-i18n-keys` / `check-pseudo-interp`，见 `npm run check:ui`）；**仍未做**的是"共享 JSON 资源 + 逐组件迁移" |
 | 8 | **官网 `pages/index.vue` 重复调用 `useSeoMeta` 两次**（参数完全相同） | `web/pages/index.vue` L188–191 与 L193–196 | 删除一处 |
 | 9 | **`web/server/db/repos.ts` 单文件 7 个 repo（863 行）** | `web/server/db/repos.ts` | 按 rep o 拆文件（`repos/` 目录）；现状改一处要滚 800 行 |
 | 10 | **后端 `/api` 顶层挂载风格不统一** | `AiImportController`、`PracticeSessionController`、`StudyRecordController` 是 `@RequestMapping("/api")` 后在方法上写全路径；其余 controller 是 `@RequestMapping("/api/xxx")` + 方法相对路径 | 统一为后者（前者让「路径散在方法上」，`grep` 端点时不直观） |
 | 11 | **测试工具类混在测试树里** | `src/test/java/com/tiku/GenerateSampleFiles.java`（344） | 属样例生成器而非测试；建议移到 `tools/` 或加 `@Disabled` 说明 |
-| 12 | **前端无测试基建**：`devDependencies` 有 `playwright-core` 但仓库内无任何 spec 文件；`package.json` 无 test 脚本 | `frontend/package.json` | 要么补齐 e2e，要么移除该依赖（`conventions.md` §8.3 已记录该债务） |
+| 12 | ~~**前端无测试基建**~~ **已部分解决（2026-09-12）**：`check:ui` / `check:i18n` 静态检查 + `smoke:editor`（Playwright 驱动本机 Chrome，拦 `/api/` 用假数据）+ `shot-routes.mjs` 截图；仍无单测框架（Vitest 未引入） | `frontend/scripts/`、`frontend/package.json` | 补 Vitest + Vue Test Utils 单测（优先覆盖 `utils/`（`netAddress` 与 Java 端一致性）与 `useConfirm`） |
 | 13 | **`GlobalExceptionHandler` 构造注入了 `View error` 但从未使用** | `controller/GlobalExceptionHandler.java:23-27` | 死依赖，可删（`data-model.md` §1.6 已记录） |
 | 14 | **两套迁移机制 + 两套 i18n + 两个内容包解析器** | Flyway ↔ `MIGRATIONS`；vue-i18n ↔ `useSiteT`；`ContentPackageInspector` ↔ `package-meta.ts` | 都是「两端独立演进」的必然代价，**不建议强行统一**；但至少让内容包解析器的上限常量（4096 / 10MB / 200MB）有一处共同出处 |
 

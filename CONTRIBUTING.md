@@ -232,11 +232,20 @@ mvn package -DskipTests     # 只关心产物时
 4. 断言里的**错误文案就是契约**（前端弹窗直接展示这些 message，且与官网 `web/server/utils/*` 同口径），
    改文案等于改契约：请同时更新测试与文档。
 
-### 前端：目前没有测试基建
+### 前端：静态检查 + Playwright 冒烟（2026-09-12 起）
 
-如实说明：`frontend/package.json` 的 `scripts` 只有 `dev` / `build` / `preview`，没有 `test`；
-`devDependencies` 里的 `playwright-core` 目前未被任何源码引用。**欢迎你补上测试基建**
-（Vitest + Vue Test Utils 单测，或 Playwright 冒烟）——建议先开 Issue 说明方案再动手，避免与后续规划冲突。
+`frontend/package.json` 现在有 4 个脚本，**改前端后请都跑一遍**：
+
+| 脚本 | 作用 | 需要后端？ |
+| --- | --- | --- |
+| `npm run check:ui` | 属性值伪插值 / 双冒号属性、i18n 重复键、`t()` 用了但没定义的 key | 否（纯静态，秒级） |
+| `npm run check:i18n` | 模板里未走 `t()` 的硬编码中文清单（迁移进度指标） | 否 |
+| `npm run smoke:editor` | 题库详情编辑大弹窗冒烟：弹窗层级、滚动容器、脏数据确认、题号盘位置 | 需先起 `npm run dev`（脚本自己拦 `/api/` 返回假数据，不需要真后端） |
+| `node scripts/shot-routes.mjs / /stats …` | 给若干路由拍图（假数据），人工核对页面骨架 | 同上 |
+
+仍然**没有单测框架**（Vitest + Vue Test Utils 欢迎补，先开 Issue 说明方案）；
+`playwright-core` 用本机已安装的 Chrome/Edge，不下载浏览器内核。界面约定见
+[`docs/design-ui.md`](docs/design-ui.md)。
 
 ### 桌面壳
 

@@ -36,6 +36,8 @@ build/
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+# shot-routes.mjs 的截图产物（本地核对用）
+frontend/.shots/
 
 ### 打包分发物（旧 scripts/package.ps1 产物） ###
 dist/

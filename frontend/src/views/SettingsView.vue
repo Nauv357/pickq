@@ -1,11 +1,6 @@
 <template>
   <div class="page">
-    <header class="page-header">
-      <div>
-        <h1 class="page-title">{{ t('pageTitle') }}</h1>
-        <p class="page-desc">{{ t('pageDesc') }}</p>
-      </div>
-    </header>
+    <PageHeader :title="t('pageTitle')" :desc="t('pageDesc')" />
 
     <!-- 完整备份：一键打包全部本机数据（数据库一致性快照 + 图片 + AI 配置） -->
     <section class="panel">
@@ -304,7 +299,7 @@
 
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { exportStudyRecords, importStudyRecords } from '../api/studyRecords'
 import { downloadBackup, prepareRestore } from '../api/backup'
@@ -315,6 +310,8 @@ import { isLocalOrPrivate, hostOf } from '../utils/netAddress'
 import { pickFile, readTextFile, saveBlob, saveJsonFile } from '../utils/files'
 import { invoke } from '@tauri-apps/api/core'
 import TikuIcon from '../components/TikuIcon.vue'
+import PageHeader from '../components/PageHeader.vue'
+import { useConfirm } from '../composables/useConfirm'
 import { getTheme, setTheme, currentTheme } from '../utils/theme'
 import { setLang, getLangPref, currentLang } from '../i18n/lang'
 import { isDesktop, getAppVersion, checkForUpdate, downloadUpdate, installUpdate } from '../utils/updater'
@@ -341,6 +338,7 @@ const { t } = useI18n({
         webNoRestore: '网页版不支持一键恢复，请使用桌面版',
         restoreAsk: '备份文件校验通过。\n\n恢复会用备份内容替换当前全部数据（题库、刷题记录、图片与 AI 配置），随后应用会自动重启完成恢复，期间请勿关闭应用窗口。确定继续吗？',
         restoreTitle: '从备份恢复',
+        restoreNow: '开始恢复',
         restoring: '正在恢复数据，应用会自动重启，请稍候…',
         restoreStartFail: '启动恢复失败：{err}',
         unknownError: '未知错误',
@@ -465,7 +463,9 @@ const { t } = useI18n({
         webNoUpdate: '网页版不提供自动更新，请从官网下载桌面版。',
         latestVer: '已是最新版本',
         downloadedAsk: '新版本 v{v} 已下载完成。\n\n安装过程中应用会自动关闭并重新启动，你的题库与记录不会丢失。是否立即安装？',
-        installTitle: '安装更新'
+        installTitle: '安装更新',
+        installNow: '立即安装',
+        installLater: '稍后再说'
       }
     },
     'en-US': {
@@ -486,6 +486,7 @@ const { t } = useI18n({
         webNoRestore: 'One-click restore is only available in the desktop app',
         restoreAsk: 'The backup file passed validation.\n\nRestoring will replace ALL current data (banks, practice records, images and AI config) with the backup contents, then the app will restart itself to finish. Please keep the app window open. Continue?',
         restoreTitle: 'Restore from backup',
+        restoreNow: 'Start restore',
         restoring: 'Restoring data — the app will restart itself, please wait…',
         restoreStartFail: 'Failed to start the restore: {err}',
         unknownError: 'Unknown error',
@@ -610,11 +611,16 @@ const { t } = useI18n({
         webNoUpdate: 'The web version has no auto-update; download the desktop app from the website.',
         latestVer: 'You are up to date',
         downloadedAsk: 'Version v{v} has been downloaded.\n\nDuring installation the app will close and restart itself — your banks and records are safe. Install now?',
-        installTitle: 'Install update'
+        installTitle: 'Install update',
+        installNow: 'Install now',
+        installLater: 'Later'
       }
     }
   }
 })
+
+/* 统一确认框（危险操作用 confirmDanger：红色按钮 + 按钮文案=动作名） */
+const { confirm, confirmDanger } = useConfirm(t)
 
 /* ---------- 版本与自动更新（桌面版；自建频道 pickq.cn/updates） ---------- */
 const isDesktopEnv = ref(isDesktop())
@@ -671,15 +677,12 @@ async function doDownload() {
     return
   }
   // 下载完成：询问是否安装（安装会关闭并重启应用）
-  try {
-    await ElMessageBox.confirm(
-      t('about.downloadedAsk', { v: info.version }),
-      t('about.installTitle'),
-      { confirmButtonText: '立即安装', cancelButtonText: '稍后再说', type: 'info', closeOnClickModal: false }
-    )
-  } catch {
-    return // 用户选择稍后
-  }
+  const installOk = await confirm(
+    t('about.downloadedAsk', { v: info.version }),
+    t('about.installTitle'),
+    { confirmText: t('about.installNow'), cancelText: t('about.installLater') }
+  )
+  if (!installOk) return // 用户选择稍后
   installing.value = true
   updateError.value = ''
   try {
@@ -743,20 +746,10 @@ async function doRestore() {
     if (!dataDir) {
       throw new Error('恢复准备失败：未返回数据目录')
     }
-    try {
-      await ElMessageBox.confirm(
-        t('backup.restoreAsk'),
-        t('backup.restoreTitle'),
-        {
-          confirmButtonText: '开始恢复',
-          cancelButtonText: '取消',
-          type: 'warning',
-          confirmButtonClass: 'el-button--danger'
-        }
-      )
-    } catch (e) {
-      return // 用户取消
-    }
+    const restoreOk = await confirmDanger(t('backup.restoreAsk'), t('backup.restoreTitle'), {
+      confirmText: t('backup.restoreNow')
+    })
+    if (!restoreOk) return // 用户取消
     ElMessage.info(t('backup.restoring'))
     try {
       await invoke('restart_with_restore', { dataDir })
@@ -1374,17 +1367,6 @@ async function doImport() {
 </script>
 
 <style scoped>
-.page-header {
-  margin-bottom: 28px;
-}
-.page-title {
-  font-size: 24px;
-}
-.page-desc {
-  margin: 8px 0 0;
-  color: var(--text-secondary);
-  font-size: 14px;
-}
 .theme-state {
   color: var(--accent-text);
   font-weight: 600;

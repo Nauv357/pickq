@@ -14,6 +14,7 @@
 | 查表结构、数据目录、怎么做数据迁移 | [`data-model.md`](data-model.md) |
 | 理解整体架构与关键机制（启动、更新、备份、AI 链路） | [`architecture.md`](architecture.md) |
 | 快速定位某个功能在哪个文件 | [`code-map.md`](code-map.md) |
+| 写前端页面 / 加按钮前先看位置与交互约定 | [`design-ui.md`](design-ui.md) |
 | 按项目约定写代码 | [`conventions.md`](conventions.md) |
 | 开发/打包/测试 | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) |
 | 发布新版本 | [`release-notes-guide.md`](release-notes-guide.md) |
@@ -40,6 +41,7 @@
 - **[`../SECURITY.md`](../SECURITY.md)** — 漏洞上报渠道与安全设计边界。
 
 ### 专题与规划
+- **`design-ui.md`** — 前端界面一体化规范：页面骨架五段、R1–R10 硬规则（主操作位置、破坏性确认、空态出路、编辑大弹窗规格…）、公共组件表、全局 `common.*` 词表、可运行的检查与冒烟脚本、迁移阶段。**新增页面必须遵守**。
 - **`backend-audit-and-refactoring-plan.md`** — 后端审计与重构路线图：已修复项（图片路径隔离、备份解压限额、AI 配置原子写入、默认只监听本机、失效测试夹具）、已完成的服务拆分、以及下一步（`VisionLayoutContext`、流式导入、失败分类打磨）。
 - **`design-mobile.md`** — Android 端设计稿：技术选型、功能映射、信息架构、数据映射、里程碑、风险、开工材料清单。
 - **`import-issues.md`** — 文档导入解析的已知问题与优先级记录。
@@ -59,6 +61,7 @@
 | 数据库迁移（新增表/字段） | `data-model.md` + Flyway 迁移文件（**迁移只增不改**） |
 | 业务规则（判分、错题、复习间隔、版本自增） | `features.md` + 对应服务的注释 |
 | 新增/改动功能 | `features.md`、`code-map.md`；用户可感知的写入 `CHANGELOG.md` |
+| 前端页面结构 / 按钮位置 / 确认框 / 公共组件 | `design-ui.md`（含 `npm run check:ui` 必须全绿） |
 | 发版 | `release-notes-guide.md` 的检查清单（含官网下载链接、更新频道、GitHub Release） |
 | 编码约定调整 | `conventions.md` + `CONTRIBUTING.md` 摘要 |
 

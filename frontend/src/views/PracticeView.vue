@@ -348,7 +348,7 @@ import { useI18n } from 'vue-i18n'
 const { t } = useI18n({
   messages: {
     'zh-CN': {
-      notFoundDesc: '题库可能已被删除，或地址有误', backToBanks: '返回题库列表', backToBank: '返回题库',
+      notFoundDesc: '题库可能已被删除，或地址有误', backToBanks: '返回题库列表', backToBank: '返回题库', back: '返回',
       reportTitle: '成绩报告', scoreFull: '得分 / 满分', viewReview: '查看详细回顾',
       pendingSubjective: '有 {n} 道主观题待自评赋分，自评后总分自动更新',
       subjectiveGrade: '主观题自评', subjectiveType: '主观题', myAnswer: '我的作答', referenceAnswer: '参考答案',
@@ -370,7 +370,7 @@ const { t } = useI18n({
       msgNoQuestionN: '会话中没有第 {n} 题'
     },
     'en-US': {
-      notFoundDesc: 'This bank may have been deleted, or the link is wrong', backToBanks: 'Back to banks', backToBank: 'Back to bank',
+      notFoundDesc: 'This bank may have been deleted, or the link is wrong', backToBanks: 'Back to banks', back: 'Back', backToBank: 'Back to bank',
       reportTitle: 'Score Report', scoreFull: 'Score / Full', viewReview: 'View detailed review',
       pendingSubjective: '{n} subjective question(s) await self-grading — the total updates automatically',
       subjectiveGrade: 'Grade subjective questions', subjectiveType: 'Subjective', myAnswer: 'My answer', referenceAnswer: 'Reference answer',

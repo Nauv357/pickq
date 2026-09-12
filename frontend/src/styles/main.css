@@ -347,6 +347,37 @@ html.dark {
 .el-dialog__body { padding: 16px 24px 8px; }
 .el-dialog__footer { padding: 8px 24px 20px; }
 
+/* 录题 / 编辑大弹窗（BankDetailView）：面板自带 sticky 头 + 底部操作，弹窗只做"外框 + 唯一滚动容器"。
+   放在全局而非 scoped 样式里，避免依赖 el-dialog 内部根元素的 scope 属性归属；
+   选择器刻意比组件内 scoped 规则多一层（组件样式在 main.css 之后注入，同权重会覆盖全局）。 */
+.editor-dialog .el-dialog__header { display: none; }
+.editor-dialog .el-dialog__body {
+  padding: 0;
+  max-height: calc(92vh - 60px);
+  overflow-y: auto;
+}
+/* 弹窗内的面板去掉"卡片"外观（外框/圆角/背景交给弹窗），避免双层边框 */
+.editor-dialog .el-dialog__body .panel {
+  margin-bottom: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+/* 弹窗内头/脚用弹窗底色（--bg-card 与弹窗底色在暗色主题下不同，会露出色带） */
+.editor-dialog .el-dialog__body .panel-head,
+.editor-dialog .el-dialog__body .panel-foot { background: var(--el-bg-color-overlay); }
+/* 底部操作吸底：长表单不用滚到底才能保存 */
+.editor-dialog .el-dialog__body .panel-foot {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  border-radius: 0;
+}
+/* 编辑态在右侧给悬浮题号盘留出通道：弹窗整体左移，题号盘（含收起态小按钮）不再压住表单 */
+@media (min-width: 1120px) {
+  .editor-gutter { padding-right: 212px; }
+}
+
 /* 表单标签 */
 .el-form-item__label { color: var(--text-secondary); font-size: 13px; }
 

@@ -266,7 +266,7 @@
     <!-- 面板底部操作 -->
     <div class="panel-foot">
       <span class="foot-hint text-muted">
-        <template v-if="mode === 'edit'">「保存修改」后停留本页，可直接用右上角箭头切上一题 / 下一题；改完点「保存并返回列表」或右上角 ×</template>
+        <template v-if="mode === 'edit'">「保存修改」后停留本窗口，可直接用右上角箭头切上一题 / 下一题；改完点「保存并关闭」或右上角 ×</template>
         <template v-else>保存后清空表单，可继续录入下一题</template>
       </span>
       <div class="foot-actions">
@@ -281,7 +281,7 @@
         </template>
         <template v-else>
           <button class="btn btn-secondary" :disabled="submitting" @click="saveAndClose">
-            {{ submitting ? '保存中…' : '保存并返回列表' }}
+            {{ submitting ? '保存中…' : '保存并关闭' }}
           </button>
           <button class="btn btn-primary" :disabled="submitting" @click="submit">
             {{ submitting ? '保存中…' : '保存修改' }}
@@ -299,8 +299,8 @@ import { useI18n } from 'vue-i18n'
 const { t } = useI18n({
   messages: {
     'zh-CN': {
-      editNth: '编辑第 {n} 题', addQuestion: '添加题目', unsavedTip: '有未保存的修改', prevTip: '上一题（若有未保存修改会先询问）',
-      nextTip: '下一题（若有未保存修改会先询问）', posTip: '当前位置：第 {p} 行 / 共 {t} 行（按当前列表顺序）',
+      editNth: '编辑第 {n} 题', addQuestion: '添加题目', unsavedTip: '有未保存的修改', prevTip: '上一题（有未保存修改会自动保存）',
+      nextTip: '下一题（有未保存修改会自动保存）', posTip: '当前位置：第 {p} 行 / 共 {t} 行（按当前列表顺序）',
       aiNeedStem: '请先填写题干', aiEmptyRet: 'AI 未返回内容，请稍后重试', aiFilled: 'AI 解析已填入（可修改后保存）',
       imgInserted: '图片已插入（[图片:…] 标记）', imgInsertedOpt: '图片已插入选项（[图片:…] 标记）',
       stemRequired: '请输入题干', need2Options: '至少需要 2 个选项', optionEmpty: '选项内容不能为空', pickCorrect: '请选择正确答案',
@@ -310,12 +310,12 @@ const { t } = useI18n({
       modelRecoverToast: '看起来是模型已下线或不存在，建议重新获取可用模型', modelRecoverTitle: '模型可能已下线',
       modelRecoverAsk: '当前模型可能已下线或不存在。是否现在前往设置页重新获取可用模型？', modelRecoverConfirm: '获取可用模型', modelRecoverCancel: '暂不',
       modelSuggest: '建议改用 {model}（{note}）', modelSuggestPlain: '建议改用 {model}',
-      closeAskMsg: '当前题目还有未保存的修改，先保存吗？选择「放弃修改」将丢失这些改动。', closePanelTitle: '关闭编辑面板',
+      closeAskMsg: '当前题目还有未保存的修改，先保存吗？选择「放弃修改」将丢失这些改动。', closePanelTitle: '关闭编辑窗口',
       leaveAskMsg: '当前题目还有未保存的修改，离开前要保存吗？选择「放弃修改」将丢失这些改动。', leavePageTitle: '离开当前页面'
     },
     'en-US': {
-      editNth: 'Editing question #{n}', addQuestion: 'Add question', unsavedTip: 'Unsaved changes', prevTip: 'Previous (asks first if there are unsaved changes)',
-      nextTip: 'Next (asks first if there are unsaved changes)', posTip: 'Position: row {p} / {t} (current list order)',
+      editNth: 'Editing question #{n}', addQuestion: 'Add question', unsavedTip: 'Unsaved changes', prevTip: 'Previous (unsaved changes are saved automatically)',
+      nextTip: 'Next (unsaved changes are saved automatically)', posTip: 'Position: row {p} / {t} (current list order)',
       aiNeedStem: 'Please fill in the question stem first', aiEmptyRet: 'AI returned nothing — please try again later', aiFilled: 'AI analysis filled in (you can edit it before saving)',
       imgInserted: 'Image inserted ([图片:…] marker)', imgInsertedOpt: 'Image inserted into the option ([图片:…] marker)',
       stemRequired: 'Please enter the question stem', need2Options: 'At least 2 options are required', optionEmpty: 'Option text cannot be empty', pickCorrect: 'Please select the correct answer',
@@ -325,7 +325,7 @@ const { t } = useI18n({
       modelRecoverToast: 'Looks like this model is retired or no longer exists — fetch the available models', modelRecoverTitle: 'Model may be retired',
       modelRecoverAsk: 'The current model may be retired or no longer exist. Open Settings and fetch the available models now?', modelRecoverConfirm: 'Fetch available models', modelRecoverCancel: 'Not now',
       modelSuggest: 'Suggested replacement: {model} ({note})', modelSuggestPlain: 'Suggested replacement: {model}',
-      closeAskMsg: 'This question has unsaved changes. Save first? Choosing “Discard changes” will lose them.', closePanelTitle: 'Close edit panel',
+      closeAskMsg: 'This question has unsaved changes. Save first? Choosing “Discard changes” will lose them.', closePanelTitle: 'Close editor',
       leaveAskMsg: 'This question has unsaved changes. Save before leaving? Choosing “Discard changes” will lose them.', leavePageTitle: 'Leave this page'
     }
   }

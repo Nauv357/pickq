@@ -124,23 +124,36 @@
         </div>
       </section>
 
-      <!-- 录题面板（{{ t('edit') }}打开时页面右侧悬浮"题号盘"，不占主内容宽度） -->
-      <div ref="panelEl">
-            <QuestionFormPanel
-              v-if="panelOpen"
-              :key="panelKey"
-              :bank-id="Number(id)"
-              :mode="panelMode"
-              :initial="editingQuestion"
-              :next-number="nextNumber"
-              :nav="navState"
-              :jump-request="jumpRequest"
-              @saved="onPanelSaved"
-              @navigate="handleNavigate"
-              @jump-to="onPanelJumpTo"
-              @closed="panelOpen = false"
-            />
-          </div>
+      <!-- 录题 / 编辑：大弹窗单独聚焦。列表被遮罩挡住，
+           不存在"点另一行静默丢弃未保存修改"的问题；题号盘浮于弹窗之上、弹窗右侧预留出题号盘的位置（editor-gutter），
+           所以编辑中仍可直接按题号跳题而不遮挡弹窗内容。 -->
+      <el-dialog
+        v-model="panelOpen"
+        class="editor-dialog"
+        :width="panelMode === 'edit' ? 'min(calc(100vw - 236px), 1040px)' : 'min(96vw, 1120px)'"
+        top="4vh"
+        :z-index="1900"
+        :modal-class="panelMode === 'edit' ? 'editor-dialog-overlay editor-gutter' : 'editor-dialog-overlay'"
+        :show-close="false"
+        :close-on-click-modal="false"
+        :close-on-press-escape="false"
+        destroy-on-close
+        append-to-body
+      >
+        <QuestionFormPanel
+          :key="panelKey"
+          :bank-id="Number(id)"
+          :mode="panelMode"
+          :initial="editingQuestion"
+          :next-number="nextNumber"
+          :nav="navState"
+          :jump-request="jumpRequest"
+          @saved="onPanelSaved"
+          @navigate="handleNavigate"
+          @jump-to="onPanelJumpTo"
+          @closed="panelOpen = false"
+        />
+      </el-dialog>
 
       <!-- 题目区（全宽，与上方元素等宽对齐） -->
       <section class="questions-section">
@@ -256,7 +269,7 @@
               <span
                 v-if="duplicateNums.has(q.questionNumber)"
                 class="q-number mono dup-number"
-                title="该题号在当前列表中重复，可能是重复导入的题目，请{{ t('delete') }}或修改题号"
+                :title="t('dupNumberTitle')"
               >重复题号 {{ q.questionNumber }}</span>
               <span v-else-if="q.questionNumber != null" class="q-number mono">#{{ q.questionNumber }}</span>
               <span v-else class="q-number mono unnumbered" title="后端未能回填题号，导入/录入后自动按顺序补号">未编号</span>
@@ -264,7 +277,7 @@
               <span
                 v-if="q.questionType !== 'SUBJECTIVE' && !answerKeysText(q)"
                 class="q-no-answer"
-                title="未配置答案：做题时无法判对错，点击{{ t('edit') }}补配"
+                :title="t('noAnswerTitle')"
               >无答案</span>
               <span class="q-content" :title="q.content">{{ summarizeContent(q.content) }}</span>
               <span v-if="q.topic" class="q-topic">{{ q.topic }}</span>
@@ -288,10 +301,10 @@
                 >
                   <TikuIcon name="sparkle" :size="14" />
                 </button>
-                <button class="icon-btn" title="{{ t('edit') }}" @click="openEditPanel(q.questionId, i)">
+                <button class="icon-btn" :title="t('edit')" @click="openEditPanel(q.questionId, i)">
                   <TikuIcon name="edit" :size="14" />
                 </button>
-                <button class="icon-btn danger" title="{{ t('delete') }}" @click="confirmDeleteQuestion(q)">
+                <button class="icon-btn danger" :title="t('delete')" @click="confirmDeleteQuestion(q)">
                   <TikuIcon name="trash" :size="14" />
                 </button>
               </div>
@@ -399,12 +412,13 @@
         </template>
       </el-dialog>
 
-      <!-- 右侧悬浮题号盘（{{ t('edit') }}模式）：宽视口常显；窄视口（右侧放不下）收成"题号"小按钮，点击展开 -->
+      <!-- 右侧悬浮题号盘（编辑模式）：宽视口常显；窄视口（右侧放不下）收成"题号"小按钮，点击展开。
+           编辑大弹窗打开时题号盘浮到遮罩之上（z-index 1990 > 弹窗 1900），仍可直接按题号跳题。 -->
       <template v-if="dockOpen">
         <QuestionNavDock
           v-if="!dockNarrow || dockFabOpen"
           class="edit-dock-side"
-          :class="{ 'dock-pop': dockNarrow }"
+          :class="{ 'dock-pop': dockNarrow, 'dock-over-modal': true }"
           title="全部题目"
           :items="qNav"
           :active-id="editingQuestionId"
@@ -416,7 +430,7 @@
         />
         <button
           v-if="dockNarrow"
-          class="dock-fab"
+          class="dock-fab dock-over-modal"
           :class="{ open: dockFabOpen }"
           :title="dockFabOpen ? '收起题号盘' : '打开题号盘（按题号跳题）'"
           @click="dockFabOpen = !dockFabOpen"
@@ -427,7 +441,7 @@
       </template>
 
       <!-- {{ t('edit') }}题库弹窗 -->
-      <el-dialog v-model="editBankVisible" title="{{ t('edit') }}题库" width="min(92vw, 500px)" align-center>
+      <el-dialog v-model="editBankVisible" :title="t('edit') + t('bankWord')" width="min(92vw, 500px)" align-center>
         <el-form label-position="top" @submit.prevent>
           <el-form-item label="题库名称" required>
             <el-input v-model="editBankForm.name" maxlength="100" show-word-limit />
@@ -439,7 +453,7 @@
             <el-input v-model="editBankForm.source" maxlength="255" placeholder="如：整理自公开教材与历年真题" />
           </el-form-item>
           <el-form-item label="作者名（可选）">
-            <el-input v-model="editBankForm.authorName" maxlength="100" placeholder="{{ t('exportBank') }}时写入文件的展示名" />
+            <el-input v-model="editBankForm.authorName" maxlength="100" :placeholder="t('authorNamePh')" />
           </el-form-item>
         </el-form>
         <template #footer>
@@ -451,7 +465,7 @@
       </el-dialog>
 
       <!-- 导出弹窗 -->
-      <el-dialog v-model="exportVisible" title="{{ t('exportBank') }}" width="min(92vw, 500px)" align-center>
+      <el-dialog v-model="exportVisible" :title="t('exportBank')" width="min(92vw, 500px)" align-center>
         <el-form label-position="top" @submit.prevent>
           <el-form-item label="版本号">
             <el-input v-model="exportForm.version" placeholder="如 1.0.0" maxlength="20" />
@@ -512,7 +526,7 @@
       </el-dialog>
 
       <!-- {{ t('startPractice') }}弹窗（会话模式） -->
-      <el-dialog v-model="sessionVisible" title="{{ t('startPractice') }}" width="min(92vw, 540px)" align-center>
+      <el-dialog v-model="sessionVisible" :title="t('startPractice')" width="min(92vw, 540px)" align-center>
         <el-form label-position="top" @submit.prevent>
           <el-form-item label="练习模式">
             <div class="mode-options">
@@ -570,7 +584,7 @@
       </el-dialog>
 
       <!-- {{ t('batchImport') }}弹窗 -->
-      <el-dialog v-model="batchVisible" title="{{ t('batchImport') }}题目" width="min(92vw, 560px)" align-center>
+      <el-dialog v-model="batchVisible" :title="t('batchImport') + t('questions')" width="min(92vw, 560px)" align-center>
         <div class="batch-head">
           <p class="text-secondary batch-desc">
             粘贴 AI 整理或结构化的题目 JSON（数组，或 <code>{ "questions": [...] }</code>），也可以选择 .json 文件
@@ -649,7 +663,7 @@
             <span class="wrong-meta text-muted">
               错 {{ w.wrongCount }} 次 · {{ formatDate(w.lastAnsweredAt) }}
             </span>
-            <button class="icon-btn" title="{{ t('edit') }}该题" @click="editFromDialog(w)">
+            <button class="icon-btn" :title="t('edit') + t('thisQuestion')" @click="editFromDialog(w)">
               <TikuIcon name="edit" :size="13" />
             </button>
           </div>
@@ -690,7 +704,7 @@
               <span v-else-if="w.dueAt" class="due-today">今日到期</span>
               · Lv.{{ w.level }} · {{ formatDate(w.dueAt) }}
             </span>
-            <button class="icon-btn" title="{{ t('edit') }}该题" @click="editFromDialog(w)">
+            <button class="icon-btn" :title="t('edit') + t('thisQuestion')" @click="editFromDialog(w)">
               <TikuIcon name="edit" :size="13" />
             </button>
           </div>
@@ -730,7 +744,7 @@
       <AiImportDialog ref="aiDialog" :bank-id="id" :bank-name="bank?.name" @done="onAiDone" />
 
       <!-- {{ t('materials') }}管理弹窗 -->
-      <el-dialog v-model="materialsVisible" title="共享{{ t('materials') }}（资料分析大题干）" width="min(92vw, 620px)" align-center>
+      <el-dialog v-model="materialsVisible" :title="t('materialsDialogTitle')" width="min(92vw, 620px)" align-center>
         <div class="material-list">
           <div v-for="m in materials" :key="m.id" class="material-item">
             <div class="material-content" v-html="richHtml(m.content)"></div>
@@ -763,7 +777,7 @@
             v-model="materialContent"
             type="textarea"
             :rows="3"
-            placeholder="{{ t('materials') }}内容（文字 + [图片:文件名] 标记）"
+            :placeholder="t('materialContentPh')"
           />
           <div class="material-edit-actions">
             <button class="btn btn-ghost btn-sm" @click="resetMaterialForm">清空</button>
@@ -781,7 +795,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n({
@@ -790,6 +804,7 @@ const { t } = useI18n({
       notFoundDesc: '题库可能已被删除，或地址有误', backToBanks: '返回题库列表', loading: '加载中…',
       authorBy: '作者：{v}', sourceFrom: '来源：{v}', createdOn: '创建于 {d}', questionsN: '共 {n} 题',
       history: '练习历史', edit: '编辑', exportBank: '导出题库文件', printPaper: '打印试卷', delete: '删除', startPractice: '开始做题',
+    bankWord: '题库', thisQuestion: '该题',
       answeredOf: '已做 / 共 {n} 题', accuracyOf: '正确率（作答 {n} 次）', progressPct: '完成度',
       noDesc: '暂无描述',
       noRecordHint: '还没有做题记录，点击「{act}」刷第一轮', favStartTip: '一键开刷全部收藏题（收藏模式）', noFavTip: '还没有收藏题',
@@ -802,6 +817,11 @@ const { t } = useI18n({
       filterResultN: '筛选结果 {n} 题', noMatch: '没有匹配的题目，试试调整筛选条件', noQuestions: '题库还没有题目', addFirstQuestion: '录入第一题',
       clickEditHint: '点击编辑该题（右侧按钮可做题 / AI 解析 / 删除）',
       noMaterialsTip: '还没有材料。材料用于资料分析题（组内题共用的文字/图片大题干），创建后可在录题时关联。',
+      dupNumberTitle: '该题号在当前列表中重复，可能是重复导入的题目，请删除或修改题号',
+      noAnswerTitle: '未配置答案：做题时无法判对错，点击编辑补配',
+      authorNamePh: '导出时写入文件的展示名',
+      materialsDialogTitle: '共享材料（资料分析大题干）',
+      materialContentPh: '材料内容（文字 + [图片:文件名] 标记）',
       editMaterial: '编辑材料', createMaterial: '创建材料', saving: '保存中…', saveEdit: '保存修改', insertImage: '插图',
       genByAi: '由 AI 导入生成',
       msgMaxCopy: '一次最多复制 {n} 题，请分批操作',
@@ -864,6 +884,7 @@ const { t } = useI18n({
       notFoundDesc: 'This bank may have been deleted, or the link is wrong', backToBanks: 'Back to banks', loading: 'Loading…',
       authorBy: 'Author: {v}', sourceFrom: 'Source: {v}', createdOn: 'Created {d}', questionsN: '{n} questions',
       history: 'History', edit: 'Edit', exportBank: 'Export bank file', printPaper: 'Print paper', delete: 'Delete', startPractice: 'Start practice',
+    bankWord: 'Bank', thisQuestion: 'this question',
       answeredOf: '{n} answered / total', accuracyOf: 'Accuracy ({n} attempts)', progressPct: 'Progress',
       noDesc: 'No description',
       noRecordHint: 'No practice records yet — click “{act}” for your first round', favStartTip: 'Practice all favorites in one go (favorites mode)', noFavTip: 'No favorites yet',
@@ -876,6 +897,11 @@ const { t } = useI18n({
       filterResultN: '{n} results', noMatch: 'No matching questions — try adjusting filters', noQuestions: 'No questions in this bank yet', addFirstQuestion: 'Add your first question',
       clickEditHint: 'Click to edit (right-side buttons: practice / AI analyze / delete)',
       noMaterialsTip: 'No materials yet. Materials are shared texts/images used by analysis questions; create one and link it when adding questions.',
+      dupNumberTitle: 'This number appears more than once in the list — likely a duplicate import; delete it or change the number',
+      noAnswerTitle: 'No answer configured — practice cannot grade it; click to edit and fill it in',
+      authorNamePh: 'Display name written into the exported file',
+      materialsDialogTitle: 'Shared materials (analysis passages)',
+      materialContentPh: 'Material content (text + [image:file-name] markers)',
       editMaterial: 'Edit material', createMaterial: 'Create material', saving: 'Saving…', saveEdit: 'Save changes', insertImage: 'Image',
       genByAi: 'Generated by AI import',
       msgMaxCopy: 'You can copy at most {n} questions at a time — please run it in batches',
@@ -1653,23 +1679,17 @@ async function startPracticeAt(questionId) {
   }
 }
 
-/* ---------- 录题面板 ---------- */
+/* ---------- 录题 / 编辑弹窗 ---------- */
 const panelOpen = ref(false)
 const panelMode = ref('create')
 const panelKey = ref(0)
 const editingQuestion = ref(null)
-const panelEl = ref(null)
 // 连续编辑导航状态：当前编辑题在"当前结果列表"中的行下标 / questionId（跨页切换自动翻页）
 const editingListIndex = ref(-1)
 const editingQuestionId = ref(null)
 const navSwitching = ref(false)
-
-/* 打开面板后把页面滚动到面板（列表深处的"{{ t('edit') }}"点击后面板在页面顶部，不滚动用户看不到） */
-function scrollToPanel() {
-  nextTick(() => {
-    panelEl.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  })
-}
+// 并发防抖：连续点两行时，只让最后一次选择生效（先发的请求返回后直接丢弃）
+let editOpenSeq = 0
 
 function openCreatePanel() {
   panelMode.value = 'create'
@@ -1678,19 +1698,21 @@ function openCreatePanel() {
   editingListIndex.value = -1
   panelKey.value++
   panelOpen.value = true
-  scrollToPanel()
 }
 
 async function openEditPanel(questionId, index = -1) {
+  const seq = ++editOpenSeq
   try {
     const detail = await getQuestion(questionId)
+    if (seq !== editOpenSeq) return
     panelMode.value = 'edit'
     editingQuestion.value = detail
     editingQuestionId.value = questionId
+    // 行下标：优先用调用方给的（跨页跳转后已算准），否则在当前页里找；
+    // 找不到就是 -1（筛选后目标题不在本页），绝不复用上一题的下标
     editingListIndex.value = index >= 0 ? index : questions.value.findIndex((q) => q.questionId === questionId)
     panelKey.value++
     panelOpen.value = true
-    scrollToPanel()
   } catch (e) {
     /* 拦截器已提示 */
   }
@@ -1717,14 +1739,15 @@ async function handleNavigate(dir) {
   if (navSwitching.value) return
   navSwitching.value = true
   try {
-    let idx = editingListIndex.value
-    // 当前{{ t('edit') }}题可能在保存刷新后移动过位置，以列表中的实际位置为准
+    // 当前编辑题可能在保存刷新后移动过位置 / 也可能压根不在本页（筛选+题号盘跳转），
+    // 一律以列表中的实际位置为准；找不到就只走"翻页到边界行"，绝不复用旧行下标
     const found = questions.value.findIndex((q) => q.questionId === editingQuestionId.value)
-    if (found >= 0) idx = found
-    const target = idx + dir
-    if (target >= 0 && target < questions.value.length) {
-      await openEditPanel(questions.value[target].questionId, target)
-      return
+    if (found >= 0) {
+      const target = found + dir
+      if (target >= 0 && target < questions.value.length) {
+        await openEditPanel(questions.value[target].questionId, target)
+        return
+      }
     }
     if (dir > 0 && qPage.value * qPageSize < qTotal.value) {
       qPage.value += 1
@@ -2277,6 +2300,15 @@ loadTopicOptions() // 分类筛选选项（与 TOPIC 会话共用，幂等）
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 1px 9px;
+}
+
+/* 编辑大弹窗打开时：题号盘与窄视口"题号"按钮浮到弹窗遮罩之上（弹窗 z-index=1900），
+   保持"编辑中可直接按题号跳题"的能力；后续打开的 Element Plus 弹窗（2000+）仍会盖住它 */
+.edit-dock-side.dock-over-modal {
+  z-index: 1990;
+}
+.dock-fab.dock-over-modal {
+  z-index: 1990;
 }
 
 /* 右侧悬浮题号盘（{{ t('edit') }}模式）：fixed 于内容右缘与视口右边界之间，主内容始终全宽不受挤压 */

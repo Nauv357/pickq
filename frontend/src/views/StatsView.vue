@@ -1,36 +1,26 @@
 <template>
   <div class="page stats-page">
-    <header class="page-header stats-header">
-      <div>
-        <h1 class="page-title">{{ t('title') }}</h1>
-        <p class="page-desc text-secondary">{{ t('subtitle') }}</p>
-      </div>
-      <div class="stats-actions">
+    <PageHeader :title="t('title')" :desc="t('subtitle')" :note="t('localOnly')">
+      <template #actions>
         <button v-if="hasData" class="btn btn-primary btn-sm" @click="$router.push('/')">
           <TikuIcon name="play" :size="14" />
           {{ t('goPractice') }}
         </button>
-        <span class="text-muted stats-note">{{ t('localOnly') }}</span>
-      </div>
-    </header>
+      </template>
+    </PageHeader>
 
     <!-- 加载骨架 -->
     <div v-if="loading" class="stats-loading">
       <div v-for="n in 4" :key="n" class="card tiku-skeleton"><div class="sk-line" style="width: 60%"></div><div class="sk-line" style="width: 90%"></div></div>
     </div>
 
-    <!-- 空态：从未做过题 -->
-    <div v-else-if="!hasData" class="empty stats-empty">
-      <TikuIcon name="chart" :size="40" />
-      <h3>{{ t('emptyTitle') }}</h3>
-      <p class="text-secondary">{{ t('emptyDesc') }}</p>
-      <div class="empty-actions">
-        <button class="btn btn-primary" @click="$router.push('/')">
-          <TikuIcon name="play" :size="14" />
-          {{ t('goFirstRound') }}
-        </button>
-      </div>
-    </div>
+    <!-- 空态：从未做过题（必须给一条出路，不允许只有"暂无数据"） -->
+    <EmptyState v-else-if="!hasData" icon="chart" :title="t('emptyTitle')" :desc="t('emptyDesc')">
+      <button class="btn btn-primary" @click="$router.push('/')">
+        <TikuIcon name="play" :size="14" />
+        {{ t('goFirstRound') }}
+      </button>
+    </EmptyState>
 
     <template v-else>
       <!-- ============ KPI 行 ============ -->
@@ -332,6 +322,8 @@ const { t } = useI18n({
 })
 import TikuIcon from '../components/TikuIcon.vue'
 import StatsHeatmap from '../components/StatsHeatmap.vue'
+import PageHeader from '../components/PageHeader.vue'
+import EmptyState from '../components/EmptyState.vue'
 
 echarts.use([BarChart, LineChart, GridComponent, TooltipComponent, CanvasRenderer])
 
@@ -707,22 +699,6 @@ onBeforeUnmount(() => {
 .stats-page {
   padding-bottom: 40px;
 }
-.stats-header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin-bottom: 20px;
-}
-.stats-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.stats-note {
-  font-size: 12px;
-}
 .stats-loading {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -731,9 +707,6 @@ onBeforeUnmount(() => {
 .stats-loading .card {
   padding: 18px;
   min-height: 120px;
-}
-.stats-empty {
-  padding: 80px 0;
 }
 
 /* ============ KPI 行（4 等宽，紧凑） ============ */

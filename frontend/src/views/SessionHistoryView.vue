@@ -2,34 +2,29 @@
   <div class="page">
     <!-- ============ 回顾视图 ============ -->
     <template v-if="viewSession">
-      <header class="page-header">
-        <div>
-          <button class="back-link" @click="$router.push(`/banks/${id}`)">
-            <TikuIcon name="arrow-left" :size="14" />
-            {{ t('backToBank') }}
+      <PageHeader :title="t('title')" :back-to="`/banks/${id}`" :back-text="t('backToBank')">
+        <template #title-extra>
+          <span class="mode-tag">{{ MODE_LABELS[viewSession.mode] || viewSession.mode }}</span>
+          <span class="status-tag" :class="viewSession.status === 'COMPLETED' ? 'status-done' : 'status-doing'">
+            {{ viewSession.status === 'COMPLETED' ? t('completed') : t('running') }}
+          </span>
+        </template>
+        <template #meta>
+          <span>{{ t('correctOf', { a: viewSession.correctCount, b: viewSession.answeredCount }) }}</span>
+          <span class="dot"></span>
+          <span>{{ t('scoreOf', { a: viewSession.totalScore, b: viewSession.maxScore }) }}</span>
+          <span class="dot"></span>
+          <span>{{ t('timeUsed') }} {{ formatDuration(viewSession.totalSeconds) }}</span>
+          <span class="dot"></span>
+          <span>{{ formatDate(viewSession.createdAt) }}</span>
+        </template>
+        <template #actions>
+          <button v-if="viewSession.status !== 'COMPLETED'" class="btn btn-primary" @click="continuePractice">
+            <TikuIcon name="play" :size="14" />
+            {{ t('continuePractice') }}
           </button>
-          <div class="title-line">
-            <h1 class="page-title">{{ t('title') }}</h1>
-            <span class="mode-tag">{{ MODE_LABELS[viewSession.mode] || viewSession.mode }}</span>
-            <span class="status-tag" :class="viewSession.status === 'COMPLETED' ? 'status-done' : 'status-doing'">
-              {{ viewSession.status === 'COMPLETED' ? t('completed') : t('running') }}
-            </span>
-          </div>
-          <div class="page-meta text-muted">
-            <span>{{ t('correctOf', { a: viewSession.correctCount, b: viewSession.answeredCount }) }}</span>
-            <span class="dot"></span>
-            <span>{{ t('scoreOf', { a: viewSession.totalScore, b: viewSession.maxScore }) }}</span>
-            <span class="dot"></span>
-            <span>{{ t('timeUsed') }} {{ formatDuration(viewSession.totalSeconds) }}</span>
-            <span class="dot"></span>
-            <span>{{ formatDate(viewSession.createdAt) }}</span>
-          </div>
-        </div>
-        <button v-if="viewSession.status !== 'COMPLETED'" class="btn btn-primary" @click="continuePractice">
-          <TikuIcon name="play" :size="14" />
-          {{ t('continuePractice') }}
-        </button>
-      </header>
+        </template>
+      </PageHeader>
 
       <div v-if="viewSession.status !== 'COMPLETED'" class="warn-banner">
         <TikuIcon name="info" :size="15" />
@@ -188,16 +183,12 @@
 
     <!-- ============ 历史列表 ============ -->
     <template v-else>
-      <header class="page-header">
-        <div>
-          <RouterLink :to="`/banks/${id}`" class="back-link">
-            <TikuIcon name="arrow-left" :size="14" />
-            {{ t('backToBank') }}
-          </RouterLink>
-          <h1 class="page-title">{{ t('historyTitle') }}</h1>
-          <p class="page-desc">{{ t('sessionsTotal', { n: total }) }}</p>
-        </div>
-      </header>
+      <PageHeader
+        :title="t('historyTitle')"
+        :desc="t('sessionsTotal', { n: total })"
+        :back-to="`/banks/${id}`"
+        :back-text="t('backToBank')"
+      />
 
       <div v-if="loading" class="sess-list">
         <div v-for="n in 4" :key="n" class="sess-row tiku-skeleton">
@@ -206,12 +197,9 @@
         </div>
       </div>
 
-      <div v-else-if="sessions.length === 0" class="empty">
-        <TikuIcon name="clock" :size="40" />
-        <h3>{{ t('emptyTitle') }}</h3>
-        <p class="text-secondary">{{ t('emptyTip') }}</p>
+      <EmptyState v-else-if="sessions.length === 0" icon="clock" :title="t('emptyTitle')" :desc="t('emptyTip')">
         <button class="btn btn-primary" @click="$router.push(`/banks/${id}`)">{{ t('goPractice') }}</button>
-      </div>
+      </EmptyState>
 
       <div v-else class="sess-list">
         <div
@@ -232,16 +220,7 @@
         </div>
       </div>
 
-      <div v-if="total > 0" class="pager">
-        <el-pagination
-          background
-          layout="prev, pager, next, total"
-          :total="total"
-          :page-size="pageSize"
-          :current-page="page"
-          @current-change="onPageChange"
-        />
-      </div>
+      <Pager :page="page" :size="pageSize" :total="total" @update:page="onPageChange" />
     </template>
   </div>
 </template>
@@ -259,7 +238,12 @@ const { t } = useI18n({
       material: '材料', expandMaterial: '展开材料', collapseMaterial: '收起材料',
       myAnswer: '我的作答', notAnswered: '未作答', earnedScore: '实得', selfGradePrompt: '对照参考答案自评赋分：', regrade: '重新自评：',
       unitPoint: '分',
-      fullMarks: '全对', saving: '保存中…', saveScore: '保存得分', referenceAnswer: '参考答案', selfSaveDone: '自评已保存（{earned} / {score} 分）'
+      fullMarks: '全对', saving: '保存中…', saveScore: '保存得分', referenceAnswer: '参考答案', selfSaveDone: '自评已保存（{earned} / {score} 分）',
+      /* 以下 12 个 key 曾经只在模板里用、词典里没有 → 界面上显示裸 key（本轮补上） */
+      correctAnswer: '正确答案', answerLbl: '答案', analysisLbl: '解析',
+      answerSheet: '答题卡', collapseSheet: '收起答题卡', openSheet: '打开答题卡', collapse: '收起',
+      historyTitle: '练习历史', sessionsTotal: '共 {n} 次练习',
+      emptyTitle: '还没有练习记录', emptyTip: '完成一轮练习后，这里会保留每次的得分与逐题回顾', goPractice: '去练习'
     },
     'en-US': {
       backToBank: 'Back to bank', title: 'Session Review', completed: 'Completed', running: 'In progress',
@@ -268,7 +252,11 @@ const { t } = useI18n({
       material: 'Material', expandMaterial: 'Expand material', collapseMaterial: 'Collapse material',
       myAnswer: 'My answer', notAnswered: 'Not answered', earnedScore: 'Earned', selfGradePrompt: 'Grade against the reference answer: ', regrade: 'Regrade: ',
       unitPoint: 'pts',
-      fullMarks: 'Full marks', saving: 'Saving…', saveScore: 'Save score', referenceAnswer: 'Reference answer', selfSaveDone: 'Self-grade saved ({earned} / {score} pts)'
+      fullMarks: 'Full marks', saving: 'Saving…', saveScore: 'Save score', referenceAnswer: 'Reference answer', selfSaveDone: 'Self-grade saved ({earned} / {score} pts)',
+      correctAnswer: 'Correct answer', answerLbl: 'Answer', analysisLbl: 'Analysis',
+      answerSheet: 'Answer sheet', collapseSheet: 'Collapse answer sheet', openSheet: 'Open answer sheet', collapse: 'Collapse',
+      historyTitle: 'Practice history', sessionsTotal: '{n} sessions',
+      emptyTitle: 'No practice sessions yet', emptyTip: 'After you finish a round, each session keeps its score and per-question review', goPractice: 'Start practicing'
     }
   }
 })
@@ -282,6 +270,9 @@ import { richTextToHtml } from '../utils/richText'
 import TikuIcon from '../components/TikuIcon.vue'
 import QuestionAiAnalysis from '../components/QuestionAiAnalysis.vue'
 import QuestionNavDock from '../components/QuestionNavDock.vue'
+import PageHeader from '../components/PageHeader.vue'
+import EmptyState from '../components/EmptyState.vue'
+import Pager from '../components/Pager.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -510,53 +501,8 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.page-header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 20px;
-  margin-bottom: 24px;
-  flex-wrap: wrap;
-}
-.back-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: none;
-  border: none;
-  padding: 0;
-  color: var(--text-secondary);
-  font-family: var(--font-sans);
-  font-size: 13px;
-  margin-bottom: 10px;
-  cursor: pointer;
-  transition: color var(--ease);
-}
-.back-link:hover {
-  color: var(--accent-text);
-}
-.page-title {
-  font-size: 26px;
-}
-.page-desc {
-  margin: 6px 0 0;
-  color: var(--text-secondary);
-  font-size: 14px;
-}
-.title-line {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.page-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-  font-size: 13px;
-  flex-wrap: wrap;
-}
+/* 页头 / 返回入口 / 空态 / 分页条已改用公共组件（PageHeader / EmptyState / Pager），
+   这里只保留本页特有元素；插槽内容（mode-tag / status-tag / dot）仍由本页样式负责 */
 .dot {
   width: 3px;
   height: 3px;
@@ -633,12 +579,6 @@ onMounted(() => {
   color: var(--accent-text);
   transform: translateX(2px);
   transition: all var(--ease);
-}
-
-.pager {
-  display: flex;
-  justify-content: center;
-  margin-top: 26px;
 }
 
 /* 回顾 */
@@ -991,22 +931,6 @@ onMounted(() => {
 }
 
 /* 其他 */
-.empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  padding: 90px 0;
-  color: var(--text-muted);
-  text-align: center;
-}
-.empty h3 {
-  margin-top: 6px;
-  color: var(--text-primary);
-}
-.empty .btn {
-  margin-top: 10px;
-}
 .sk-line {
   height: 12px;
   border-radius: 6px;

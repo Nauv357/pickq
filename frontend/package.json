@@ -7,7 +7,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check:ui": "node scripts/check-pseudo-interp.mjs && node scripts/check-i18n-dup.mjs && node scripts/check-i18n-keys.mjs",
+    "check:i18n": "node scripts/check-hardcoded-zh.mjs",
+    "smoke:editor": "node scripts/smoke-editor-dialog.mjs"
   },
   "dependencies": {
     "@fontsource/noto-serif-sc": "^5.3.0",

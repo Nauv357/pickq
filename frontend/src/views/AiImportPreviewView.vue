@@ -592,6 +592,9 @@ const { t } = useI18n({
       warnStemEmpty: '{pos}题干为空', warnOptIncomplete: '{pos}选项不完整（至少 2 个且文本非空）',
       importedN: '已导入 {n} 道题目', cancelAsk: '取消后将删除该任务的整理结果，且无法恢复。确定取消导入吗？',
       cancelTitle: '取消导入', canceledDone: '已取消导入', taskDeleted: '任务已删除',
+      keepThinking: '再想想',
+      delQAsk: '删除后不可恢复，确定删除这道题吗？', delQTitle: '删除题目',
+      delMatAsk: '删除后关联题目将解除引用，且不可恢复。确定删除材料「{key}」吗？', delMatTitle: '删除材料',
       // ---- 渲染态 / 编辑态（默认渲染，按需展开编辑） ----
       editThis: '编辑此题', doneEdit: '完成', expandAllEdit: '全部展开编辑', collapseAll: '全部收起',
       expandAllEditTip: '把所有题目切换为编辑态（表单）', collapseAllTip: '把所有题目收起为渲染态（只读预览）',
@@ -620,6 +623,9 @@ const { t } = useI18n({
       warnStemEmpty: 'Question {pos} has an empty stem', warnOptIncomplete: 'Question {pos} has incomplete options (need at least 2, all with text)',
       importedN: 'Imported {n} questions', cancelAsk: 'Canceling deletes this task’s results and cannot be undone. Cancel the import?',
       cancelTitle: 'Cancel import', canceledDone: 'Import canceled', taskDeleted: 'Task deleted',
+      keepThinking: 'Keep it',
+      delQAsk: 'This cannot be undone. Delete this question?', delQTitle: 'Delete question',
+      delMatAsk: 'Linked questions will be unlinked and this cannot be undone. Delete material “{key}”?', delMatTitle: 'Delete material',
       // ---- rendered / edit mode (rendered by default, edit on demand) ----
       editThis: 'Edit this question', doneEdit: 'Done', expandAllEdit: 'Edit all', collapseAll: 'Collapse all',
       expandAllEditTip: 'Switch every question to edit mode (form)', collapseAllTip: 'Collapse every question back to the rendered view',
@@ -1153,18 +1159,38 @@ function removeQuestion(index) {
     ElMessage.warning(t('keepOneQ'))
     return
   }
-  questions.value.splice(index, 1)
+  confirmDelete(t('delQAsk'), t('delQTitle')).then((ok) => {
+    if (ok) questions.value.splice(index, 1)
+  })
 }
 
 /* 删除材料：关联题目解除引用（确认导入时后端按剩余材料映射） */
 function removeMaterial(index) {
   const m = materials.value[index]
   if (!m) return
-  materials.value.splice(index, 1)
-  for (const q of questions.value) {
-    if (q.materialKey === m.materialKey) q.materialKey = null
+  confirmDelete(t('delMatAsk', { key: m.materialKey }), t('delMatTitle')).then((ok) => {
+    if (!ok) return
+    materials.value.splice(index, 1)
+    for (const q of questions.value) {
+      if (q.materialKey === m.materialKey) q.materialKey = null
+    }
+    ElMessage.success(t('matDeleted', { key: m.materialKey }))
+  })
+}
+
+/* 破坏性操作统一确认入口：true = 用户确认执行 */
+async function confirmDelete(message, title) {
+  try {
+    await ElMessageBox.confirm(message, title, {
+      type: 'warning',
+      confirmButtonText: title,
+      cancelButtonText: t('keepThinking'),
+      confirmButtonClass: 'el-button--danger'
+    })
+    return true
+  } catch {
+    return false
   }
-  ElMessage.success(t('matDeleted', { key: m.materialKey }))
 }
 
 function addQuestion() {
@@ -1274,8 +1300,8 @@ async function cancel() {
       t('cancelTitle'),
       {
         type: 'warning',
-        confirmButtonText: '取消导入',
-        cancelButtonText: '再想想',
+        confirmButtonText: t('cancelImport'),
+        cancelButtonText: t('keepThinking'),
         confirmButtonClass: 'el-button--danger'
       }
     )
