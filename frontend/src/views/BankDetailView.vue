@@ -124,9 +124,12 @@
         </div>
       </section>
 
-      <!-- 录题 / 编辑：大弹窗单独聚焦。列表被遮罩挡住，
-           不存在"点另一行静默丢弃未保存修改"的问题；题号盘浮于弹窗之上、弹窗右侧预留出题号盘的位置（editor-gutter），
-           所以编辑中仍可直接按题号跳题而不遮挡弹窗内容。 -->
+      <!-- 题目行操作菜单（右键 /「…」按钮共用） -->
+      <ActionMenu ref="qMenu" :items="questionMenuItems" @select="onQuestionMenuSelect" />
+
+      <!-- 编辑大弹窗：单独聚焦（列表被遮罩挡住，不存在"点另一行静默丢弃未保存修改"的问题；
+           题号盘浮于弹窗之上、弹窗右侧预留出题号盘的位置（editor-gutter），
+           所以编辑中仍可直接按题号跳题而不遮挡弹窗内容） -->
       <el-dialog
         v-model="panelOpen"
         class="editor-dialog"
@@ -253,6 +256,7 @@
                 ? (selectedQids.has(q.questionId) ? '点击取消选择' : '点击选择该题')
                 : t('clickEditHint')"
               @click="selectionMode ? toggleSelect(q.questionId) : openEditPanel(q.questionId, i)"
+              @contextmenu.prevent="openQuestionMenu($event, q, i)"
             >
               <!-- 选择模式：行首勾选框 -->
               <button
@@ -291,21 +295,12 @@
               </button>
               <span class="q-score text-muted">{{ formatScore(q.score) }} 分</span>
               <div class="q-actions" @click.stop>
-                <button class="icon-btn" title="从该题开始顺序做题" @click="startPracticeAt(q.questionId)">
-                  <TikuIcon name="play" :size="14" />
-                </button>
-                <button
-                  class="icon-btn"
-                  :title="aiOpen[q.questionId] ? '收起解析' : 'AI 解析'"
-                  @click="toggleAiPanel(q)"
-                >
-                  <TikuIcon name="sparkle" :size="14" />
-                </button>
                 <button class="icon-btn" :title="t('edit')" @click="openEditPanel(q.questionId, i)">
                   <TikuIcon name="edit" :size="14" />
                 </button>
-                <button class="icon-btn danger" :title="t('delete')" @click="confirmDeleteQuestion(q)">
-                  <TikuIcon name="trash" :size="14" />
+                <!-- 其余动作收进「…」菜单（右键同款）：做题 / AI 解析 / 复制题干 / 收藏 / 删除 -->
+                <button class="icon-btn" :title="t('qmenu.moreTip')" @click="openQuestionMenu($event, q, i)">
+                  <TikuIcon name="more" :size="15" />
                 </button>
               </div>
             </div>
@@ -349,25 +344,35 @@
           />
         </div>
 
-        <!-- 选择模式工具条（悬浮底部）：勾选题目后另存为新题库 / 并入现有题库 -->
+        <!-- 选择模式工具条（悬浮底部）：勾选题目后导出 / 另存为新题库 / 并入现有题库 / 批量删除 -->
         <div v-if="selectionMode" class="selection-bar">
-          <span class="sel-count">已选 <b class="mono">{{ selectedQids.size }}</b> 题</span>
+          <span class="sel-count">{{ t('sel.barCount') }} <b class="mono">{{ selectedQids.size }}</b> {{ t('sel.qUnit') }}</span>
           <button class="btn btn-ghost btn-sm" :disabled="allPageSelected" @click="selectAllPage">
-            {{ allPageSelected ? '本页已全选' : '全选本页' }}
+            {{ allPageSelected ? t('sel.pageAll') : t('sel.selectPage') }}
           </button>
-          <button class="btn btn-ghost btn-sm" :disabled="selectedQids.size === 0" @click="selectedQids.clear()">清空</button>
+          <button class="btn btn-ghost btn-sm" :disabled="selectedQids.size === 0" @click="selectedQids.clear()">{{ t('sel.clear') }}</button>
           <span class="sel-spacer"></span>
           <button
             class="btn btn-secondary btn-sm"
             :disabled="selectedQids.size === 0 || selectionBusy"
+            @click="openExport('selection')"
+          >{{ t('sel.export') }}</button>
+          <button
+            class="btn btn-secondary btn-sm"
+            :disabled="selectedQids.size === 0 || selectionBusy"
             @click="openNewBankDialog"
-          >另存为新题库</button>
+          >{{ t('sel.saveAsNew') }}</button>
           <button
             class="btn btn-secondary btn-sm"
             :disabled="selectedQids.size === 0 || selectionBusy"
             @click="openMergeDialog"
-          >并入现有题库</button>
-          <button class="btn btn-ghost btn-sm" @click="toggleSelectionMode">退出</button>
+          >{{ t('sel.mergeInto') }}</button>
+          <button
+            class="btn btn-danger btn-sm"
+            :disabled="selectedQids.size === 0 || selectionBusy"
+            @click="deleteSelectedQuestions"
+          >{{ t('sel.delete') }}</button>
+          <button class="btn btn-ghost btn-sm" @click="toggleSelectionMode">{{ t('sel.exit') }}</button>
         </div>
       </section>
 
@@ -467,6 +472,21 @@
       <!-- 导出弹窗 -->
       <el-dialog v-model="exportVisible" :title="t('exportBank')" width="min(92vw, 500px)" align-center>
         <el-form label-position="top" @submit.prevent>
+          <el-form-item :label="t('scopeLabel')">
+            <div class="mode-options">
+              <button
+                v-for="s in scopeOptions()"
+                :key="s.value"
+                class="mode-option"
+                :class="{ active: exportForm.scope === s.value }"
+                @click="exportForm.scope = s.value"
+              >
+                <span class="mode-title">{{ s.label }}</span>
+                <span class="mode-desc">{{ s.desc }}</span>
+              </button>
+            </div>
+            <p v-if="exportForm.scope === 'selection'" class="form-tip text-muted">{{ t('scopeSelectionNote') }}</p>
+          </el-form-item>
           <el-form-item label="版本号">
             <el-input v-model="exportForm.version" placeholder="如 1.0.0" maxlength="20" />
             <p v-if="bank?.packageKey" class="form-tip text-muted">
@@ -822,6 +842,38 @@ const { t } = useI18n({
       authorNamePh: '导出时写入文件的展示名',
       materialsDialogTitle: '共享材料（资料分析大题干）',
       materialContentPh: '材料内容（文字 + [图片:文件名] 标记）',
+      /* ---- 题目行菜单 / 导出范围 / 批量删除（2026-09-12） ---- */
+      scopeLabel: '导出范围',
+      scopeAll: '全部题目', scopeAllDesc: '整库导出（推荐：会登记/沿用发布身份）',
+      scopeFavorite: '仅收藏', scopeFavoriteDesc: '只导出收藏过的题（子集，生成临时身份）',
+      scopeWrong: '仅错题', scopeWrongDesc: '只导出最近一次做错的题（子集）',
+      scopeUndone: '仅未做过', scopeUndoneDesc: '只导出还没有做题记录的题（子集）',
+      scopeSelection: '已勾选 {n} 题', scopeSelectionDesc: '导出范围里勾选的那几道题',
+      scopeSelectionNote: '子集导出不会改动原题库的发布身份，文件使用临时身份，便于单独分享。',
+      msgNoSelection: '请先勾选要导出的题目',
+      resetReview: '重置',
+      sel: {
+        barCount: '已选', qUnit: '题', selectPage: '全选本页', pageAll: '本页已全选', clear: '清空',
+        export: '导出所选', saveAsNew: '另存为新题库', mergeInto: '并入现有题库', delete: '删除所选', exit: '退出'
+      },
+      qmenu: {
+        moreTip: '更多操作（右键同款菜单）',
+        edit: '编辑此题',
+        practice: '从这题开始做题',
+        ai: 'AI 解析',
+        aiClose: '收起解析',
+        copy: '复制题干',
+        favorite: '收藏此题',
+        unfavorite: '取消收藏',
+        select: '加入批量选择',
+        delete: '删除此题',
+        copied: '题干已复制',
+        copyFail: '复制失败，请手动选择文本'
+      },
+      msgDeleteQuestionsAsk: '将删除勾选的 {n} 道题及其做题记录，此操作不可恢复，确定删除吗？',
+      msgDeleteQuestionsTitle: '删除 {n} 道题',
+      msgDeletedQuestions: '已删除 {n} 道题',
+      msgDeletedQuestionsPartial: '已删除 {ok} 道，{fail} 道删除失败',
       editMaterial: '编辑材料', createMaterial: '创建材料', saving: '保存中…', saveEdit: '保存修改', insertImage: '插图',
       genByAi: '由 AI 导入生成',
       msgMaxCopy: '一次最多复制 {n} 题，请分批操作',
@@ -902,6 +954,37 @@ const { t } = useI18n({
       authorNamePh: 'Display name written into the exported file',
       materialsDialogTitle: 'Shared materials (analysis passages)',
       materialContentPh: 'Material content (text + [image:file-name] markers)',
+      scopeLabel: 'Export range',
+      scopeAll: 'All questions', scopeAllDesc: 'Whole bank (recommended: claims/keeps the publish identity)',
+      scopeFavorite: 'Favorites only', scopeFavoriteDesc: 'Export only starred questions (subset, temporary identity)',
+      scopeWrong: 'Wrong answers only', scopeWrongDesc: 'Export questions you got wrong last time (subset)',
+      scopeUndone: 'Not attempted yet', scopeUndoneDesc: 'Export questions with no practice record (subset)',
+      scopeSelection: '{n} selected', scopeSelectionDesc: 'Export just the questions you ticked',
+      scopeSelectionNote: 'A subset export never changes the bank’s publish identity — the file gets a temporary one, so it is safe to share on its own.',
+      msgNoSelection: 'Select at least one question to export',
+      resetReview: 'Reset',
+      sel: {
+        barCount: 'Selected', qUnit: 'questions', selectPage: 'Select page', pageAll: 'Whole page selected', clear: 'Clear',
+        export: 'Export selected', saveAsNew: 'Save as new bank', mergeInto: 'Merge into bank', delete: 'Delete selected', exit: 'Exit'
+      },
+      qmenu: {
+        moreTip: 'More actions (same menu as right-click)',
+        edit: 'Edit this question',
+        practice: 'Practice from here',
+        ai: 'AI analysis',
+        aiClose: 'Hide analysis',
+        copy: 'Copy question text',
+        favorite: 'Add to favorites',
+        unfavorite: 'Remove from favorites',
+        select: 'Add to batch selection',
+        delete: 'Delete this question',
+        copied: 'Question text copied',
+        copyFail: 'Copy failed — select the text manually'
+      },
+      msgDeleteQuestionsAsk: 'This deletes the {n} selected questions and their practice records. It cannot be undone. Delete?',
+      msgDeleteQuestionsTitle: 'Delete {n} questions',
+      msgDeletedQuestions: 'Deleted {n} questions',
+      msgDeletedQuestionsPartial: 'Deleted {ok}, {failed} failed',
       editMaterial: 'Edit material', createMaterial: 'Create material', saving: 'Saving…', saveEdit: 'Save changes', insertImage: 'Image',
       genByAi: 'Generated by AI import',
       msgMaxCopy: 'You can copy at most {n} questions at a time — please run it in batches',
@@ -978,8 +1061,12 @@ import QuestionFormPanel from '../components/QuestionFormPanel.vue'
 import QuestionNavDock from '../components/QuestionNavDock.vue'
 import AiImportDialog from '../components/AiImportDialog.vue'
 import QuestionAiAnalysis from '../components/QuestionAiAnalysis.vue'
+import ActionMenu from '../components/ActionMenu.vue'
+import { useConfirm } from '../composables/useConfirm'
 
 const route = useRoute()
+/* 统一确认框（危险操作 confirmDanger：红色按钮 + 按钮文案=动作名） */
+const { confirm, confirmDanger } = useConfirm(t)
 /** 系统自动生成描述（后端存库固定中文），按界面语言展示；用户自填描述原样显示 */
 const AI_GEN_DESC = '由 AI 导入生成'
 function bankDescText(b) {
@@ -1366,16 +1453,11 @@ const reviewResetting = ref(false)
 async function resetReviewPlan() {
   if (reviewResetting.value) return
   try {
-    await ElMessageBox.confirm(
-      t('msgResetReviewConfirm'),
-      t('msgResetReviewTitle'),
-      {
-        type: 'warning',
-        confirmButtonText: '重置',
-        cancelButtonText: '再想想',
-        confirmButtonClass: 'el-button--danger'
-      }
-    )
+    const ok = await confirmDanger(t('msgResetReviewConfirm'), t('msgResetReviewTitle'), {
+      confirmText: t('resetReview'),
+      cancelText: t('common.thinkAgain')
+    })
+    if (!ok) return
   } catch (e) {
     return // 用户取消
   }
@@ -1536,13 +1618,12 @@ async function startFavoriteSession() {
     return
   }
   try {
-    await ElMessageBox.confirm(
-      t('msgFavSessionConfirm', { n: favoriteCount.value }),
-      t('msgFavSessionTitle'),
-      { confirmButtonText: '开始刷题', cancelButtonText: '取消' }
-    )
+    const ok = await confirm(t('msgFavSessionConfirm', { n: favoriteCount.value }), t('msgFavSessionTitle'), {
+      confirmText: t('startPractice')
+    })
+    if (!ok) return
   } catch (e) {
-    return // 用户取消
+    return // 状态加载失败，不启动
   }
   await startSessionWith({ mode: 'FAVORITE' }, null)
 }
@@ -1606,12 +1687,10 @@ async function saveMaterial() {
 
 async function removeMaterial(m) {
   try {
-    await ElMessageBox.confirm(t('msgDeleteMaterialConfirm'), t('msgDeleteMaterialTitle'), {
-      type: 'warning',
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
-      confirmButtonClass: 'el-button--danger'
+    const ok = await confirmDanger(t('msgDeleteMaterialConfirm'), t('msgDeleteMaterialTitle'), {
+      confirmText: t('delete')
     })
+    if (!ok) return
   } catch (e) {
     return
   }
@@ -1792,6 +1871,11 @@ if (route.query.new === '1') {
   openCreatePanel()
   router.replace({ path: `/banks/${id}` })
 }
+/* 题库列表卡片菜单「开始做题」= 跳到本页并带 ?start=1，直接打开开始做题弹窗 */
+if (route.query.start === '1') {
+  openSession()
+  router.replace({ path: `/banks/${id}` })
+}
 
 /* ---------- {{ t('edit') }}题库 ---------- */
 const editBankVisible = ref(false)
@@ -1845,7 +1929,7 @@ async function submitEditBank() {
 /* ---------- {{ t('exportBank') }} ---------- */
 const exportVisible = ref(false)
 const exporting = ref(false)
-const exportForm = reactive({ version: '', authorName: '', mode: 'AUTO', format: 'tiku' })
+const exportForm = reactive({ version: '', authorName: '', mode: 'AUTO', format: 'tiku', scope: 'all' })
 
 const formatOptions = [
   { value: 'tiku', label: '.tiku 容器（推荐）', desc: '图片与文字分离打包，体积小、加载快' },
@@ -1858,9 +1942,28 @@ const modeOptions = [
   { value: 'BRANCH', label: '另存新文件', desc: '生成新的发布身份（不改变原题库）' }
 ]
 
+/* 导出范围：与打印页同一套 scope 口径（后端 ExportRequest.scope），外加"已勾选 N 题" */
+function scopeOptions() {
+  const opts = [
+    { value: 'all', label: t('scopeAll'), desc: t('scopeAllDesc') },
+    { value: 'favorite', label: t('scopeFavorite'), desc: t('scopeFavoriteDesc') },
+    { value: 'wrong', label: t('scopeWrong'), desc: t('scopeWrongDesc') },
+    { value: 'undone', label: t('scopeUndone'), desc: t('scopeUndoneDesc') }
+  ]
+  const n = selectedQids.size
+  if (n > 0) {
+    opts.push({
+      value: 'selection',
+      label: t('scopeSelection', { n }),
+      desc: t('scopeSelectionDesc')
+    })
+  }
+  return opts
+}
+
 const DEFAULT_AUTHOR_KEY = 'tiku:default-author'
 
-function openExport() {
+function openExport(scope) {
   exportForm.version = bank.value?.version || '1.0.0'
   //作者名默认：题库记录 → 设置页"默认作者名"（本地记忆，中心账号上线前用）
   let savedAuthor = ''
@@ -1872,6 +1975,8 @@ function openExport() {
   exportForm.authorName = bank.value?.authorName || savedAuthor
   exportForm.mode = 'AUTO'
   exportForm.format = 'tiku'
+  //有勾选且没指定范围时，默认导出勾选的题（用户刚做的动作就是"选了一些题"）
+  exportForm.scope = scope || (selectedQids.size > 0 ? 'selection' : 'all')
   exportVisible.value = true
 }
 
@@ -1880,9 +1985,21 @@ async function submitExport() {
   const payload = { version }
   if (exportForm.authorName.trim()) payload.authorName = exportForm.authorName.trim()
   if (bank.value?.packageKey && exportForm.mode !== 'AUTO') payload.mode = exportForm.mode
+  const isSelection = exportForm.scope === 'selection'
+  if (isSelection) {
+    payload.questionIds = [...selectedQids]
+    if (payload.questionIds.length === 0) {
+      ElMessage.warning(t('msgNoSelection'))
+      return
+    }
+  } else if (exportForm.scope !== 'all') {
+    payload.scope = exportForm.scope
+  }
   exporting.value = true
   try {
-    const baseName = `${bank.value?.name || '题库'}-${version}`
+    const baseName = isSelection
+      ? `${bank.value?.name || '题库'}-选${payload.questionIds.length}题-${version}`
+      : `${bank.value?.name || '题库'}-${version}`
     if (exportForm.format === 'tiku') {
       // v2 .tiku 容器（zip：package.json + media/）——带图题库体积小，推荐
       const blob = await exportTikuBank(id, payload)
@@ -1907,6 +2024,94 @@ async function submitExport() {
     /* 400（内容未变却改版本号等）由拦截器提示，弹窗保留供调整 */
   } finally {
     exporting.value = false
+  }
+}
+
+/* ---------- 题目行菜单（右键 /「…」同一份）：编辑、做题、AI 解析、复制题干、收藏、删除 ---------- */
+const qMenu = ref(null)
+const qMenuTarget = ref(null)
+const qMenuIndex = ref(-1)
+const questionMenuItems = computed(() => {
+  const q = qMenuTarget.value
+  if (!q) return []
+  return [
+    { key: 'edit', label: t('qmenu.edit'), icon: 'edit' },
+    { key: 'practice', label: t('qmenu.practice'), icon: 'play' },
+    { key: 'ai', label: aiOpen[q.questionId] ? t('qmenu.aiClose') : t('qmenu.ai'), icon: 'sparkle' },
+    { key: 'copy', label: t('qmenu.copy'), icon: 'copy' },
+    { key: 'favorite', label: q.favorite ? t('qmenu.unfavorite') : t('qmenu.favorite'), icon: 'star' },
+    { divider: true },
+    { key: 'select', label: t('qmenu.select'), icon: 'list', disabled: selectionMode.value },
+    { key: 'delete', label: t('qmenu.delete'), icon: 'trash', danger: true }
+  ]
+})
+
+function openQuestionMenu(e, q, i) {
+  qMenuTarget.value = q
+  qMenuIndex.value = i
+  if (e.type === 'click') qMenu.value?.openFromEl(e.currentTarget)
+  else qMenu.value?.openFromEvent(e)
+}
+
+async function onQuestionMenuSelect(key) {
+  const q = qMenuTarget.value
+  if (!q) return
+  const i = qMenuIndex.value
+  if (key === 'edit') return openEditPanel(q.questionId, i)
+  if (key === 'practice') return startPracticeAt(q.questionId)
+  if (key === 'ai') return toggleAiPanel(q)
+  if (key === 'copy') return copyQuestionText(q)
+  if (key === 'favorite') return toggleRowFavorite(q)
+  if (key === 'select') {
+    if (!selectionMode.value) toggleSelectionMode()
+    selectedQids.add(q.questionId)
+    return
+  }
+  if (key === 'delete') return confirmDeleteQuestion(q)
+}
+
+/** 复制题干（纯文本，图片标记替换为〔图〕占位，避免粘出无意义的 [图片:x]） */
+async function copyQuestionText(q) {
+  const text = (q?.content || '').replace(/\[图片:[^\]]+\]/g, '〔图〕')
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success(t('qmenu.copied'))
+  } catch (e) {
+    ElMessage.warning(t('qmenu.copyFail'))
+  }
+}
+
+/** 批量删除勾选的题目（循环单条删除；题量级为几十~几百，够用） */
+async function deleteSelectedQuestions() {
+  const ids = [...selectedQids]
+  if (!ids.length) return
+  const ok = await confirmDanger(
+    t('msgDeleteQuestionsAsk', { n: ids.length }),
+    t('msgDeleteQuestionsTitle', { n: ids.length })
+  )
+  if (!ok) return
+  selectionBusy.value = true
+  let done = 0
+  let failed = 0
+  try {
+    for (const qid of ids) {
+      try {
+        await deleteQuestion(qid)
+        selectedQids.delete(qid)
+        done++
+      } catch (e) {
+        failed++
+      }
+    }
+    if (failed === 0) ElMessage.success(t('msgDeletedQuestions', { n: done }))
+    else ElMessage.warning(t('msgDeletedQuestionsPartial', { ok: done, fail: failed }))
+    await loadQuestions()
+    loadProgress()
+    loadWrongCount()
+    if (selectedQids.size === 0) toggleSelectionMode()
+  } finally {
+    selectionBusy.value = false
   }
 }
 
@@ -2012,7 +2217,7 @@ async function submitAiFill() {
       if (failed > 0) parts.push(t('msgAiFillFailed', { n: failed }))
       ElMessageBox.alert(parts.join('<br/>'), t('msgAiFillDoneTitle'), {
         dangerouslyUseHTMLString: true,
-        confirmButtonText: '好的'
+        confirmButtonText: t('common.ok')
       })
     }
     loadQuestions()
@@ -2032,16 +2237,12 @@ async function submitAiFill() {
 /* ---------- {{ t('delete') }}题库 ---------- */
 async function confirmDeleteBank() {
   try {
-    await ElMessageBox.confirm(
+    const ok = await confirmDanger(
       t('msgDeleteBankConfirm', { name: bank.value.name, n: qTotal.value }),
       t('msgDeleteBankTitle'),
-      {
-        type: 'warning',
-        confirmButtonText: '删除',
-        cancelButtonText: '取消',
-        confirmButtonClass: 'el-button--danger'
-      }
+      { confirmText: t('delete') }
     )
+    if (!ok) return
   } catch (e) {
     return // 用户取消
   }
@@ -2070,16 +2271,12 @@ async function toggleRowFavorite(q) {
 /* ---------- {{ t('delete') }}题目 ---------- */
 async function confirmDeleteQuestion(q) {
   try {
-    await ElMessageBox.confirm(
+    const ok = await confirmDanger(
       t('msgDeleteQuestionConfirm', { num: q.questionNumber ?? '—' }),
       t('msgDeleteQuestionTitle'),
-      {
-        type: 'warning',
-        confirmButtonText: '删除',
-        cancelButtonText: '取消',
-        confirmButtonClass: 'el-button--danger'
-      }
+      { confirmText: t('delete') }
     )
+    if (!ok) return
   } catch (e) {
     return
   }

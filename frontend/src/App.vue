@@ -151,14 +151,33 @@ function onDocClick(e) {
   if (img && img.src) openLightbox(img.src)
 }
 
+/** 输入类元素内保留系统右键菜单（右键粘贴 API Key / 复制题干片段是刚需） */
+function isEditableTarget(el) {
+  if (!el || typeof el.closest !== 'function') return false
+  return !!el.closest('input, textarea, [contenteditable="true"], .el-textarea__inner')
+}
+
+/**
+ * 屏蔽 WebView2/浏览器自带的右键菜单（「另存为 / 共享 / 检查」对 SPA 没有意义，
+ * 且"共享"在 WebView2 里没有宿主，点了没反应——用户当成 bug）。
+ * 各处需要右键菜单的元素自行 @contextmenu 打开自己的菜单（ActionMenu 组件）；
+ * 输入框内不拦截，保留系统菜单。
+ */
+function onDocContextMenu(e) {
+  if (isEditableTarget(e.target)) return
+  e.preventDefault()
+}
+
 onMounted(() => {
   document.addEventListener('click', onDocClick)
   document.addEventListener('keydown', onKeydown)
+  document.addEventListener('contextmenu', onDocContextMenu)
   autoCheckUpdate()
 })
 onBeforeUnmount(() => {
   document.removeEventListener('click', onDocClick)
   document.removeEventListener('keydown', onKeydown)
+  document.removeEventListener('contextmenu', onDocContextMenu)
 })
 
 /* ---------- 启动自动更新检查（仅桌面版；失败静默，不打扰） ----------

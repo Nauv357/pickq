@@ -122,6 +122,16 @@
         </el-select>
         <span v-if="searchActive" class="bank-match text-muted">{{ t('toolbar.match', { n: total }) }}</span>
         <span class="bar-grow"></span>
+        <!-- 批量管理：进入勾选模式（删除/导出/合并多个题库，不必逐个进详情页） -->
+        <button
+          class="btn btn-ghost btn-sm"
+          :class="{ active: batchMode }"
+          :disabled="banks.length === 0"
+          @click="toggleBatchMode"
+        >
+          <TikuIcon name="list" :size="13" />
+          {{ batchMode ? t('batch.exit') : t('batch.enter') }}
+        </button>
         <RouterLink to="/stats" class="stats-link">
           <TikuIcon name="chart" :size="13" />
           {{ t('toolbar.stats') }}
@@ -174,14 +184,34 @@
       </div>
       <div v-else class="grid">
         <div
-          v-for="bank in banks"
+          v-for="(bank, i) in banks"
           :key="bank.id"
           class="bank-card"
-          @click="goDetail(bank.id)"
+          :class="{ 'bank-card-sel': batchMode && selectedBankIds.has(bank.id) }"
+          @click="onCardClick(bank, i, $event)"
+          @contextmenu.prevent="openBankMenuFromEvent($event, bank)"
         >
+          <!-- 批量模式：勾选框（支持 Shift 连选）；平时：右下角「…」菜单（右键同款） -->
+          <button
+            v-if="batchMode"
+            class="sel-box bank-check"
+            :class="{ on: selectedBankIds.has(bank.id) }"
+            :title="selectedBankIds.has(bank.id) ? t('batch.unselect') : t('batch.select')"
+            @click.stop="toggleBankSelect(bank.id, $event, i)"
+          >
+            <TikuIcon v-if="selectedBankIds.has(bank.id)" name="check" :size="13" />
+          </button>
+          <button
+            v-else
+            class="icon-btn bank-more"
+            :title="t('menu.moreTip')"
+            @click.stop="openBankMenuFromEvent($event, bank)"
+          >
+            <TikuIcon name="more" :size="16" />
+          </button>
+
           <div class="bank-card-top">
             <h3 class="bank-name">{{ bank.name }}</h3>
-            <TikuIcon name="chevron-right" :size="15" class="bank-arrow" />
           </div>
           <div class="bank-tags">
             <span v-if="bank.version" class="version-tag">v{{ bank.version }}</span>
@@ -189,12 +219,67 @@
           </div>
           <p class="bank-desc">{{ bankDescText(bank) }}</p>
           <div class="bank-meta text-muted">
+            <!-- 卡片直接给题数与做题进度：省掉"点进去看一眼再退出来" -->
+            <TikuIcon name="list" :size="13" />
+            <span>{{ t('meta.counts', { q: bank.questionCount ?? 0, d: bank.answeredCount ?? 0 }) }}</span>
+            <span class="meta-dot"></span>
             <TikuIcon name="clock" :size="13" />
             <span>{{ t('createdOn', { d: formatDate(bank.createdAt) }) }}</span>
           </div>
         </div>
       </div>
+
+      <!-- 批量操作条（勾选后操作多个题库；与题目列表的选择条同款交互） -->
+      <div v-if="batchMode" class="selection-bar">
+        <span class="sel-count">{{ t('batch.selected', { n: selectedBankIds.size }) }}</span>
+        <button class="btn btn-ghost btn-sm" :disabled="allPageSelected" @click="selectAllPage">
+          {{ allPageSelected ? t('batch.pageAllSelected') : t('batch.selectPage') }}
+        </button>
+        <button class="btn btn-ghost btn-sm" :disabled="selectedBankIds.size === 0" @click="selectedBankIds.clear()">
+          {{ t('batch.clear') }}
+        </button>
+        <span class="sel-spacer"></span>
+        <button class="btn btn-secondary btn-sm" :disabled="busy || selectedBankIds.size === 0" @click="batchExport">
+          {{ t('batch.export') }}
+        </button>
+        <button
+          class="btn btn-secondary btn-sm"
+          :disabled="busy || selectedBankIds.size < 2"
+          @click="batchMerge"
+        >{{ t('batch.merge') }}</button>
+        <button class="btn btn-danger btn-sm" :disabled="busy || selectedBankIds.size === 0" @click="batchDelete">
+          {{ t('batch.delete') }}
+        </button>
+        <button class="btn btn-ghost btn-sm" @click="toggleBatchMode">{{ t('batch.exit') }}</button>
+      </div>
     </template>
+
+    <!-- 题库操作菜单（右键 / 「…」按钮共用同一份菜单） -->
+    <ActionMenu ref="bankMenu" :items="bankMenuItems" @select="onBankMenuSelect" />
+
+    <!-- 重命名题库弹窗（不必进详情页） -->
+    <el-dialog
+      v-model="renameVisible"
+      :title="t('rename.title')"
+      width="min(92vw, 480px)"
+      :close-on-click-modal="false"
+      align-center
+    >
+      <el-form label-position="top" @submit.prevent>
+        <el-form-item :label="t('dialogs.name')" required>
+          <el-input v-model="renameForm.name" maxlength="100" show-word-limit @keyup.enter="submitRename" />
+        </el-form-item>
+        <el-form-item :label="t('dialogs.desc')">
+          <el-input v-model="renameForm.description" type="textarea" :rows="3" maxlength="500" show-word-limit />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <button class="btn btn-ghost" @click="renameVisible = false">{{ t('dialogs.cancel') }}</button>
+        <button class="btn btn-primary" :disabled="busy" @click="submitRename">
+          {{ busy ? t('rename.saving') : t('rename.submit') }}
+        </button>
+      </template>
+    </el-dialog>
 
     <!-- 分页 -->
     <div v-if="total > 0" class="pager">
@@ -324,12 +409,16 @@
 import { computed, onUnmounted, reactive, ref, watch, watchEffect } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { createBank, getBanks, getHomeOverview, importBank, importTikuBank, mergeBanks } from '../api/banks'
+import { ElMessage } from 'element-plus'
+import { createBank, deleteBank, getBanks, getHomeOverview, importBank, importTikuBank, mergeBanks, updateBank } from '../api/banks'
 import { formatDate } from '../utils/format'
 import { pickFile, readArrayBuffer, readTextFile } from '../utils/files'
+import { openLocalFolder } from '../utils/external'
+import http from '../api/http'
 import TikuIcon from '../components/TikuIcon.vue'
 import AiImportDialog from '../components/AiImportDialog.vue'
+import ActionMenu from '../components/ActionMenu.vue'
+import { useConfirm } from '../composables/useConfirm'
 
 const { t } = useI18n({
   messages: {
@@ -414,7 +503,46 @@ const { t } = useI18n({
       msgImportResult: '{tip}：{detail}',
       msgImportedJump: '导入成功，是否跳转到新题库「{id}」？',
       msgJumpOriginal: '是否跳转到原题库？',
-      msgAlreadyImportedTitle: '已导入过'
+      msgAlreadyImportedTitle: '已导入过',
+      msgGoView: '去查看',
+      msgStayHere: '留在本页',
+      /* ---- 卡片操作菜单 / 批量管理 / 重命名 / 导出 / 删除（2026-09-12） ---- */
+      meta: { counts: '共 {q} 题 · 已做 {d}' },
+      menu: {
+        moreTip: '更多操作（右键同款菜单）',
+        open: '打开题库',
+        practice: '开始做题',
+        history: '练习历史',
+        print: '打印试卷',
+        rename: '重命名 / 改描述…',
+        export: '导出题库文件…',
+        multiSelect: '批量管理…',
+        delete: '删除题库…'
+      },
+      rename: { title: '重命名题库', submit: '保存', saving: '保存中…', done: '已保存' },
+      batch: {
+        enter: '批量管理',
+        exit: '退出批量',
+        select: '选中该题库',
+        unselect: '取消选中',
+        selected: '已选 {n} 个题库',
+        selectPage: '全选本页',
+        pageAllSelected: '本页已全选',
+        clear: '清空',
+        export: '导出所选',
+        merge: '合并为新题库',
+        delete: '删除所选'
+      },
+      msgExportedTo: '已导出到：{path}',
+      msgExportedN: '已导出 {n} 个题库文件',
+      msgExportPartial: '成功 {ok} / {total}，其余导出失败',
+      msgExportFail: '导出失败',
+      msgDeleteBankAsk: '将删除 {n} 个题库（共 {q} 道题）及其刷题记录、错题与复习进度，图片文件一并清理。此操作不可恢复，确定删除吗？',
+      msgDeleteBankTitle: '删除题库',
+      msgDeleteBanksTitle: '删除 {n} 个题库',
+      msgBankDeleted: '题库已删除',
+      msgBanksDeleted: '已删除 {n} 个题库',
+      msgDeleteFail: '删除失败'
     },
     'en-US': {
       pageTitle: 'Question Banks',
@@ -497,10 +625,51 @@ const { t } = useI18n({
       msgImportResult: '{tip}: {detail}',
       msgImportedJump: 'Import succeeded — go to the new bank “{id}”?',
       msgJumpOriginal: 'Go to the original bank?',
-      msgAlreadyImportedTitle: 'Already imported'
+      msgAlreadyImportedTitle: 'Already imported',
+      msgGoView: 'Open it',
+      msgStayHere: 'Stay here',
+      meta: { counts: '{q} questions · {d} attempted' },
+      menu: {
+        moreTip: 'More actions (same menu as right-click)',
+        open: 'Open bank',
+        practice: 'Start practicing',
+        history: 'Practice history',
+        print: 'Print paper',
+        rename: 'Rename / edit description…',
+        export: 'Export bank file…',
+        multiSelect: 'Batch manage…',
+        delete: 'Delete bank…'
+      },
+      rename: { title: 'Rename bank', submit: 'Save', saving: 'Saving…', done: 'Saved' },
+      batch: {
+        enter: 'Batch manage',
+        exit: 'Exit batch',
+        select: 'Select this bank',
+        unselect: 'Deselect',
+        selected: '{n} banks selected',
+        selectPage: 'Select page',
+        pageAllSelected: 'Whole page selected',
+        clear: 'Clear',
+        export: 'Export selected',
+        merge: 'Merge into new bank',
+        delete: 'Delete selected'
+      },
+      msgExportedTo: 'Exported to: {path}',
+      msgExportedN: 'Exported {n} bank files',
+      msgExportPartial: 'Succeeded {ok} / {total}; the rest failed',
+      msgExportFail: 'Export failed',
+      msgDeleteBankAsk: 'This deletes {n} bank(s) ({q} questions in total) along with their practice records, wrong-question marks and review progress, and removes their images. This cannot be undone. Delete?',
+      msgDeleteBankTitle: 'Delete bank',
+      msgDeleteBanksTitle: 'Delete {n} banks',
+      msgBankDeleted: 'Bank deleted',
+      msgBanksDeleted: 'Deleted {n} banks',
+      msgDeleteFail: 'Delete failed'
     }
   }
 })
+
+/* 统一确认框（危险操作用 confirmDanger：红色按钮 + 按钮文案=动作名） */
+const { confirm, confirmDanger } = useConfirm(t)
 
 const router = useRouter()
 /** 系统自动生成描述（后端存库固定中文），按界面语言展示；用户自填描述原样显示 */
@@ -759,6 +928,205 @@ async function submitMerge() {
   }
 }
 
+/* ---------- 题库操作菜单（右键 /「…」按钮同一份菜单） ---------- */
+/* 常用动作直达，不必先进详情页 —— 这是用户反馈"删个题库要进去点半天"的直接修复 */
+const bankMenu = ref(null)
+const menuBank = ref(null)
+const bankMenuItems = computed(() => [
+  { key: 'open', label: t('menu.open'), icon: 'book' },
+  { key: 'practice', label: t('menu.practice'), icon: 'play' },
+  { key: 'history', label: t('menu.history'), icon: 'clock' },
+  { key: 'print', label: t('menu.print'), icon: 'file' },
+  { divider: true },
+  { key: 'rename', label: t('menu.rename'), icon: 'edit' },
+  { key: 'export', label: t('menu.export'), icon: 'download' },
+  { divider: true },
+  { key: 'select', label: t('menu.multiSelect'), icon: 'list' },
+  { key: 'delete', label: t('menu.delete'), icon: 'trash', danger: true }
+])
+
+function openBankMenuFromEvent(e, bank) {
+  menuBank.value = bank
+  // 左键点「…」按钮时用元素位置，右键时用鼠标位置
+  if (e.type === 'click') bankMenu.value?.openFromEl(e.currentTarget)
+  else bankMenu.value?.openFromEvent(e)
+}
+
+async function onBankMenuSelect(key) {
+  const bank = menuBank.value
+  if (!bank) return
+  if (key === 'open') return goDetail(bank.id)
+  if (key === 'practice') return router.push({ path: `/banks/${bank.id}`, query: { start: '1' } })
+  if (key === 'history') return router.push(`/banks/${bank.id}/sessions`)
+  if (key === 'print') return router.push(`/banks/${bank.id}/print`)
+  if (key === 'rename') return openRename(bank)
+  if (key === 'export') return exportBanks([bank])
+  if (key === 'select') {
+    batchMode.value = true
+    selectedBankIds.clear()
+    selectedBankIds.add(bank.id)
+    return
+  }
+  if (key === 'delete') return deleteBanks([bank])
+}
+
+/* ---------- 重命名 / 改描述（不必进详情页） ---------- */
+const renameVisible = ref(false)
+const renameForm = reactive({ id: null, name: '', description: '' })
+
+function openRename(bank) {
+  renameForm.id = bank.id
+  renameForm.name = bank.name || ''
+  renameForm.description = bank.description === AI_GEN_DESC ? '' : bank.description || ''
+  renameVisible.value = true
+}
+
+async function submitRename() {
+  const name = renameForm.name.trim()
+  if (!name) {
+    ElMessage.warning(t('msgNeedBankName'))
+    return
+  }
+  busy.value = true
+  try {
+    await updateBank(renameForm.id, { name, description: renameForm.description.trim() || null })
+    ElMessage.success(t('rename.done'))
+    renameVisible.value = false
+    await loadBanks()
+  } catch (e) {
+    /* 错误提示已由拦截器统一处理 */
+  } finally {
+    busy.value = false
+  }
+}
+
+/* ---------- 导出题库文件（写入记忆目录，与「我的作品」同一套：免登录、离线可用） ---------- */
+const EXPORT_TIMEOUT_MS = 10 * 60 * 1000
+
+async function exportBanks(list) {
+  if (!list.length) return
+  busy.value = true
+  let ok = 0
+  let lastPath = ''
+  try {
+    for (const b of list) {
+      const body = { bankId: b.id }
+      if (b.version) body.version = b.version
+      const r = await http.post('/exports/export', body, { skipErrorMessage: true, timeout: EXPORT_TIMEOUT_MS })
+      ok++
+      if (r?.filePath) lastPath = r.filePath
+    }
+    if (ok === 1 && lastPath) ElMessage.success(t('msgExportedTo', { path: lastPath }))
+    else ElMessage.success(t('msgExportedN', { n: ok }))
+    if (ok !== list.length) ElMessage.warning(t('msgExportPartial', { ok, total: list.length }))
+  } catch (e) {
+    ElMessage.error(errTextOf(e, t('msgExportFail')))
+  } finally {
+    busy.value = false
+  }
+}
+
+function errTextOf(e, fallback) {
+  return e?.response?.data?.message || e?.message || fallback
+}
+
+/* ---------- 批量管理（勾选多个题库 → 删除 / 导出 / 合并；与题目列表同一套交互） ---------- */
+const batchMode = ref(false)
+const busy = ref(false)
+const selectedBankIds = reactive(new Set())
+const lastClickedIndex = ref(-1)
+const allPageSelected = computed(
+  () => banks.value.length > 0 && banks.value.every((b) => selectedBankIds.has(b.id))
+)
+
+function toggleBatchMode() {
+  batchMode.value = !batchMode.value
+  if (!batchMode.value) {
+    selectedBankIds.clear()
+    lastClickedIndex.value = -1
+  }
+}
+
+/** 卡片点击：批量模式下=勾选（Shift 连选），平时=进详情 */
+function onCardClick(bank, index, e) {
+  if (!batchMode.value) return goDetail(bank.id)
+  toggleBankSelect(bank.id, e, index)
+}
+
+function toggleBankSelect(id, e, index = -1) {
+  const range = e?.shiftKey && lastClickedIndex.value >= 0 && index >= 0
+  if (range) {
+    const [from, to] = [lastClickedIndex.value, index].sort((a, b) => a - b)
+    for (let i = from; i <= to; i++) {
+      if (banks.value[i]) selectedBankIds.add(banks.value[i].id)
+    }
+  } else if (selectedBankIds.has(id)) {
+    selectedBankIds.delete(id)
+  } else {
+    selectedBankIds.add(id)
+  }
+  if (index >= 0) lastClickedIndex.value = index
+}
+
+function selectAllPage() {
+  for (const b of banks.value) selectedBankIds.add(b.id)
+}
+
+function selectedBanks() {
+  return banks.value.filter((b) => selectedBankIds.has(b.id))
+}
+
+async function batchExport() {
+  const list = selectedBanks()
+  if (!list.length) return
+  await exportBanks(list)
+}
+
+/** 批量合并：预选已勾选的题库，复用现有合并弹窗（源库保留） */
+async function batchMerge() {
+  const list = selectedBanks()
+  if (list.length < 2) {
+    ElMessage.warning(t('msgNeedTwoBanks'))
+    return
+  }
+  await openMerge()
+  mergeIds.value = list.map((b) => b.id)
+}
+
+async function batchDelete() {
+  const list = selectedBanks()
+  if (!list.length) return
+  await deleteBanks(list)
+  if (batchMode.value) toggleBatchMode()
+}
+
+/** 删除题库（单个 / 批量共用）：确认里说明题量与记录影响，删完刷新列表 */
+async function deleteBanks(list) {
+  const totalQuestions = list.reduce((sum, b) => sum + Number(b.questionCount || 0), 0)
+  const ok = await confirmDanger(
+    t('msgDeleteBankAsk', { n: list.length, q: totalQuestions }),
+    list.length === 1 ? t('msgDeleteBankTitle') : t('msgDeleteBanksTitle', { n: list.length })
+  )
+  if (!ok) return
+  busy.value = true
+  let deleted = 0
+  try {
+    for (const b of list) {
+      await deleteBank(b.id)
+      deleted++
+    }
+    ElMessage.success(
+      list.length === 1 ? t('msgBankDeleted') : t('msgBanksDeleted', { n: deleted })
+    )
+    await Promise.all([loadBanks(), loadOverview()])
+  } catch (e) {
+    ElMessage.error(errTextOf(e, t('msgDeleteFail')))
+    if (deleted > 0) await loadBanks()
+  } finally {
+    busy.value = false
+  }
+}
+
 /* ---------- 导入题库文件 ---------- */
 const IMPORT_TIPS = {
   CREATED: 'msgImportCreated',
@@ -809,27 +1177,18 @@ async function handleImportResult(res) {
   if (res?.result === 'CREATED') {
     ElMessage.success(t('msgImportResult', { tip, detail: res.message || '' }))
     await loadBanks()
-    try {
-      await ElMessageBox.confirm(t('msgImportedJump', { id: res.bankId }), t('msgImportDone'), {
-        confirmButtonText: '去查看',
-        cancelButtonText: '留在本页'
-      })
-      router.push(`/banks/${res.bankId}`)
-    } catch (e) {
-      /* 用户选择留在本页 */
-    }
+    const go = await confirm(t('msgImportedJump', { id: res.bankId }), t('msgImportDone'), {
+      confirmText: t('msgGoView'),
+      cancelText: t('msgStayHere')
+    })
+    if (go) router.push(`/banks/${res.bankId}`)
   } else if (res?.result === 'ALREADY_IMPORTED') {
     ElMessage.warning(t('msgImportResult', { tip, detail: res.message || '' }))
     await loadBanks()
-    try {
-      await ElMessageBox.confirm(t('msgJumpOriginal'), t('msgAlreadyImportedTitle'), {
-        confirmButtonText: '去查看',
-        cancelButtonText: '取消'
-      })
-      router.push(`/banks/${res.bankId}`)
-    } catch (e) {
-      /* 留在本页 */
-    }
+    const go = await confirm(t('msgJumpOriginal'), t('msgAlreadyImportedTitle'), {
+      confirmText: t('msgGoView')
+    })
+    if (go) router.push(`/banks/${res.bankId}`)
   } else {
     // VERSION_ADDED / BRANCHED：提示并存/分支，刷新列表即可看到新题库
     ElMessage.success(t('msgImportResult', { tip, detail: res.message || '' }))
@@ -963,6 +1322,7 @@ loadOverview()
 }
 
 .bank-card {
+  position: relative;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
@@ -975,26 +1335,93 @@ loadOverview()
   border-color: var(--border-strong);
   transform: translateY(-1px);
 }
+/* 批量模式：选中卡片高亮（与题目列表 .q-row-sel 同款观感） */
+.bank-card-sel {
+  border-color: var(--accent) !important;
+  background: var(--accent-soft) !important;
+}
+/* 卡片右上角「…」：常显（可发现性优先），悬停加深 */
+.bank-more {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  color: var(--text-muted);
+}
+.bank-card:hover .bank-more {
+  color: var(--text-primary);
+}
+/* 批量模式勾选框（左上角，避免与右侧箭头/菜单抢位置） */
+.bank-check {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 1;
+}
+.sel-box {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg-card);
+  color: #fff;
+  cursor: pointer;
+  padding: 0;
+  transition: all var(--ease);
+}
+.sel-box:hover {
+  border-color: var(--accent);
+}
+.sel-box.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.meta-dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  margin: 0 2px;
+}
+/* 批量操作条（与题目列表 .selection-bar 同款：吸底、卡片外观） */
+.selection-bar {
+  position: sticky;
+  bottom: 14px;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+  padding: 10px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.14);
+  flex-wrap: wrap;
+}
+.sel-count {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.sel-spacer {
+  flex: 1;
+}
 .bank-card-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  /* 右上角留给「…」按钮：名字不要顶到那里，否则会遮住按钮的点击区 */
+  padding-right: 26px;
 }
 .bank-name {
   font-size: 16px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.bank-arrow {
-  color: var(--text-muted);
-  flex-shrink: 0;
-  transition: color var(--ease), transform var(--ease);
-}
-.bank-card:hover .bank-arrow {
-  color: var(--accent-text);
-  transform: translateX(2px);
 }
 .bank-tags {
   display: flex;

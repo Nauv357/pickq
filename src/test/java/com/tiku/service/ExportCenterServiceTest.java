@@ -322,7 +322,7 @@ class ExportCenterServiceTest {
         when(questionMapper.selectList(any())).thenReturn(List.of(question));
 
         ContentPackageService.TikuExport export = service.exportTikuPackageWithMeta(1L,
-                new ExportRequest(null, null, "UPGRADE", null, null, null), "1.0.1");
+                new ExportRequest(null, null, "UPGRADE", null, null, null, null), "1.0.1");
 
         assertEquals("1.0.1", export.version());
         assertEquals("key-1", export.packageKey(), "UPGRADE 沿用身份：改写版本号不影响 packageKey");
@@ -337,7 +337,7 @@ class ExportCenterServiceTest {
 
         // 不传 override = 保持导出决策出的版本（既有 /api/banks/{id}/export-tiku 行为不变）
         ContentPackageService.TikuExport keep = service.exportTikuPackageWithMeta(1L,
-                new ExportRequest(null, null, "UPGRADE", null, null, null), null);
+                new ExportRequest(null, null, "UPGRADE", null, null, null, null), null);
         assertEquals("1.0.0", ContentPackageInspector.inspect(keep.bytes()).version());
     }
 

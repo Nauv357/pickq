@@ -54,7 +54,7 @@
 | # | 规则 | 为什么 |
 | --- | --- | --- |
 | **R1** | 每屏**最多一个**主按钮（`btn-primary`），且必须落在 PageHeader 最右 | 用户视线动线是"左上标题 → 右上下一步"，主按钮位置固定才不用思考 |
-| **R2** | 次级操作超过 3 个 → 收进「更多」；不与主操作平铺 | 平铺 = 每个都要读一遍才知道该点哪个 |
+| **R2** | 次级操作超过 3 个 → 收进「更多」（`ActionMenu`）；不与主操作平铺 | 平铺 = 每个都要读一遍才知道该点哪个 |
 | **R3** | 破坏性操作（删除/覆盖/重置/退出登录）**必须二次确认**；确认按钮红色 + 文案等于动作本身（"删除"而不是"确定"）；取消按钮文案统一"取消" | 盲确认 = 没有确认 |
 | **R4** | 空态必须给一条出路（一个可点的下一步），并说清"为什么空" | "暂无数据"是死路 |
 | **R5** | 列表页固定：Toolbar 左搜索、左筛选、右计数；Pager 在 Content 下方居中；每页条数一致（默认 50） | 找搜索框不该靠眼睛扫 |
@@ -63,6 +63,9 @@
 | **R8** | 反馈统一用 `ElMessage`；错误文案由 axios 拦截器统一给，页面不重复包装 | 避免同一错误弹两次 |
 | **R9** | 用户可见文案一律走 `t()`；公共组件自带词典或走 `common.*` | 英文界面不出现裸 key / 中文 |
 | **R10** | 图标按钮必须有 `title`（走 i18n），`title` 写"点了会发生什么" | 图标语义不唯一 |
+| **R11** | 菜单（右键 /「…」）只放**对这一个对象**的动作；跨对象动作（批量）放工具条与底部批量条 | 菜单里出现"全选"之类会让人怀疑作用域 |
+| **R12** | 右键必须同时提供可见入口（「…」按钮），且**输入框内保留系统菜单** | 右键是不可发现的；输入框里要能右键粘贴 |
+| **R13** | 多选交互两个层级（题库列表 / 题目列表）**完全一致**：勾选框在对象左上/行首、Shift 连选、底部批量条、退出即清空 | 学一次，处处适用 |
 
 **R7 的大弹窗规格**（题库详情编辑已按此实现，可作为模板）：
 
@@ -95,10 +98,35 @@
 | `PageHeader` | `src/components/PageHeader.vue` | 统一页头 | props：`title`(必填) / `desc` / `backTo` / `backText` / `note`；插槽：`title-extra` / `meta` / `actions`（主操作放最右） |
 | `EmptyState` | `src/components/EmptyState.vue` | 统一空态 | props：`icon` / `title` / `desc` / `compact`；默认插槽放出路按钮 |
 | `Pager` | `src/components/Pager.vue` | 统一分页 | props：`page` / `size` / `total` / `pageSizes` / `small`；`total > size` 才渲染 |
+| `ActionMenu` | `src/components/ActionMenu.vue` | 统一菜单（右键 /「…」共用） | props：`items`（`{key,label,icon,hint,danger,disabled}` 或 `{divider:true}`）；`@select(key)`；`defineExpose({ openFromEvent, openFromEl, close })`；z-index 2200（高于编辑大弹窗 1900 与题号盘 1990） |
 | `useConfirm()` | `src/composables/useConfirm.js` | 统一确认框 | `useConfirm(t)` → `{ confirm, confirmDanger }`，返回 `Promise<boolean>`；`confirmDanger` 用红色确认按钮且按钮文案=标题 |
 
-规划中（迁移过程中按需补，避免过度设计）：
-`Toolbar`、`MoreMenu`（R2）、`BulkBar`、`ImmersiveBar`（R7 之外的"沉浸式单题"入口）。
+### 4.1 右键与「…」菜单（R11 / R12）
+
+- 系统右键菜单由 `App.vue` 的 `contextmenu` 监听统一 `preventDefault()`，**输入框/文本域/contenteditable 内不拦截**（右键粘贴 API Key 是刚需）。这一条同时堵掉了普通用户误入"检查元素"的入口。
+  > 背景：WebView2/Edge 的默认菜单里有「另存为 HTML」「共享」——对 SPA 毫无意义，"共享"在 WebView2 里还没有宿主，点了没反应。用户会当成 bug。
+- 需要菜单的对象（题库卡片、题目行）同时提供两种打开方式：右键（`@contextmenu.prevent`）与可见的「…」按钮（`openFromEl($event.currentTarget)`）。
+- 菜单项顺序固定：**常用动作 → 分隔线 → 重命名/导出 → 分隔线 → 危险动作（红色，最后一项）**。
+- 菜单里只放"对当前对象"的动作；批量类动作（全选本页、批量删除）放工具条与底部批量条。
+- 未接入菜单的区域右键现在是"无反应"（已知取舍）：文本仍可用 Ctrl+C 复制，后续可给"有选区时显示复制"的兜底菜单。
+
+### 4.2 批量管理（R13）
+
+两级列表用同一套交互，实现见 `BankListView`（题库）与 `BankDetailView`（题目）：
+
+1. 工具条上的「批量管理 / 选题另存」按钮进入勾选模式；
+2. 对象上出现勾选框（题库卡片左上、题目行行首），点击卡片/行本身即勾选；
+3. **Shift 点击**从上次点击处连选到当前位置；
+4. 页面底部出现吸底批量条：计数 + 全选本页 + 清空 + 批量动作 + 退出；
+5. 退出即清空选择（不留"看不见的选中态"）；
+6. 只有 1 个对象时不做批量入口（按钮置灰）。
+
+题库级批量动作：导出所选（写入记忆目录，逐个调用 `/api/exports/export`）、合并为新题库、删除所选。
+题目级批量动作：导出所选（→ 导出弹窗，范围默认"已勾选 N 题"）、另存为新题库、并入现有题库、删除所选。
+
+> 批量写操作目前是**循环单条请求**（后端只有单条 DELETE 端点）。几十~几百个对象够用；
+> 若将来出现上千量级的批量删除，再加批量端点。
+
 
 ---
 
@@ -131,7 +159,8 @@ common.opFailed 操作失败，请稍后重试
 cd frontend
 npm run check:ui      # 伪插值 + i18n 重复键 + 未定义 key（纯静态，秒级）
 npm run check:i18n    # 模板里未走 t() 的硬编码中文（当前 240 行，迁移中逐页消除）
-npm run smoke:editor  # 编辑大弹窗冒烟（Playwright + 本机 Chrome，需先起 dev server）
+npm run smoke:editor  # 编辑大弹窗冒烟（28 项断言，需先起 dev server）
+npm run smoke:bank    # 右键菜单 / 批量管理 / 导出所选冒烟（45 项断言，需先起 dev server）
 ```
 
 | 脚本 | 抓什么缺陷 | 实例 |
@@ -141,6 +170,7 @@ npm run smoke:editor  # 编辑大弹窗冒烟（Playwright + 本机 Chrome，需
 | `check-i18n-keys.mjs` | `t('x')` 用了但词典没定义 → 界面显示裸 key | `SessionHistoryView` 的 `historyTitle`/`sessionsTotal` 等 14 个 |
 | `check-hardcoded-zh.mjs` | 模板里未走 i18n 的中文（英文界面直接显示中文） | 当前 240 行 / 10 个文件，属迁移清单 |
 | `smoke-editor-dialog.mjs` | 弹窗层级、滚动容器、脏数据确认、题号盘位置等**只能靠跑**才能确认的行为 | 28 项断言（1440×900 / 1920×1080 两档） |
+| `smoke-bank-actions.mjs` | 右键是否被屏蔽（含输入框放行）、菜单项、Shift 连选、批量删除/导出真的发了请求、导出范围默认值 | 45 项断言；**本轮靠它抓出两个真 bug**（卡片箭头挡住「…」按钮、菜单 items 计算时序导致菜单不出现） |
 | `shot-routes.mjs` | 给若干路由拍图，人工核对骨架（假数据，不需要后端） | `<out>/<route>.png` |
 
 > 说明：`check-i18n-keys.mjs` 直接 eval `useI18n({ messages })` 里的对象字面量再展开成
@@ -154,11 +184,12 @@ npm run smoke:editor  # 编辑大弹窗冒烟（Playwright + 本机 Chrome，需
 
 | 阶段 | 范围 | 状态 |
 | --- | --- | --- |
-| P0 | 题库详情编辑改大弹窗（R7）+ 4 个确定性缺陷 | ✅ 本轮完成 |
-| P1 | 建公共组件（PageHeader / EmptyState / Pager / useConfirm）+ 全局词表 | ✅ 本轮完成 |
-| P2 | 迁移设置页、统计页、练习历史页（页头 / 空态 / 分页） | ✅ 本轮完成 |
-| P3 | 迁移题库列表、我的作品、发现题库、AI 任务页；补 `Toolbar` / `MoreMenu` | 待办 |
-| P4 | 练习页 / 打印页（交互重，最后动）；模板硬编码中文清零 | 待办 |
+| P0 | 题库详情编辑改大弹窗（R7）+ 4 个确定性缺陷 | ✅ |
+| P1 | 建公共组件（PageHeader / EmptyState / Pager / useConfirm）+ 全局词表 | ✅ |
+| P2 | 迁移设置页、统计页、练习历史页（页头 / 空态 / 分页） | ✅ |
+| P3 | 右键菜单 + 「…」入口（R11/R12）+ 两级列表批量管理（R13）+ 卡片菜单直达（重命名/导出/做题/历史/打印）+ 多选后导出（R2 的导出范围） | ✅ 2026-09-12 |
+| P4 | 迁移题库列表、我的作品、发现题库、AI 任务页到 PageHeader/EmptyState/Toolbar；补 `Toolbar` / `MoreMenu` 收口次级操作 | 待办 |
+| P5 | 练习页 / 打印页（交互重，最后动）；模板硬编码中文清零 | 待办 |
 
 验收口径（每阶段都适用）：
 

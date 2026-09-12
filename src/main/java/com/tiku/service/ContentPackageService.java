@@ -59,11 +59,17 @@ public class ContentPackageService {
      * 保持原顺序。
      */
     private List<Question> filterExportQuestions(Long bankId, List<Question> questions,
-                                                 String scope, String category, String topic) {
+                                                 String scope, String category, String topic,
+                                                 List<Long> questionIds) {
         List<Question> filtered = questions.stream()
                 .filter(q -> category == null || category.isBlank() || category.equals(q.getCategory()))
                 .filter(q -> topic == null || topic.isBlank() || topic.equals(q.getTopic()))
                 .toList();
+        //按题目 id 精确导出（勾选若干题后导出）：只保留勾选的题（与上面的筛选取交集）
+        if (questionIds != null && !questionIds.isEmpty()) {
+            Set<Long> wanted = new HashSet<>(questionIds);
+            filtered = filtered.stream().filter(q -> wanted.contains(q.getId())).toList();
+        }
         if ("favorite".equals(scope)) {
             filtered = filtered.stream().filter(q -> Boolean.TRUE.equals(q.getFavorite())).toList();
         } else if ("wrong".equals(scope) || "undone".equals(scope)) {
@@ -165,9 +171,10 @@ public class ContentPackageService {
         }
         List<Question> questions = questionMapper.selectList(
                 new LambdaQueryWrapper<Question>().eq(Question::getBankId, bankId).orderByAsc(Question::getId));
-        //题目范围过滤（打印/组卷数据源复用）：scope=all|favorite|wrong|undone + category/topic
+        //题目范围过滤（打印/组卷/导出所选复用）：scope=all|favorite|wrong|undone + category/topic + questionIds
         questions = filterExportQuestions(bankId, questions, request == null ? null : request.scope(),
-                request == null ? null : request.category(), request == null ? null : request.topic());
+                request == null ? null : request.category(), request == null ? null : request.topic(),
+                request == null ? null : request.questionIds());
         List<Material> materials = materialMapper.selectList(
                 new LambdaQueryWrapper<Material>().eq(Material::getBankId, bankId)
                         .orderByAsc(Material::getSortOrder).orderByAsc(Material::getId));
@@ -230,10 +237,21 @@ public class ContentPackageService {
         if (bank.getPackageKey() == null || bank.getPackageKey().isBlank()) {
             //自建题库（无身份）：完整导出时"认领身份"——把生成的 packageKey/version/指纹回写题库。
             //此后该库的刷题记录可随记录文件跨设备迁移（记录文件以 packageKey+version 定位），
-            //后续导出可走 UPGRADE 作者迭代闭环；范围过滤导出（打印/组卷）不认领，避免把子集内容登记成身份指纹
+            //后续导出可走 UPGRADE 作者迭代闭环；范围过滤导出（打印/组卷/导出所选）不认领，
+            //避免把子集内容登记成整个题库的身份指纹。
+            //
+            //⚠️ 这里必须用括号分组：`a || b && c` 会解析成 `a || (b && c)`，
+            //   过去写成 `isBlank(scope) || "all".equals(scope) && isBlank(category) && isBlank(topic)`，
+            //   导致「只按 category 过滤」的导出（scope 为空）被误判成完整导出并认领身份，
+            //   把子集指纹写进题库 → 之后"内容是否变化"的判断全部失真。
+            boolean scopeIsAll = isBlank(request == null ? null : request.scope())
+                    || "all".equalsIgnoreCase(request.scope());
+            boolean hasCategoryOrTopic = request != null
+                    && (!isBlank(request.category()) || !isBlank(request.topic()));
+            boolean hasQuestionIds = request != null
+                    && request.questionIds() != null && !request.questionIds().isEmpty();
             boolean fullExport = request == null
-                    || isBlank(request.scope()) || "all".equalsIgnoreCase(request.scope())
-                    && isBlank(request.category()) && isBlank(request.topic());
+                    || (scopeIsAll && !hasCategoryOrTopic && !hasQuestionIds);
             String claimedVersion = resolveVersion(request, bank);
             if (fullExport) {
                 packageKey = generatePackageKey();
@@ -243,7 +261,7 @@ public class ContentPackageService {
                 bank.setChecksum(currentChecksum);
                 questionBankMapper.updateById(bank);
             } else {
-                //非完整导出（打印/组卷）：不认领，临时身份仅用于本次文件
+                //非完整导出（打印/组卷/导出所选）：不认领，临时身份仅用于本次文件
                 packageKey = generatePackageKey();
             }
         } else if ("UPGRADE".equalsIgnoreCase(mode)) {

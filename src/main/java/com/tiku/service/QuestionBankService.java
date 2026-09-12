@@ -1,6 +1,7 @@
 package com.tiku.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.tiku.dto.*;
@@ -23,6 +24,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -82,7 +85,31 @@ public class QuestionBankService {
         IPage<QuestionBank> questionBankPage = questionBankMapper.selectPage(
                 new Page<>(com.tiku.util.Paging.page(page), com.tiku.util.Paging.size(size)),
                 wrapper);
-        return PageResult.from(questionBankPage.convert(QuestionBankResponse::fromEntity));
+        //列表卡片要显示「共 N 题 · 已做 M」：一次 IN 查询后在内存分组，
+        //避免每库两条自定义聚合 SQL（也避开 H2 聚合列名大小写的坑）。
+        //注意用 QueryWrapper（字符串列名）而不是 LambdaQueryWrapper：后者在纯单测里
+        //需要 MyBatis-Plus 的 lambda 缓存（无 Spring 上下文时直接抛异常），可测性更好。
+        List<QuestionBank> rows = questionBankPage.getRecords();
+        Map<Long, Long> questionCountByBank = new HashMap<>();
+        Map<Long, Long> answeredCountByBank = new HashMap<>();
+        List<Long> ids = rows.stream().map(QuestionBank::getId).toList();
+        if (!ids.isEmpty()) {
+            for (Question q : questionMapper.selectList(new QueryWrapper<Question>()
+                    .select("bank_id").in("bank_id", ids))) {
+                questionCountByBank.merge(q.getBankId(), 1L, Long::sum);
+            }
+            Map<Long, Set<Long>> answeredByBank = new HashMap<>();
+            for (StudyRecord r : studyRecordMapper.selectList(new QueryWrapper<StudyRecord>()
+                    .select("bank_id", "question_id").in("bank_id", ids))) {
+                answeredByBank.computeIfAbsent(r.getBankId(), k -> new HashSet<>()).add(r.getQuestionId());
+            }
+            answeredByBank.forEach((bankId, qids) -> answeredCountByBank.put(bankId, (long) qids.size()));
+        }
+        IPage<QuestionBankResponse> converted = questionBankPage.convert(b ->
+                QuestionBankResponse.fromEntity(b,
+                        questionCountByBank.getOrDefault(b.getId(), 0L),
+                        answeredCountByBank.getOrDefault(b.getId(), 0L)));
+        return PageResult.from(converted);
     }
 
     public QuestionBankDetailResponse getBankDetail(Long id){

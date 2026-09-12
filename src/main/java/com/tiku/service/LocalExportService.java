@@ -80,7 +80,7 @@ public class LocalExportService {
         //"同一作品的新版本"；AUTO 在内容被改过时会分支成新 packageKey（那是"派生/防冒用"语义，
         //不适合"我的作品发新版本"）。版本号不交给导出逻辑，而是打包前改写包内 version（见下），
         //这样"内容没改但用户就是想发个新版本号"不会被"内容未变化禁止变更版本号"挡住。
-        ExportRequest exportRequest = new ExportRequest(null, null, "UPGRADE", null, null, null);
+        ExportRequest exportRequest = new ExportRequest(null, null, "UPGRADE", null, null, null, null);
         ContentPackageService.TikuExport export =
                 contentPackageService.exportTikuPackageWithMeta(bankId, exportRequest, versionOverride);
 

@@ -94,7 +94,7 @@
 | 方法 + 路径 | 鉴权 | 请求 | 响应 `data` | 常见错误 |
 | --- | --- | --- | --- | --- |
 | `POST /api/banks` | 无 | body `{name*, description}` | `Long`（新题库 id） | 400 `题库名不能为空`（`@NotBlank`） |
-| `GET /api/banks` | 无 | query `page=1`、`size=20`、`keyword`、`sort=created\|updated\|name` | `PageResult<QuestionBankResponse{id,name,description,version,authorName,source,createdAt}>` | 无 |
+| `GET /api/banks` | 无 | query `page=1`、`size=20`、`keyword`、`sort=created\|updated\|name` | `PageResult<QuestionBankResponse{id,name,description,version,authorName,source,createdAt,questionCount,answeredCount}>`（后两个字段由列表接口按当前页批量填充，卡片显示「共 N 题 · 已做 M」；`answeredCount` 为去重后的已做题数） | 无 |
 | `GET /api/banks/{id}` | 无 | — | `QuestionBankDetailResponse{id,name,description,packageKey,version,schemaVersion,authorId,authorName,source,parentKey,createdAt,reviewEnabled}` | 404 `题库不存在` |
 | `GET /api/banks/{id}/questions` | 无 | query `page,size,keyword,questionType,category,topic,scope=all\|favorite\|wrong\|undone` | `PageResult<QuestionSummaryResponse{questionId,questionType,typeLabel,questionNumber,content,score,category,topic,favorite,answerKeys,analysis,materialContent}>`（含答案与解析，供「解析」弹窗一次到位） | 404 `题库不存在`；`scope=wrong` 无错题时返回空页（不报错） |
 | `GET /api/banks/{id}/question-nav` | 无 | 同上的筛选参数（无分页） | `List<QuestionNavItemResponse{questionId,questionType,questionNumber}>`（全量轻量，`questionNumber ASC, id ASC`） | 404 `题库不存在` |
@@ -103,7 +103,7 @@
 | `DELETE /api/banks/{id}` | 无 | — | `DeleteBankResult{deletedQuestions,affectedRecords}` | 404 `题库不存在` |
 | `POST /api/banks/import` | 无 | body = 内容包 JSON 原文（`String`，非 JSON 对象也可） | `ImportResultResponse{result,bankId,message}`；`result` ∈ `CREATED`/`ALREADY_IMPORTED`/`VERSION_ADDED`/`BRANCHED` | 400 `内容包文件格式错误：{原因}` / `不支持的内容包格式版本：{v}` / `内容包缺少 packageKey` / `内容包缺少标题` / `内容包缺少版本号` / `题目缺少 questionKey` / `题目题干为空：{key}` / `未知题型：{type}` / `题目引用的材料不存在：{key}` / `内容包材料缺少 materialKey` |
 | `POST /api/banks/import-tiku` | 无 | body = `.tiku` zip 字节（`application/octet-stream`） | 同 `import` | 400 `.tiku 容器读取失败：{msg}` + 上表校验错误 |
-| `POST /api/banks/{id}/export` | 无 | body 可选 `{version,authorName,mode=UPGRADE\|BRANCH\|null,scope,category,topic}` | `ContentPackageFile`（内容包对象，含 `checksum`；前端保存文件时应剥离 `checksum`） | 404 `题库不存在：{id}`；400 `题目内容未变化，无需变更版本号（保持 {v} 原样导出）` |
+| `POST /api/banks/{id}/export` | 无 | body 可选 `{version,authorName,mode=UPGRADE\|BRANCH\|null,scope,category,topic,questionIds}`（`scope` ∈ `all`/`favorite`/`wrong`/`undone`；`questionIds` = 勾选题精确导出，与 `scope` 取交集） | `ContentPackageFile`（内容包对象，含 `checksum`；前端保存文件时应剥离 `checksum`） | 404 `题库不存在：{id}`；400 `题目内容未变化，无需变更版本号（保持 {v} 原样导出）` |
 | `POST /api/banks/{id}/export-tiku` | 无 | body 同上 | **zip 字节流**（`content.tiku`） | 同上 |
 | `POST /api/banks/merge` | 无 | body `{name*,description,sourceBankIds*（≥2）}` | `MergeResult{bankId,name,questionsCopied,materialsCopied}` | 400 `新题库名称不能为空` / `请至少选择两个题库进行合并` |
 | `POST /api/banks/{id}/questions/selection-copy` | 无 | body `{questionIds*（非空）,name,description,targetBankId}` | `MergeResult` | 400 `请先勾选要复制的题目`；404 `题库不存在` |

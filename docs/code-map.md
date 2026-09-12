@@ -85,7 +85,7 @@ frontend/src/
 ├── App.vue                     根组件：el-config-provider + router-view + 两个 Teleport（图片灯箱、更新进度弹窗）
 ├── router/index.js             12 条路由，全部懒加载；只有 afterEach 设 document.title（无鉴权守卫）
 ├── api/                        薄封装（10）：http.js（唯一 axios 实例）+ 按后端资源分文件
-├── components/                 复用组件（10）——见 §3.2 与 §3.3
+├── components/                 复用组件（11）——见 §3.2 与 §3.3
 ├── composables/                useConfirm.js（统一确认框；界面规范见 docs/design-ui.md）
 ├── i18n/                       index.js（建实例 + 全局 common.* 词表）+ lang.js（切换/持久化/Element Plus 联动）
 ├── layouts/AppLayout.vue       唯一外壳：侧栏导航 + AI 任务全局监控（5s 轮询 + Notification）
@@ -99,6 +99,7 @@ frontend/scripts/              前端检查与冒烟（`npm run check:ui` / `che
 ├── check-i18n-keys.mjs         t() 用了但没定义的 key（eval 词典再展开 a.b.c）
 ├── check-hardcoded-zh.mjs      模板里未走 t() 的中文清单
 ├── smoke-editor-dialog.mjs     编辑大弹窗 Playwright 冒烟（需先起 dev server）
+├── smoke-bank-actions.mjs      右键菜单 / 批量管理 / 导出所选冒烟（需先起 dev server）
 └── shot-routes.mjs             批量路由截图（假数据，人工核对骨架）
 ```
 
@@ -240,14 +241,14 @@ web/
 
 ## 3. 前端页面索引表
 
-### 3.1 路由页面（`frontend/src/views/`，11 个，合计 17,492 行）
+### 3.1 路由页面（`frontend/src/views/`，11 个）
 
 | 路由 | name | 文件 | 行数 | 职责 | 主要子组件 |
 | --- | --- | --- | --- | --- | --- |
-| `/` | `bank-list` | `BankListView.vue` | **1347** | 首页：概览卡带（最近练习 / 今日待复习）、题库分页 + 名称筛选、新建题库、合并题库、三种导入入口（AI / JSON / .tiku）、首次使用引导 | `TikuIcon`、`AiImportDialog` |
-| `/banks/:id` | `bank-detail` | `BankDetailView.vue` | **2848** | 题库详情与**题库级全部操作**：信息编辑、导出、删除、复习计划开关、复习队列/重置、进度与错题、题目检索分页与收藏、题号盘、批量选择另存/并入、批量建题、AI 补答案、材料 CRUD、图片上传、开练习会话、打印入口 | `TikuIcon`、`QuestionFormPanel`、`QuestionNavDock`、`AiImportDialog`、`QuestionAiAnalysis` |
+| `/` | `bank-list` | `BankListView.vue` | **1774** | 首页：概览卡带（最近练习 / 今日待复习）、题库分页 + 名称筛选、新建题库、合并题库、三种导入入口（AI / JSON / .tiku）、首次使用引导；**卡片操作菜单**（右键 /「…」：打开 / 做题 / 历史 / 打印 / 重命名 / 导出 / 批量管理 / 删除）、**批量管理模式**（勾选 + Shift 连选 + 底部批量条：导出所选 / 合并 / 删除所选）、卡片显示「共 N 题 · 已做 M」 | `TikuIcon`、`AiImportDialog`、`ActionMenu` |
+| `/banks/:id` | `bank-detail` | `BankDetailView.vue` | **3077** | 题库详情与**题库级全部操作**：信息编辑、导出（含**导出范围**：全部/收藏/错题/未做/**已勾选 N 题**）、删除、复习计划开关、复习队列/重置、进度与错题、题目检索分页与收藏、题号盘、**题目行菜单**（右键 /「…」）、批量选择（导出所选 / 另存为新题库 / 并入现有题库 / **删除所选**）、批量建题、AI 补答案、材料 CRUD、图片上传、开练习会话（支持 `?start=1` 直达）、打印入口 | `TikuIcon`、`QuestionFormPanel`、`QuestionNavDock`、`AiImportDialog`、`QuestionAiAnalysis`、`ActionMenu` |
 | `/banks/:id/practice` | `practice` | `PracticeView.vue` | **1822** | 做题页（会话制）：计时、逐题作答、收藏、暂停复习、交卷 → 成绩报告、报告内主观题自评、进入回顾 | `TikuIcon`、`QuestionAiAnalysis` |
-| `/banks/:id/sessions` | `session-history` | `SessionHistoryView.vue` | **1016** | 双视图：历史列表（继续练习）/ 会话回顾（每题对错、答案、解析、材料折叠、自评、题号状态盘） | `TikuIcon`、`QuestionAiAnalysis`、`QuestionNavDock` |
+| `/banks/:id/sessions` | `session-history` | `SessionHistoryView.vue` | **940** | 双视图：历史列表（继续练习）/ 会话回顾（每题对错、答案、解析、材料折叠、自评、题号状态盘） | `TikuIcon`、`QuestionAiAnalysis`、`QuestionNavDock` |
 | `/banks/:id/print` | `print-paper` | `PrintPaperView.vue` | 528 | **独立页面（无侧栏）**：按范围（全部/错题/收藏/未做）+ 分类本地过滤渲染，切换`仅题目/含答案解析`，`window.print()` | `TikuIcon` |
 | `/ai-import/jobs` | `ai-import-jobs` | `AiImportJobsView.vue` | 414 | AI 导入任务列表：5s 轮询、状态/耗时展示、进入预览、两阶段取消/删除 | `TikuIcon` |
 | `/ai-import/:jobId` | `ai-import-preview` | `AiImportPreviewView.vue` | **2341** | 预览与确认：进度（轮询兜底）、题目/材料卡片就地编辑、拖拽排序、图片素材拖入/删除标记、确认入库或取消 | `TikuIcon`、`FieldImages`、`QuestionNavDock` |
@@ -277,6 +278,7 @@ web/
 | `PageHeader.vue` | 统一页头：可选返回入口 → 标题(+标签) → 一句话说明 → 摘要行；右侧说明文字 + 操作（主操作最右） | props `title`(必填)/`desc`/`backTo`/`backText`/`note`；slots `title-extra`/`meta`/`actions` |
 | `EmptyState.vue` | 统一空态：图标 + 为什么空 + 一条出路（不允许只有"暂无数据"） | props `icon`/`title`/`desc`/`compact`；默认插槽放出路按钮 |
 | `Pager.vue` | 统一分页条（`total > size` 才渲染），居中 | props `page`/`size`/`total`/`pageSizes`/`small`；emits `update:page`/`update:size`/`change` |
+| `ActionMenu.vue` | 统一菜单：右键与「…」按钮共用；键盘 ↑↓/Enter/Esc、点外关闭、视口内自动收边 | props `items`(`{key,label,icon,hint,danger,disabled}`/`{divider}`)；emits `select`；`defineExpose({openFromEvent,openFromEl,close})` |
 | `useConfirm()`（`composables/`） | 统一确认框：危险操作红色确认按钮、按钮文案=动作名、点遮罩不算确认 | `useConfirm(t)` → `{ confirm, confirmDanger }`，返回 `Promise<boolean>` |
 
 **业务组件**
@@ -284,12 +286,12 @@ web/
 | 文件 | 行数 | 职责 | 接口 |
 | --- | --- | --- | --- |
 | `QuestionFormPanel.vue` | **1360** | 录题/编辑题面板：题型、题干、选项、答案、解析、材料选择/新建、图片上传插入 `[图片:name]`、实时富文本预览、AI 草稿解析、创建/更新、上一题/下一题、未保存离开确认 | props `bankId` / `mode` / `initial` / `nextNumber` / `nav` / `jumpRequest`；emits `saved` / `closed` / `navigate` / `jump-to` |
-| `AiImportDialog.vue` | 849 | AI 导入对话框：校验 AI 配置 → 选文件（多选可逐个移除）→ 目标题库 → 处理模式（快速/标准/深度）→ 补充答案与思考开关 → 提交并订阅 SSE（**8s 无事件回退轮询**） | props `bankId` / `bankName`；emits `done`；`defineExpose({ open })` |
+| `AiImportDialog.vue` | 847 | AI 导入对话框：校验 AI 配置 → 选文件（多选可逐个移除）→ 目标题库 → 处理模式（快速/标准/深度）→ 补充答案与思考开关 → 提交并订阅 SSE（**8s 无事件回退轮询**） | props `bankId` / `bankName`；emits `done`；`defineExpose({ open })` |
 | `QuestionNavDock.vue` | 427 | 可拖动题号盘：题号按钮 + 状态色（对/错/部分/未答）、跳转输入、三档尺寸、位置与尺寸持久化到 localStorage | props `title`/`items`/`activeId`/`showLegend`/`hint`/`draggable`/`storageKey`/`activeFill`；emits `select` |
 | `StatsHeatmap.vue` | 285 | 每日做题量热力图：30 天/90 天/全年三视图、分级上色、点击展开当日题量与正确率 | props `daily` |
 | `QuestionAiAnalysis.vue` | 222 | 单题 AI 解析：生成/重新生成、保存为正式解析、`autoStart`、模型失效时引导去设置页 | props `questionId`/`bankId`/`autoStart`；emits `saved`；`defineExpose({ generate })` |
 | `FieldImages.vue` | 127 | 把 `obj[field]` 文本里的 `[图片N]` 渲染为任务临时图片缩略图（可预览、悬停删除该编号引用） | props `obj`/`field`/`jobId` |
-| `TikuIcon.vue` | 60 | **无依赖内联 SVG 图标组件**（24×24 stroke，随 `currentColor`），内置 30 个图标；全仓唯一图标来源（不引入图标库） | props `name`/`size`/`filled` |
+| `TikuIcon.vue` | 62 | **无依赖内联 SVG 图标组件**（24×24 stroke，随 `currentColor`），内置 32 个图标（含 `more` 横向省略号、`folder`）；全仓唯一图标来源（不引入图标库） | props `name`/`size`/`filled` |
 
 ---
 
