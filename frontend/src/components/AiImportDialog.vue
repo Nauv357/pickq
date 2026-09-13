@@ -187,8 +187,8 @@ const { t } = useI18n({
       mineruOnTip: '把照片/扫描件版面里的图形题裁成独立题图（默认视觉直读只能看整张图）。文字型 PDF/Word 无需开启',
       mineruOffTip: '未配置 MinerU Key：点击后到「设置-AI 配置」填写（拍照试卷的图形题需要它裁题图）',
       formats: '支持格式与处理方式',
-      formatsTip1: 'txt / md 直接读取；Word、文字版 PDF（可选中文字的）由 AI 看图整理（公式/插图自动归位，最推荐）；',
-      formatsTip2: '扫描件 PDF 与图片由多模态模型直读，含图形图表的扫描件可勾选上方「MinerU 增强」；doc 老格式请先另存为 .docx',
+      formatsTip1: 'txt / md / csv 直接读取；Word（含老 .doc）、文字版 PDF（可选中文字的）由 AI 整理，公式与插图自动归位（最推荐）；',
+      formatsTip2: 'Excel（xls/xlsx）与 PPT（ppt/pptx）按表格行列 / 幻灯片逐页抽取文字后交给 AI 整理；扫描件 PDF 与图片由多模态模型直读，含图形图表的扫描件可勾选上方「MinerU 增强」',
       backgroundTip: '可关闭本窗口继续做其他事，任务在后台进行，完成后侧边栏与系统通知都会提醒你',
       cancel: '取消', submitting: '提交中…', startParse: '开始解析', close: '关闭', closeBg: '关闭（后台继续）',
       mineruKeyNeeded: '未配置 MinerU 解析 Key，请先到「设置-AI 配置」填写',
@@ -217,8 +217,8 @@ const { t } = useI18n({
       mineruOnTip: 'Crops figure questions from photo/scan layouts into separate images (default vision reads the whole page only). Not needed for text PDFs/Word',
       mineruOffTip: 'MinerU key not configured: click to add it in Settings → AI Setup (needed to crop figures from photographed papers)',
       formats: 'Supported formats & how they are handled',
-      formatsTip1: 'txt / md are read directly; Word and text-layer PDFs are organized by AI vision (formulas/images placed back automatically — recommended);',
-      formatsTip2: 'Scanned PDFs and images are read by the vision model; for scans with figures/charts enable "MinerU enhance" above; old .doc format: save as .docx first',
+      formatsTip1: 'txt / md / csv are read directly; Word (including legacy .doc) and text-layer PDFs are organized by AI, with formulas and figures placed back automatically (recommended);',
+      formatsTip2: 'Excel (xls/xlsx) and PowerPoint (ppt/pptx) are converted to text row by row / slide by slide before AI organizing; scanned PDFs and images are read by the vision model — for scans with figures/charts enable "MinerU enhance" above',
       backgroundTip: 'You can close this window — the task keeps running in the background; the sidebar and system notification will remind you when done',
       cancel: 'Cancel', submitting: 'Submitting…', startParse: 'Start parsing', close: 'Close', closeBg: 'Close (keep running)',
       mineruKeyNeeded: 'MinerU parse key not configured — add it first in Settings → AI Setup',
@@ -405,7 +405,7 @@ function pick() {
   const input = document.createElement('input')
   input.type = 'file'
   input.multiple = true
-  input.accept = '.txt,.md,.docx,.pdf,.jpg,.jpeg,.png,.webp'
+  input.accept = '.txt,.md,.csv,.doc,.docx,.pdf,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp'
   input.onchange = () => {
     const picked = [...(input.files || [])]
     if (picked.length) files.value = picked

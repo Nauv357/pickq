@@ -930,7 +930,11 @@ public class AiImportService {
     private String detectType(String fileName) {
         String lower = fileName.toLowerCase();
         if (lower.endsWith(".pdf")) return "PDF";
-        if (lower.endsWith(".docx")) return "DOCX";
+        if (lower.endsWith(".docx") || lower.endsWith(".doc")) return "DOCX";
+        // 表格 / 幻灯片（本地解析为文本后交给模型；在任务列表里显示真实格式而不是笼统的 TXT）
+        if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) return "XLSX";
+        if (lower.endsWith(".pptx") || lower.endsWith(".ppt")) return "PPTX";
+        if (lower.endsWith(".csv")) return "CSV";
         if (lower.endsWith(".md") || lower.endsWith(".markdown")) return "MD";
         if (lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg")
                 || lower.endsWith(".webp") || lower.endsWith(".bmp")) return "IMAGE";

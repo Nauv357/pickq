@@ -169,14 +169,34 @@ public class DocumentParserService {
         if (lower.endsWith(".txt") || lower.endsWith(".md") || lower.endsWith(".markdown")) {
             return new ParseResult("TXT", readText(bytes, lower.endsWith(".md") ? "MD" : "TXT"), List.of(), null, List.of(), null, 0, java.util.Set.of());
         }
+        // CSV：本质是纯文本表格，直读即可（不像 Excel 需要解压/解析）
+        if (lower.endsWith(".csv")) {
+            return new ParseResult("CSV", readText(bytes, "CSV"), List.of(), null, List.of(), null, 0, java.util.Set.of());
+        }
         if (lower.endsWith(".docx")) {
             return parseDocx(bytes);
         }
+        // 老格式 .doc（Word 97-2003）：POI HWPF 取纯文本（.doc 里的内嵌图片本版不提取）
         if (lower.endsWith(".doc")) {
-            throw new IllegalArgumentException("不支持 .doc 老格式，请用 Word 另存为 .docx 后重试");
+            return parseLegacyDoc(bytes);
         }
         if (lower.endsWith(".pdf")) {
             return parsePdf(bytes);
+        }
+        // Excel 表格（题库表格 / 表单导出）：只把单元格文本按行抽出来交给模型，不做任何"表头结构化"——
+        // 列名千奇百怪，预先结构化反而丢信息（PDF 早期就吃过这个亏：先解析再交给模型，结果丢内容）。
+        if (lower.endsWith(".xlsx")) {
+            return parseWorkbook(bytes, false);
+        }
+        if (lower.endsWith(".xls")) {
+            return parseWorkbook(bytes, true);
+        }
+        // PPT 课件 / 讲义：逐页抽文本框与表格；同样不做结构化
+        if (lower.endsWith(".pptx")) {
+            return parseSlides(bytes, false);
+        }
+        if (lower.endsWith(".ppt")) {
+            return parseSlides(bytes, true);
         }
         if (lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".webp") || lower.endsWith(".bmp")) {
             if (bytes.length > MAX_IMAGE_BYTES) {
@@ -191,7 +211,223 @@ public class DocumentParserService {
             return new ParseResult("IMAGE", null, List.of(new AiClientService.ImageData(mime, bytes)),
                     null, List.of(), null, 0, java.util.Set.of());
         }
-        throw new IllegalArgumentException("不支持的文件格式：" + fileName + "（支持 txt/md/docx/pdf/图片）");
+        throw new IllegalArgumentException("不支持的文件格式：" + fileName
+                + "（支持 txt/md/csv/doc/docx/pdf/xls/xlsx/ppt/pptx/图片）");
+    }
+
+    // ==================== 表格 / 幻灯片 / 老 Word（只抽文本，不做结构化） ====================
+
+    /** 单元格分隔符：用 " | " 而不是制表符——下游会做空白归一化，制表符会被压掉 */
+    private static final String CELL_SEP = " | ";
+
+    /**
+     * Excel（.xlsx / .xls）：逐工作表逐行取单元格文本。
+     * 输出形如：
+     *   ## 工作表：Sheet1
+     *   题干 | 选项A | 选项B | 答案
+     *   下列… | 甲 | 乙 | A
+     * 不做表头识别、不拼"第N题 题干：…"这类结构化文本：让模型自己看列名与内容去判断，
+     * 与我们处理 PDF/docx 的思路一致（抽取原文交给模型，避免本地预先解释丢信息）。
+     */
+    private ParseResult parseWorkbook(byte[] bytes, boolean legacy) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        try (InputStream in = new ByteArrayInputStream(bytes)) {
+            if (legacy) {
+                try (org.apache.poi.hssf.usermodel.HSSFWorkbook wb = new org.apache.poi.hssf.usermodel.HSSFWorkbook(in)) {
+                    appendSheets(sb, wb.getNumberOfSheets(), i -> wb.getSheetName(i), i -> wb.getSheetAt(i));
+                }
+            } else {
+                try (org.apache.poi.xssf.usermodel.XSSFWorkbook wb = new org.apache.poi.xssf.usermodel.XSSFWorkbook(in)) {
+                    appendSheets(sb, wb.getNumberOfSheets(), i -> wb.getSheetName(i), i -> wb.getSheetAt(i));
+                }
+            }
+        }
+        return new ParseResult(legacy ? "XLS" : "XLSX", truncate(sb.toString().trim(), "XLSX"),
+                List.of(), null, List.of(), null, 0, java.util.Set.of());
+    }
+
+    private void appendSheets(StringBuilder sb, int sheetCount,
+                              java.util.function.IntFunction<String> nameOf,
+                              java.util.function.IntFunction<org.apache.poi.ss.usermodel.Sheet> sheetOf) {
+        for (int s = 0; s < sheetCount; s++) {
+            org.apache.poi.ss.usermodel.Sheet sheet = sheetOf.apply(s);
+            if (sheet == null) {
+                continue;
+            }
+            List<String> lines = new ArrayList<>();
+            for (org.apache.poi.ss.usermodel.Row row : sheet) {
+                if (row == null) {
+                    continue;
+                }
+                List<String> cells = new ArrayList<>();
+                for (int c = row.getFirstCellNum(); c >= 0 && c < row.getLastCellNum(); c++) {
+                    cells.add(cellText(row.getCell(c)));
+                }
+                String line = String.join(CELL_SEP, trimTrailingEmpty(cells)).trim();
+                // 整行为空（含只有分隔符）的行跳过，避免把上千空行喂给模型
+                if (!line.replace(CELL_SEP.trim(), "").isBlank()) {
+                    lines.add(line);
+                }
+            }
+            if (lines.isEmpty()) {
+                continue;
+            }
+            if (sheetCount > 1) {
+                sb.append("## 工作表：").append(nameOf.apply(s)).append('\n');
+            }
+            for (String line : lines) {
+                sb.append(line).append('\n');
+            }
+            sb.append('\n');
+        }
+    }
+
+    private List<String> trimTrailingEmpty(List<String> cells) {
+        int end = cells.size();
+        while (end > 0 && cells.get(end - 1).isBlank()) {
+            end--;
+        }
+        return cells.subList(0, end);
+    }
+
+    private String cellText(org.apache.poi.ss.usermodel.Cell cell) {
+        if (cell == null) {
+            return "";
+        }
+        return switch (cell.getCellType()) {
+            case STRING -> cell.getStringCellValue().trim();
+            case NUMERIC -> org.apache.poi.ss.usermodel.DateUtil.isCellDateFormatted(cell)
+                    ? cell.getLocalDateTimeCellValue().toLocalDate().toString()
+                    : trimNumber(cell.getNumericCellValue());
+            case BOOLEAN -> String.valueOf(cell.getBooleanCellValue());
+            case FORMULA -> {
+                try {
+                    yield cell.getStringCellValue().trim();
+                } catch (IllegalStateException e) {
+                    yield trimNumber(cell.getNumericCellValue());
+                }
+            }
+            default -> "";
+        };
+    }
+
+    /** 去掉 Excel 数值的 ".0"（1.0 → 1），题号/分值这类整数列更干净 */
+    private String trimNumber(double v) {
+        if (v == Math.rint(v) && !Double.isInfinite(v) && Math.abs(v) < 1e15) {
+            return String.valueOf((long) v);
+        }
+        return String.valueOf(v);
+    }
+
+    /**
+     * PPT（.pptx / .ppt）：逐页抽文本框段落 + 表格 + 备注。
+     * 输出形如：
+     *   ## 第 1 页
+     *   一、单选题
+     *   1. 下列…
+     * 页码标记保留"这一页有什么"的边界信息，模型据此判断题目归属（与 PDF 的逐页文本同思路）。
+     */
+    private ParseResult parseSlides(byte[] bytes, boolean legacy) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        try (InputStream in = new ByteArrayInputStream(bytes)) {
+            if (legacy) {
+                try (org.apache.poi.hslf.usermodel.HSLFSlideShow show =
+                             new org.apache.poi.hslf.usermodel.HSLFSlideShow(new org.apache.poi.poifs.filesystem.POIFSFileSystem(in))) {
+                    List<org.apache.poi.hslf.usermodel.HSLFSlide> slides = show.getSlides();
+                    for (int i = 0; i < slides.size(); i++) {
+                        appendSlideText(sb, i + 1, legacySlideTexts(slides.get(i)));
+                    }
+                }
+            } else {
+                try (org.apache.poi.xslf.usermodel.XMLSlideShow show =
+                             new org.apache.poi.xslf.usermodel.XMLSlideShow(in)) {
+                    List<org.apache.poi.xslf.usermodel.XSLFSlide> slides = show.getSlides();
+                    for (int i = 0; i < slides.size(); i++) {
+                        appendSlideText(sb, i + 1, xslfSlideTexts(slides.get(i)));
+                    }
+                }
+            }
+        }
+        return new ParseResult(legacy ? "PPT" : "PPTX", truncate(sb.toString().trim(), "PPTX"),
+                List.of(), null, List.of(), null, 0, java.util.Set.of());
+    }
+
+    private void appendSlideText(StringBuilder sb, int pageNo, List<String> texts) {
+        if (texts.isEmpty()) {
+            return;
+        }
+        sb.append("## 第 ").append(pageNo).append(" 页\n");
+        for (String t : texts) {
+            sb.append(t).append('\n');
+        }
+        sb.append('\n');
+    }
+
+    private List<String> xslfSlideTexts(org.apache.poi.xslf.usermodel.XSLFSlide slide) {
+        List<String> out = new ArrayList<>();
+        for (org.apache.poi.sl.usermodel.Shape shape : slide.getShapes()) {
+            if (shape instanceof org.apache.poi.xslf.usermodel.XSLFTable table) {
+                for (org.apache.poi.xslf.usermodel.XSLFTableRow row : table.getRows()) {
+                    List<String> cells = new ArrayList<>();
+                    for (org.apache.poi.xslf.usermodel.XSLFTableCell cell : row.getCells()) {
+                        cells.add(cell.getText() == null ? "" : cell.getText().trim());
+                    }
+                    String line = String.join(CELL_SEP, trimTrailingEmpty(cells)).trim();
+                    if (!line.isBlank()) {
+                        out.add(line);
+                    }
+                }
+            } else if (shape instanceof org.apache.poi.xslf.usermodel.XSLFTextShape textShape) {
+                String text = textShape.getText();
+                if (text != null && !text.isBlank()) {
+                    out.add(text.trim());
+                }
+            }
+        }
+        return out;
+    }
+
+    private List<String> legacySlideTexts(org.apache.poi.hslf.usermodel.HSLFSlide slide) {
+        List<String> out = new ArrayList<>();
+        // HSLF 没有"占位符"专用 API：直接遍历所有形状里的文本形状（演讲者备注另取）
+        for (org.apache.poi.hslf.usermodel.HSLFShape shape : slide.getShapes()) {
+            if (shape instanceof org.apache.poi.hslf.usermodel.HSLFTextShape textShape) {
+                String text = textShape.getText();
+                if (text != null && !text.isBlank()) {
+                    out.add(text.trim());
+                }
+            }
+        }
+        // 演讲者备注（HSLFNotes 的文本同样来自其形状）
+        org.apache.poi.hslf.usermodel.HSLFNotes notes = slide.getNotes();
+        if (notes != null) {
+            for (org.apache.poi.hslf.usermodel.HSLFShape shape : notes.getShapes()) {
+                if (shape instanceof org.apache.poi.hslf.usermodel.HSLFTextShape t) {
+                    String text = t.getText();
+                    if (text != null && !text.isBlank()) {
+                        out.add(text.trim());
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    /** 老 Word（.doc / Word 97-2003）：HWPF 取纯文本（段落级），内嵌图片本版不提取 */
+    private ParseResult parseLegacyDoc(byte[] bytes) throws IOException {
+        String text;
+        try (InputStream in = new ByteArrayInputStream(bytes);
+             org.apache.poi.hwpf.extractor.WordExtractor extractor =
+                     new org.apache.poi.hwpf.extractor.WordExtractor(in)) {
+            text = extractor.getText();
+        } catch (Exception e) {
+            // HWPF 对少数"伪 .doc"（其实是 RTF/HTML 改名）会失败：给出能照做的提示，而不是抛栈
+            throw new IllegalArgumentException("无法解析 .doc 文件（可能是改名得到的旧格式），请用 Word 另存为 .docx 后重试", e);
+        }
+        if (text == null || text.isBlank()) {
+            throw new IllegalArgumentException("这个 .doc 文件里没有可提取的文字（可能是扫描图或加密文档），请另存为 .docx 或 PDF 后重试");
+        }
+        return new ParseResult("DOC", truncate(text.trim(), "DOC"), List.of(), null, List.of(), null, 0, java.util.Set.of());
     }
 
     // ==================== 具体解析 ====================

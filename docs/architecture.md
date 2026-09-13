@@ -407,7 +407,7 @@ sequenceDiagram
   SPA->>LB: GET /api/ai-import/jobs/{id}/stream（SSE）
   LB->>EX: 提交 executeJob
   EX->>EX: 解析阶段（engine=AUTO/LOCAL 走本地；engine=MINERU 且已配 mineruKey 才走云端）
-  Note over EX: DocumentParserService：txt/md 直读、docx→POI、pdf→PDFBox（文本层+内嵌图+按页渲染）<br/>MinerU 失败自动回退本地解析（不整体失败）
+  Note over EX: DocumentParserService：txt/md/csv 直读、docx→POI、doc→POI HWPF、xls/xlsx/ppt/pptx→POI（纯文本抽取）、pdf→PDFBox（文本层+内嵌图+按页渲染）<br/>MinerU 失败自动回退本地解析（不整体失败）
   EX->>CH: 分块并行调用（文本按题号边界，MinerU 16 题/块，视觉 2 页/块重叠 1 页）
   CH->>LLM: chat/completions（OpenAI 兼容；文本 / 多模态 data URL）
   LLM-->>CH: Markdown 模板输出 / JSON

@@ -67,10 +67,13 @@
 
 流程：`上传文件 → 解析（本地抽取或云端 OCR）→ 分块交给 AI 逐块出题 → 预览校对 → 确认入库`。
 
-- 支持文件：`.txt` `.md` `.markdown` `.docx` `.pdf` `.png` `.jpg` `.jpeg` `.webp` `.bmp`。
-  - `.doc` 老格式明确不支持，提示用户另存为 `.docx`。
+- 支持文件：`.txt` `.md` `.markdown` `.csv` `.doc` `.docx` `.pdf` `.xls` `.xlsx` `.ppt` `.pptx` `.png` `.jpg` `.jpeg` `.webp` `.bmp`。
+  - 表格（`.csv` `.xls` `.xlsx`）：逐工作表逐行抽出单元格文本（单元格用 ` | ` 连接，多表带 `## 工作表：<名>` 标记）；
+    幻灯片（`.ppt` `.pptx`）：逐页抽文本框/表格/备注，带 `## 第 N 页` 标记。
+    **只做抽取、不做表头识别或结构化拼装**——列名千奇百怪，本地预先解释反而丢内容（与 PDF 的处理口径一致：抽取原文交给模型）。
+  - 老格式（`.doc`）走 POI HWPF 取纯文本；解析失败时提示"另存为 .docx 后重试"。表格/幻灯片内的**内嵌图片本版不提取**（需要图就走 PDF 或图片路径）。
   - 扫描版 PDF（无文本层）：可配置 **MinerU** 云端解析（设置项 `mineruKey`），或按页渲染成图片交给视觉模型。
-- 本地解析（`DocumentParserService`，全部离线）：docx 走 POI（按 body 元素顺序，段落与表格交错；提取插图与 MathType 的 WMF/EMF 公式预览图并解码为 PNG），pdf 走 PDFBox（文本层提取 + 内嵌图片提取 + 按页渲染兜底）。小于阈值的装饰图会被过滤；无法解码的矢量图跳过并给出警告。
+- 本地解析（`DocumentParserService`，全部离线）：docx 走 POI（按 body 元素顺序，段落与表格交错；提取插图与 MathType 的 WMF/EMF 公式预览图并解码为 PNG），doc 走 POI HWPF（纯文本），xls/xlsx/ppt/pptx 走 POI（纯文本抽取），pdf 走 PDFBox（文本层提取 + 内嵌图片提取 + 按页渲染兜底）。小于阈值的装饰图会被过滤；无法解码的矢量图跳过并给出警告。
 - 任务与进度：任务落库，前端通过 SSE（`/ai-import/jobs/{id}/stream`）看进度与日志；任务可删除；`active` 用于应用重启后恢复"进行中的导入"。
 - 预览校对（`AiImportPreviewView.vue`）：默认**渲染优先**（直接看题），可切换单题编辑 / 全部编辑；解析出的材料单独成块；图片素材区可预览。
 - 确认导入：选择目标题库（可新建）→ 校验 → 写库，临时图片转正到正式图片目录。
