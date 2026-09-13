@@ -45,7 +45,7 @@
   渲染成了黑色块。
 - 可能方向：接入 MinerU（PDF 解析引擎）等更完整的版面解析方案来解决。
 
-## 6. Excel / PPT 里的图片不参与导入（2026-09-13 记录，暂不处理）
+## 6. Excel / PPT 里的图片不参与导入（2026-09-13 记录 + 当天修复 MinerU 路径）
 
 - 现象：`.xlsx` / `.pptx` 按行列、逐页抽取**文字**交给模型，但文件里插入的图片（题干配图、
   图形推理的选项图、图表、公式截图、纯图片题）不会被提取——含图题会缺图，
@@ -53,7 +53,28 @@
 - 与 PDF 的差别（为什么 PDF 可以）：PDF 走 PDFBox，能拿到每张内嵌图的**页面与坐标**
   （`ExtractedImage(pageNo, sortX, sortY, …)`），于是可以在页文本里插入 `[图片N]` 锚点，
   分块时按锚点/页归属取图；docx 同理（POI 按 body 元素顺序取图并就地插锚点）。
-  **xlsx/pptx 不是"做不到"，是本轮只做了文本抽取**，图片归属信息还没接进管线。
+
+### 6.1 MinerU 路径：已修复（勾选「MinerU 增强」时可提取 Office 内嵌图）
+
+实测结论（用 `D:\PickQ\test-cases-20260913\` 的两个用例跑真实 MinerU vlm）：
+
+- MinerU **确实**会抽出 Office 文档里的图片：pptx 8 页 → 6 张图（`content_list_v2` 里 6 个
+  `image` 条目）；xlsx 2 个工作表 → 6 张图（**没有** `image` 条目，只在 `table` 的单元格 HTML 里
+  写 `<img src="images/<hash>.jpg">`，共 10 处引用）。
+- 而我们的重建层当时一张都没拿到（`imports/<jobId>/images/` 为空）。三个独立缺陷，已全部修掉：
+  1. **无 bbox 的图被丢弃**：PDF 的条目带 `bbox`，Office 的条目只有 `type`+`content`；
+     图链结算里 `bbox == null` 写的是 `continue`（注释本意是"单张输出、不入链合并"）→ 整批丢。
+     现按出现顺序逐张输出（`MineruRebuildOfficeImageTest.keepsImagesWithoutBbox` 锁住）。
+  2. **jpg 被当成 png**：MinerU 的图是 jpg，管道契约是 PNG（`{N}.png` + `ImageData("image/png")`），
+     无 bbox 分支少了 `toPngBytes` 转换 → 现在统一转换（顺带验证"路径→图片"不错位）。
+  3. **路径被折行**：MinerU 会把超长 hash 折行写进 HTML（JSON 里是 `\n` 转义），解析后路径中间
+     真的带一个换行 → 查不到文件（10 处引用里 3 处中招）。现统一 `normalizeImgPath` 去空白。
+  4. **表格内嵌图没被识别**（xlsx 专用）：`table` 的 HTML 里 `<img>` 就地换成 `[图片N]`，
+     锚点落在**所在单元格/行**——比 PPT（无坐标，只能追加在页末）归属更准。
+- 仍存在的边界：不勾 MinerU 时，本地文本路径（POI 直读）**仍然不含图片**，见 6.2。
+
+### 6.2 本地文本路径（不勾 MinerU）：仍未支持，按需再做
+
 - 落地路径（按性价比排序，POI 5.2.5 的能力都已确认存在）：
   1. **PPT/PPTX 最容易**：`XSLFPictureShape.getPictureData()` 逐页取图，
      "第 N 页"天然等价于 PDF 的页归属，可直接复用现有 `pageTexts` + `[图片N]` 机制
@@ -66,9 +87,6 @@
   可行性判断：PPT 可按页渲染（需要 Office/LibreOffice 之类渲染器，纯 Java 侧没有可靠的渲染组件）；
   Excel 需要先渲染成图片、再按页切分，成本更高。若将来做 Android 端或需要在无 Office 环境渲染，
   这条路会变复杂——**优先做上面第 1/2 条（直接从文件里取原图），而不是截图**。
-- 可以先试的现成路径：**勾选「MinerU 增强」**。MinerU 的受理扩展名里本来就含 `pptx?|xlsx?`
-  （`MineruParseService.MINERU_FILE`），带上 MinerU Key 时 xlsx/pptx 会交给 MinerU 解析；
-  它是否能返回 Office 文档里的图片**未验证**（需要 Key），值得实测一次。
 
 ## 备注
 

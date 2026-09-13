@@ -67,6 +67,11 @@ public class MineruParseService {
     /** 支持走 MinerU 的文件类型（与 MinerU API 支持范围对齐；txt/md 走本地直读） */
     private static final Pattern MINERU_FILE = Pattern.compile("(?i)\\.(pdf|png|jpe?g|webp|bmp|docx?|pptx?|xlsx?)$");
 
+    /** 表格单元格 HTML 里的内嵌插图（xlsx：MinerU 不给 image 条目，只在 table 里写 img 标签） */
+    private static final Pattern INLINE_IMG = Pattern.compile("<img[^>]*?src=\"(images/[^\"]+)\"[^>]*>");
+    /** 内嵌插图占位符：私用区字符（> \\u0020，trim()/filterJunkLines 不会削掉），文本里的位置 == 单元格位置 */
+    private static final Pattern INLINE_IMG_TOKEN = Pattern.compile("\uE000(\\d+)\uE001");
+
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
     private final DocumentParserService documentParserService;
@@ -321,6 +326,8 @@ public class MineruParseService {
      * - 装饰图过滤：第一个含题号段落之前的图片跳过
      * - 图片转 PNG（现有管道的临时文件契约 {N}.png）
      * - 碎图合并：同页连续图块（仅夹数字圈标注）按 bbox 相邻合并
+     * - 无 bbox 的图（Office/PPT：MinerU 只给 type+content）按出现顺序逐张输出，不丢
+     * - 表格 HTML 内嵌图（xlsx：只在单元格里写 img 标签）就地提为 [图片N]，位置即所在行
      */
     DocumentParserService.ParseResult rebuild(byte[] zipBytes, String fileName, String mineruKey) throws IOException {
         //解包：content_list JSON + 图片文件
@@ -335,7 +342,7 @@ public class MineruParseService {
                     if (name.endsWith("_content_list_v2.json")) {
                         clBytes = data;
                     } else if (name.startsWith("images/") && looksLikeImage(name)) {
-                        images.put(name, data);
+                        images.put(normalizeImgPath(name), data);
                     }
                 }
             }
@@ -360,6 +367,8 @@ public class MineruParseService {
         //选项标签/识别噪声，与图块交错会误导模型；按版面排序后它们位于图行下方，无需打断图链。
         List<List<PageItem>> pageItems = new ArrayList<>();
         int firstQuestionPage = -1;
+        //PDF 的"无文本页"多是封面/广告，图可丢；Office（ppt/xls）纯图页往往就是题，不能丢
+        boolean pdfSource = fileName.toLowerCase(Locale.ROOT).endsWith(".pdf");
         //选项宽图切分候选（identity 语义：PageItem 是 record，同页内不会有两个字段全同的图，但保险用 identity）
         java.util.IdentityHashMap<PageItem, Boolean> splitWideImages = new java.util.IdentityHashMap<>();
         for (int p = 0; p < pages.size(); p++) {
@@ -381,7 +390,7 @@ public class MineruParseService {
                                     String.format("[%.0f,%.0f,%.0f,%.0f]", bx[0], bx[1], bx[2], bx[3]));
                             continue;
                         }
-                        items.add(new PageItem("image", null, imgPath, bx));
+                        items.add(new PageItem("image", null, imgPath, bx, List.of()));
                         continue;
                     }
                     List<String> texts = new ArrayList<>();
@@ -391,7 +400,7 @@ public class MineruParseService {
                         //噪声行（选项字母/码行）保留为 noise 条目：不输出文本、切断图链，
                         //并供"选项宽图切分"判定（宽图下方紧邻整行选项码 = 横排选项图，可列间隙切分）。
                         //单个字母（"A"）与"B." 短码不参与切分信号（isOptionCodeLine 过滤）。
-                        items.add(new PageItem("noise", joined, null, parseBbox(node.path("bbox"))));
+                        items.add(new PageItem("noise", joined, null, parseBbox(node.path("bbox")), List.of()));
                         continue;
                     }
                     if (joined.length() > MAX_TEXT_PER_BLOCK) {
@@ -408,12 +417,20 @@ public class MineruParseService {
                     if (joined.isBlank()) {
                         continue;
                     }
+                    //表格 HTML 里的内嵌插图：MinerU 对 xlsx 不产出 image 条目，而是在 table 的单元格里写
+                    //<img src="images/xx.jpg">（实测 2 个工作表 6 张图全靠这个引用）。整份表格 HTML 是
+                    //一个文本块 → 把 img 标签换成占位符（保留在单元格原位），结算时再插 [图片N] 登记图片：
+                    //位置天然是"所在行/格"，比 PPT（无坐标只能追加在末尾）更准。
+                    List<String> inlineImgs = new ArrayList<>();
+                    if (joined.contains("<img")) {
+                        joined = markInlineImages(joined, inlineImgs);
+                    }
                     if (firstQuestionPage < 0 && QUESTION_NUM.matcher(joined).find()) {
                         firstQuestionPage = p;
                     }
                     //数字圈标注（①②…/纯数字 ≤2 字符，六图间编号）：不输出文本，也不切断图链
                     String kind = isNumericTag(joined) ? "tag" : "text";
-                    items.add(new PageItem(kind, joined, null, parseBbox(node.path("bbox"))));
+                    items.add(new PageItem(kind, joined, null, parseBbox(node.path("bbox")), inlineImgs));
                 }
             }
             //版面排序：content_list 块序偶发乱序（实测 Q2 选项图被排到 Q1 段落之前），
@@ -484,8 +501,11 @@ public class MineruParseService {
                         log.debug("MinerU 跳过装饰图：{}", item.imgPath());
                         continue;
                     }
-                    if (!hasText) {
-                        //无有效文本页（纯广告/插图页）→ 图片丢弃
+                    if (!hasText && pdfSource) {
+                        //无有效文本页（纯广告/插图页）→ 图片丢弃。
+                        //⚠️ 只对 PDF 这么做：PDF 的无文本页基本是封面/广告；而 PPT 的一页可能**整页就是一道图题**
+                        //（纯图片题），Excel 的工作表也可能只有图。Office 文档丢这一类页等于丢题。
+                        //封面/目录这类装饰图仍由上面的 firstQuestionPage 规则挡掉。
                         flushImageChain(chain, images, extracted, pageSb, pageHeight, p, splitWideImages);
                         log.debug("MinerU 跳过无文本页图片：{}", item.imgPath());
                         continue;
@@ -508,7 +528,8 @@ public class MineruParseService {
                 }
                 //普通文本 → 结算图链后输出
                 flushImageChain(chain, images, extracted, pageSb, pageHeight, p, splitWideImages);
-                pageSb.append(filterJunkLines(item.text())).append('\n');
+                pageSb.append(emitInlineImages(filterJunkLines(item.text()), item.inlineImgs(),
+                        images, extracted, pageHeight, p)).append('\n');
             }
             flushImageChain(chain, images, extracted, pageSb, pageHeight, p, splitWideImages);
             rebuiltPages.add(pageSb.toString());
@@ -552,22 +573,52 @@ public class MineruParseService {
             List<byte[]> raws = new ArrayList<>();
             List<float[]> boxes = new ArrayList<>();
             List<PageItem> valid = new ArrayList<>();
+            // 无 bbox 的图片（Office 文档：MinerU 对 pptx/xlsx 只给 type+content，不给版面坐标）
+            // 单独收集、按出现顺序逐张输出——不能丢，也不能参与"按 bbox 合并"的逻辑。
+            // 历史 bug：这里原本是 continue，导致 PPT/Excel 里的图片被整批丢弃（实测 pptx 6 张全丢）。
+            List<byte[]> noBoxRaw = new ArrayList<>();
             for (PageItem it : imgs) {
-                byte[] raw = it.imgPath() == null ? null : images.get(it.imgPath());
+                byte[] raw = it.imgPath() == null ? null : images.get(normalizeImgPath(it.imgPath()));
                 if (raw == null) {
                     log.warn("MinerU 图片文件缺失：{}", it.imgPath());
                     continue;
                 }
                 if (it.bbox() == null) {
-                    continue; //无 bbox 无法定位 → 单张输出（不入链合并）
+                    noBoxRaw.add(raw);
+                    continue;
                 }
                 raws.add(raw);
                 boxes.add(it.bbox());
                 valid.add(it);
             }
-            if (raws.isEmpty()) {
+            if (raws.isEmpty() && noBoxRaw.isEmpty()) {
                 return;
             }
+            //先输出能定位的图（参与合并），再把无坐标的图按顺序补在后面
+            if (!raws.isEmpty()) {
+                mergeAndOutputChain(raws, boxes, extracted, pageSb, pageHeight, pageNo, splitWideImages, chain, valid);
+            }
+            for (byte[] raw : noBoxRaw) {
+                //MinerU 的图是 jpg → 必须转 PNG（管道契约 {N}.png + ImageData("image/png")）
+                byte[] png = toPngBytes(raw);
+                if (png == null) {
+                    log.warn("MinerU 图片解码失败（无 bbox 分支）：{} 字节", raw.length);
+                    continue;
+                }
+                outputImage(extracted, pageSb, pageHeight, pageNo, png, null);
+            }
+        } finally {
+            chain.clear();
+        }
+    }
+
+    /** 图链的合并与输出（有 bbox 的部分）：整链网格合并 / 行级合并 / 逐张输出 */
+    private void mergeAndOutputChain(List<byte[]> raws, List<float[]> boxes,
+                                     List<DocumentParserService.ExtractedImage> extracted,
+                                     StringBuilder pageSb, float pageHeight, int pageNo,
+                                     java.util.IdentityHashMap<PageItem, Boolean> splitWideImages,
+                                     List<PageItem> chain, List<PageItem> valid) {
+        try {
             //行聚类
             List<List<Integer>> rows = clusterRows(boxes);
             boolean mergedWhole = false;
@@ -925,9 +976,9 @@ public class MineruParseService {
         return true;
     }
 
-    /** 输出一张图并追加 [图片N] 标记 */
-    private void outputImage(List<DocumentParserService.ExtractedImage> extracted, StringBuilder pageSb,
-                             float pageHeight, int pageNo, byte[] png, float[] bbox) {
+    /** 登记一张图并返回其全局编号（1 起）；[图片N] 标记由调用方按需放置（bbox 可 null：Office 无坐标 → 排序键 0） */
+    private int addImage(List<DocumentParserService.ExtractedImage> extracted, int pageNo,
+                         float pageHeight, byte[] png, float[] bbox) {
         float sortX = 0f;
         float sortY = 0f;
         if (bbox != null && !Float.isNaN(bbox[0])) {
@@ -936,7 +987,13 @@ public class MineruParseService {
         }
         extracted.add(new DocumentParserService.ExtractedImage(pageNo, sortX, sortY, pageHeight,
                 new AiClientService.ImageData("image/png", png)));
-        pageSb.append("[图片").append(extracted.size()).append("]");
+        return extracted.size();
+    }
+
+    /** 输出一张图并追加 [图片N] 标记 */
+    private void outputImage(List<DocumentParserService.ExtractedImage> extracted, StringBuilder pageSb,
+                             float pageHeight, int pageNo, byte[] png, float[] bbox) {
+        pageSb.append("[图片").append(addImage(extracted, pageNo, pageHeight, png, bbox)).append("]");
     }
 
     /** bbox [x0,y0,x1,y1] → float[4]；缺失/非法 → null */
@@ -1105,6 +1162,59 @@ public class MineruParseService {
     }
 
     /**
+     * 表格 HTML 里的 &lt;img src="images/xx.jpg"&gt; → 占位符，路径按出现顺序记进 inlineImgs。
+     * 不动标签之外的任何文本（单元格里的题干、选项、答案文字原位保留）。
+     */
+    private String markInlineImages(String text, List<String> inlineImgs) {
+        Matcher m = INLINE_IMG.matcher(text);
+        StringBuilder out = new StringBuilder();
+        while (m.find()) {
+            inlineImgs.add(normalizeImgPath(m.group(1)));
+            m.appendReplacement(out, Matcher.quoteReplacement(
+                    "\uE000" + (inlineImgs.size() - 1) + "\uE001"));
+        }
+        m.appendTail(out);
+        return out.toString();
+    }
+
+    /**
+     * 图片路径归一化：去掉所有空白（含换行）。
+     * MinerU 会把超长 hash 折行写进 HTML——JSON 里是 \n 转义，解析后路径中间真的带一个换行
+     * （实测 xlsx 的 6 个引用里有 2 个中招：images/89f…daaa\n48.jpg 查不到文件 → 图丢）。
+     */
+    private static String normalizeImgPath(String path) {
+        return path == null ? null : path.replaceAll("\\s", "");
+    }
+
+    /**
+     * 输出期：占位符 → "[图片N]" 并登记图片（就地替换，标记落在单元格/行的原位置）。
+     * 图片文件缺失或解码失败 → 只删占位符，不留悬空标记（标记编号与图片编号永远一致）。
+     */
+    private String emitInlineImages(String text, List<String> inlineImgs, Map<String, byte[]> images,
+                                    List<DocumentParserService.ExtractedImage> extracted,
+                                    float pageHeight, int pageNo) {
+        if (inlineImgs == null || inlineImgs.isEmpty() || text == null || text.indexOf('\uE000') < 0) {
+            return text;
+        }
+        Matcher m = INLINE_IMG_TOKEN.matcher(text);
+        StringBuilder out = new StringBuilder();
+        while (m.find()) {
+            int idx = Integer.parseInt(m.group(1));
+            byte[] raw = idx >= 0 && idx < inlineImgs.size() ? images.get(inlineImgs.get(idx)) : null;
+            byte[] png = raw == null ? null : toPngBytes(raw);
+            if (png == null) {
+                log.warn("MinerU 表格内嵌图缺失/解码失败：{}", idx < inlineImgs.size() ? inlineImgs.get(idx) : "?");
+                m.appendReplacement(out, "");
+                continue;
+            }
+            int no = addImage(extracted, pageNo, pageHeight, png, null);
+            m.appendReplacement(out, Matcher.quoteReplacement("[图片" + no + "]"));
+        }
+        m.appendTail(out);
+        return out.toString();
+    }
+
+    /**
      * 递归收集 content 对象中的正文字符串。
      * 跳过元数据/样式/坐标键：type、style、bbox、image_source——
      * vlm 的内联 span 形如 {"type":"text","content":"h","style":["italic"]}，
@@ -1241,8 +1351,10 @@ public class MineruParseService {
      * - image：图片（imgPath = images/ 相对路径）
      * - tag：数字圈标注（①②…/纯数字 ≤2 字符，六图间编号）——不输出、不切断图链
      * bbox 用于版面排序与合并定位；缺失/非法时为 null（按原序、不参与合并）。
+     * inlineImgs：文本块内嵌的图片路径（表格 HTML 的 &lt;img src="images/xx.jpg"&gt;，xlsx 专用），
+     * 文本里对应位置留着占位符，输出时换成 [图片N] 并登记图片。
      */
-    private record PageItem(String kind, String text, String imgPath, float[] bbox) {
+    private record PageItem(String kind, String text, String imgPath, float[] bbox, List<String> inlineImgs) {
 
         /** 版面排序：y0 升序，同带（差 < 3pt）按 x0 升序；无 bbox 条目保持相对原序（排在最后兜底） */
         static int compareByLayout(PageItem a, PageItem b) {
