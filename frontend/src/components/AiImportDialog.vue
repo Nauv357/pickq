@@ -29,6 +29,16 @@
             <TikuIcon name="refresh" :size="14" />
           </span>
         </div>
+        <!-- 真正的文件 input 放在模板里（而不是 document.createElement）：
+             这样测试能直接 setInputFiles，也让 accept 与 UI 提示始终同源 -->
+        <input
+          ref="fileInput"
+          class="visually-hidden"
+          type="file"
+          multiple
+          :accept="acceptTypes"
+          @change="onFilesPicked"
+        />
         <div v-if="files.length" class="file-list">
           <div v-for="(f, i) in files" :key="i" class="file-row">
             <span class="file-name">{{ f.name }}</span>
@@ -105,9 +115,13 @@
           </button>
         </div>
 
-        <!-- 纯图 MinerU 增强（选了 PDF/图片文件即出现：拍照/扫描试卷的图形题需要它裁题图；未配 Key 显示禁用态） -->
+        <!-- MinerU 增强：能处理图片/版面的解析引擎。
+             出现规则（2026-09-13 修正）：只要文件格式 MinerU 能受理就"可选"——
+             不再由"我们自己判断这份文档有没有图"来决定它出不出现（那等于"识别失败时反而没有补救手段"）。
+             拍照/扫描/纯图这类明确用得上的场景直接显示并提示；Office 文档收进「更多选项」，
+             需要时手动开，平时不占位置、不打扰。未配 Key 显示禁用态。 -->
         <button
-          v-if="showMineruOption"
+          v-if="showMineruOption && !mineruInAdvanced"
           class="supplement-option"
           :class="{ checked: mineruEnhance, disabled: !hasMineruKey }"
           @click="toggleMineruEnhance"
@@ -125,6 +139,29 @@
           </span>
         </button>
         <p v-if="imageHint" class="form-tip text-muted img-hint">{{ imageHint }}</p>
+
+        <!-- 更多选项：普通文档（Word/Excel/PPT/文字版 PDF）才折起来 -->
+        <div v-if="mineruInAdvanced" class="advanced-block">
+          <button class="advanced-toggle" :class="{ open: advancedOpen }" @click="advancedOpen = !advancedOpen">
+            <TikuIcon :name="advancedOpen ? 'chevron-down' : 'chevron-right'" :size="13" />
+            {{ t('moreOptions') }}
+          </button>
+          <div v-show="advancedOpen" class="advanced-body">
+            <button
+              class="supplement-option"
+              :class="{ checked: mineruEnhance, disabled: !hasMineruKey }"
+              @click="toggleMineruEnhance"
+            >
+              <span class="supplement-check">
+                <TikuIcon v-if="mineruEnhance" name="check" :size="12" />
+              </span>
+              <span class="supplement-text">
+                <span class="mode-title">{{ t('mineruEnhance') }}</span>
+                <span class="mode-desc">{{ hasMineruKey ? t('mineruOnTip') : t('mineruOffTip') }}</span>
+              </span>
+            </button>
+          </div>
+        </div>
       </div>
 
       <div class="field">
@@ -183,12 +220,13 @@ const { t } = useI18n({
       appendBank: '追加到现有题库', appendBankDesc: 'AI 生成的题目并入所选题库', pickBank: '选择题库',
       aiSupplement: 'AI 补充缺失的答案和解析', aiSupplementTip: '勾选 = 原文答案优先、缺失时 AI 补充（预览页会标记"AI 补充"）；不勾选 = 只用原文信息，缺失答案留空待补',
       processMode: '处理模式',
-      mineruEnhance: 'MinerU 增强（拍照/扫描/纯图试卷）',
-      mineruOnTip: '把照片/扫描件版面里的图形题裁成独立题图（默认视觉直读只能看整张图）。文字型 PDF/Word 无需开启',
-      mineruOffTip: '未配置 MinerU Key：点击后到「设置-AI 配置」填写（拍照试卷的图形题需要它裁题图）',
+      moreOptions: '更多选项',
+      mineruEnhance: 'MinerU 增强（缺图时用）',
+      mineruOnTip: '换成 MinerU 解析文档版面：只在你导入后发现大量题目缺图时才需要开启；普通文档、Word、Excel、PPT 都不用开',
+      mineruOffTip: '未配置 MinerU Key（缺图时才会用到）：点击后到「设置-AI 配置」填写',
       formats: '支持格式与处理方式',
       formatsTip1: 'txt / md / csv 直接读取；Word（含老 .doc）、文字版 PDF（可选中文字的）由 AI 整理，公式与插图自动归位（最推荐）；',
-      formatsTip2: 'Excel（xls/xlsx）与 PPT（ppt/pptx）按表格行列 / 幻灯片逐页抽取文字后交给 AI 整理；扫描件 PDF 与图片由多模态模型直读，含图形图表的扫描件可勾选上方「MinerU 增强」',
+      formatsTip2: 'Excel（xls/xlsx）与 PPT（ppt/pptx）按表格行列 / 幻灯片逐页抽取文字后交给 AI 整理；扫描件 PDF 与图片由多模态模型直读',
       backgroundTip: '可关闭本窗口继续做其他事，任务在后台进行，完成后侧边栏与系统通知都会提醒你',
       cancel: '取消', submitting: '提交中…', startParse: '开始解析', close: '关闭', closeBg: '关闭（后台继续）',
       mineruKeyNeeded: '未配置 MinerU 解析 Key，请先到「设置-AI 配置」填写',
@@ -213,12 +251,13 @@ const { t } = useI18n({
       appendBank: 'Append to an existing bank', appendBankDesc: 'AI-generated questions are merged into the selected bank', pickBank: 'Select a bank',
       aiSupplement: 'AI fills missing answers & explanations', aiSupplementTip: 'Checked = use original answers first, AI fills gaps (marked "AI" in preview); unchecked = only original content, blanks stay empty',
       processMode: 'Processing mode',
-      mineruEnhance: 'MinerU enhance (photos / scans / pure-image papers)',
-      mineruOnTip: 'Crops figure questions from photo/scan layouts into separate images (default vision reads the whole page only). Not needed for text PDFs/Word',
-      mineruOffTip: 'MinerU key not configured: click to add it in Settings → AI Setup (needed to crop figures from photographed papers)',
+      moreOptions: 'More options',
+      mineruEnhance: 'MinerU enhance (for missing figures)',
+      mineruOnTip: 'Parses the document layout with MinerU: only needed if many questions come out missing their figures; ordinary documents, Word, Excel and PowerPoint do not need it',
+      mineruOffTip: 'MinerU key not configured (only used when figures are missing): click to add it in Settings → AI Setup',
       formats: 'Supported formats & how they are handled',
       formatsTip1: 'txt / md / csv are read directly; Word (including legacy .doc) and text-layer PDFs are organized by AI, with formulas and figures placed back automatically (recommended);',
-      formatsTip2: 'Excel (xls/xlsx) and PowerPoint (ppt/pptx) are converted to text row by row / slide by slide before AI organizing; scanned PDFs and images are read by the vision model — for scans with figures/charts enable "MinerU enhance" above',
+      formatsTip2: 'Excel (xls/xlsx) and PowerPoint (ppt/pptx) are converted to text row by row / slide by slide before AI organizing; scanned PDFs and images are read by the vision model',
       backgroundTip: 'You can close this window — the task keeps running in the background; the sidebar and system notification will remind you when done',
       cancel: 'Cancel', submitting: 'Submitting…', startParse: 'Start parsing', close: 'Close', closeBg: 'Close (keep running)',
       mineruKeyNeeded: 'MinerU parse key not configured — add it first in Settings → AI Setup',
@@ -276,21 +315,31 @@ const MODE_PRESETS = [
   }
 ]
 const modePreset = ref('smart')
-/* 扫描件/纯图 MinerU 增强：选了 PDF 或图片文件即显示（用户拍的照片/纯图卷专用——
-   MinerU 能把照片版面里的图形题裁成独立图片；文字型 PDF/Word 无需）。
-   未配 Key 时仍显示（禁用态），提示去设置页配置 */
 const mineruEnhance = ref(false)
+const advancedOpen = ref(false)
+
+/** 拍照/扫描/纯图（明确用得上 MinerU 的场景）：直接显示勾选框并提示 */
 const hasImageLikeFile = computed(() =>
   files.value.some((f) => /\.(png|jpe?g|webp|bmp)$/i.test(f.name) || /\.pdf$/i.test(f.name))
 )
-const showMineruOption = computed(() => hasImageLikeFile.value)
+/**
+ * MinerU 能受理的格式（与后端 `MineruParseService.MINERU_FILE` 保持一致）。
+ * ⚠️ 这里**不能**用"我们是否检测到图片"来当门禁：识别失效恰恰是最需要 MinerU 的时候，
+ * 用它来判断"要不要把 MinerU 给用户"是循环依赖（老 docx 扫描件、图片型 pptx、矢量图 PDF 都会被挡住）。
+ */
+const mineruCapableFile = computed(() =>
+  files.value.some((f) => /\.(pdf|png|jpe?g|webp|bmp|docx?|pptx?|xlsx?|csv)$/i.test(f.name))
+)
+const showMineruOption = computed(() => mineruCapableFile.value)
+/** Office/文本类：勾选框收进「更多选项」，平时不占位置 */
+const mineruInAdvanced = computed(() => showMineruOption.value && !hasImageLikeFile.value)
 const imageHint = computed(() => {
   const hasImageFile = files.value.some((f) => /\.(png|jpe?g|webp|bmp)$/i.test(f.name))
   if (!hasMineruKey.value) {
-    return '提示：拍照/扫描的试卷建议使用「MinerU 增强」提取题图——可在「设置-AI 配置」填写 MinerU Key 后开启'
+    return '提示：如果导入后发现大量题目缺图，可以配置 MinerU Key 后重新解析（普通文档不需要）'
   }
   if (hasImageFile && !mineruEnhance.value) {
-    return '提示：图片/拍照试卷中的图形题需要裁剪题图，建议开启「MinerU 增强」（默认视觉直读只能看到整张图）'
+    return '提示：图片/拍照试卷里的图形题需要裁剪题图，建议开启「MinerU 增强」（默认视觉直读只能看到整张图）'
   }
   return ''
 })
@@ -401,16 +450,19 @@ async function loadBanks() {
   }
 }
 
+/** 可导入的扩展名（与后端 DocumentParserService.parse 的分派保持一致） */
+const acceptTypes = '.txt,.md,.csv,.doc,.docx,.pdf,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp'
+const fileInput = ref(null)
+
 function pick() {
-  const input = document.createElement('input')
-  input.type = 'file'
-  input.multiple = true
-  input.accept = '.txt,.md,.csv,.doc,.docx,.pdf,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp'
-  input.onchange = () => {
-    const picked = [...(input.files || [])]
-    if (picked.length) files.value = picked
-  }
-  input.click()
+  fileInput.value?.click()
+}
+
+function onFilesPicked() {
+  const picked = [...(fileInput.value?.files || [])]
+  if (picked.length) files.value = picked
+  // 同一个 input 连续选同一份文件也要能触发 change
+  if (fileInput.value) fileInput.value.value = ''
 }
 
 function removeFile(index) {
@@ -588,6 +640,41 @@ defineExpose({ open })
 }
 .img-hint {
   margin-top: 8px;
+}
+/* 更多选项（折叠）：MinerU 这类"平时用不到、需要时找得到"的开关放这里 */
+.advanced-block {
+  margin-top: 10px;
+}
+.advanced-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 0;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: color var(--ease);
+}
+.advanced-toggle:hover {
+  color: var(--text-secondary);
+}
+.advanced-body {
+  margin-top: 8px;
+}
+/* 隐藏的文件 input（用模板里的 input 而不是动态创建，测试可直接 setInputFiles） */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 .file-pick {
   display: flex;

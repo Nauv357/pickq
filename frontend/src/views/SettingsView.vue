@@ -171,19 +171,32 @@
             </button>
             <span class="form-tip" :class="modelsTipClass">{{ modelsTipText }}</span>
           </div>
-          <el-form-item :label="t('ai.mineru')">
-            <el-input
-              v-model="aiForm.mineruKey"
-              type="password"
-              show-password
-              :placeholder="maskedMineruKey || 'sk-…'"
-            />
-            <p class="form-tip text-muted">
-              {{ t('ai.mineruTip') }}
-              <a href="https://mineru.net/apiManage/token" target="_blank" rel="noopener">mineru.net/apiManage/token</a>
-              {{ hasMineruKey ? t('ai.keyCurrent', { v: maskedMineruKey }) : '' }}
-            </p>
-          </el-form-item>
+
+          <!-- MinerU（可选，缺图时才会用到）：默认收起。
+               放在常规配置里会让"用不上的人"以为必须去注册一个额外服务，
+               所以只给一行入口文案，真正需要的人点开就有完整说明与申请链接。 -->
+          <div class="advanced-block">
+            <button class="advanced-toggle" :class="{ open: mineruAdvancedOpen }" @click="mineruAdvancedOpen = !mineruAdvancedOpen">
+              <TikuIcon :name="mineruAdvancedOpen ? 'chevron-down' : 'chevron-right'" :size="13" />
+              {{ t('ai.mineruAdvanced') }}
+              <span v-if="hasMineruKey" class="advanced-dot" :title="t('ai.mineruConfigured')"></span>
+            </button>
+            <div v-show="mineruAdvancedOpen" class="advanced-body">
+              <el-form-item :label="t('ai.mineru')">
+                <el-input
+                  v-model="aiForm.mineruKey"
+                  type="password"
+                  show-password
+                  :placeholder="maskedMineruKey || 'sk-…'"
+                />
+                <p class="form-tip text-muted">
+                  {{ t('ai.mineruTip') }}
+                  <a href="https://mineru.net/apiManage/token" target="_blank" rel="noopener">mineru.net/apiManage/token</a>
+                  {{ hasMineruKey ? t('ai.keyCurrent', { v: maskedMineruKey }) : '' }}
+                </p>
+              </el-form-item>
+            </div>
+          </div>
         </div>
         <p class="form-tip text-muted">{{ t('ai.thinkingTip') }}</p>
       </el-form>
@@ -427,7 +440,9 @@ const { t } = useI18n({
         modelFilled: '已填入 {model}',
         guideGeneric: '该服务商的 Key 申请页见下方按钮；拿到 Key 后填入「API Key」并保存即可',
         mineru: 'MinerU 解析 Key（可选）',
-        mineruTip: '可选。扫描件、图片的版面与公式识别更准；留空 = 用本地解析。申请：',
+        mineruAdvanced: '高级（可选）：扫描件 / 图形题增强（MinerU）',
+        mineruConfigured: '已配置 MinerU Key',
+        mineruTip: '除非你导入后发现大量题目缺图，否则不需要配置（不配置也能正常导入文档、Word、Excel、PPT 与文字版 PDF）。配置后可在导入时开启它重新解析版面。申请：',
         test: '测试连接',
         testing: '测试中…',
         save: '保存配置',
@@ -578,7 +593,9 @@ const { t } = useI18n({
         modelFilled: '{model} filled in',
         guideGeneric: 'Use the button below to open this provider\'s key page, then paste the key into “API Key” and save.',
         mineru: 'MinerU API Key (optional)',
-        mineruTip: 'Optional. Improves layout and formula recognition for scans and images; leave empty to use local parsing. Apply at: ',
+        mineruAdvanced: 'Advanced (optional): scans & figure questions (MinerU)',
+        mineruConfigured: 'MinerU key configured',
+        mineruTip: 'You do not need this unless many questions come out missing their figures after importing (documents, Word, Excel, PowerPoint and text-layer PDFs all work without it). Once configured you can enable it when importing to re-parse the layout. Apply at: ',
         test: 'Test connection',
         testing: 'Testing…',
         save: 'Save config',
@@ -825,6 +842,8 @@ const maskedKey = ref('')
 const hasKey = ref(false)
 const maskedMineruKey = ref('')
 const hasMineruKey = ref(false)
+/** 「高级（可选）」折叠区默认收起：MinerU 只对"导入后缺图"的人有意义，别让其他人以为必须注册 */
+const mineruAdvancedOpen = ref(false)
 const saving = ref(false)
 const testing = ref(false)
 const testResult = ref(null)
@@ -1485,6 +1504,37 @@ async function doImport() {
 </script>
 
 <style scoped>
+/* 高级（可选）折叠区：默认收起，需要的人点开 */
+.advanced-block {
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+.advanced-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  cursor: pointer;
+  transition: color var(--ease);
+}
+.advanced-toggle:hover {
+  color: var(--text-primary);
+}
+.advanced-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.advanced-body {
+  margin-top: 12px;
+}
 .theme-state {
   color: var(--accent-text);
   font-weight: 600;
