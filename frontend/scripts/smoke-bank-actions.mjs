@@ -97,8 +97,17 @@ check('渲染 3 张题库卡片', (await page.locator('.bank-card').count()) ===
 
 console.log('\n[1] 卡片信息与「…」按钮')
 const cardMeta = (await page.locator('.bank-card').first().innerText()).replace(/\s+/g, ' ')
-check('卡片显示「共 N 题 · 已做 M」', /共 3 题/.test(cardMeta) && /已做 1/.test(cardMeta), cardMeta.slice(0, 80))
-check('卡片右上角有「…」按钮', (await page.locator('.bank-card .bank-more').count()) === 3)
+check('卡片显示题数', /\b3\b\s*题/.test(cardMeta), cardMeta.slice(0, 80))
+check('已做 >0 时显示已做数', /已做\s*1/.test(cardMeta), cardMeta.slice(0, 80))
+const secondMeta = (await page.locator('.bank-card').nth(1).innerText()).replace(/\s+/g, ' ')
+check('已做为 0 时不显示「已做 0」（少一点噪音）', !/已做/.test(secondMeta), secondMeta.slice(0, 80))
+check('卡片有「…」按钮（默认透明，悬停出现）', (await page.locator('.bank-card .bank-more').count()) === 3)
+const moreOpacity = await page.evaluate(() => getComputedStyle(document.querySelector('.bank-card .bank-more')).opacity)
+check('「…」默认不显示（卡片保持整洁）', moreOpacity === '0', moreOpacity)
+await page.locator('.bank-card').first().hover()
+await page.waitForTimeout(300)
+const moreOpacityHover = await page.evaluate(() => getComputedStyle(document.querySelector('.bank-card .bank-more')).opacity)
+check('悬停后「…」出现', moreOpacityHover === '1', moreOpacityHover)
 
 console.log('\n[2] 系统右键菜单被屏蔽（输入框内保留）')
 const prevented = await page.evaluate(() => {
@@ -126,12 +135,14 @@ await page.keyboard.press('Escape')
 await page.waitForTimeout(200)
 check('Esc 关闭菜单', (await page.locator('.action-menu').count()) === 0)
 
+await page.locator('.bank-card').nth(1).hover()
 await page.locator('.bank-card').nth(1).locator('.bank-more').click()
 await page.waitForSelector('.action-menu', { timeout: 5000 })
 check('「…」按钮打开同一份菜单', await page.locator('.action-menu').isVisible())
 await page.keyboard.press('Escape')
 
 console.log('\n[4] 重命名（不必进详情页）')
+await page.locator('.bank-card').nth(1).hover()
 await page.locator('.bank-card').nth(1).locator('.bank-more').click()
 await page.locator('.action-menu .action-menu-item', { hasText: '重命名' }).click()
 await page.waitForSelector('.el-dialog', { timeout: 5000 })
@@ -144,6 +155,7 @@ check('重命名发出 PUT /api/banks/2', !!putCall, JSON.stringify(calls.slice(
 check('请求体带新名称', !!putCall && /改名后的题库/.test(putCall.body || ''), putCall?.body)
 
 console.log('\n[5] 删除题库（确认框 + DELETE）')
+await page.locator('.bank-card').first().hover()
 await page.locator('.bank-card').first().locator('.bank-more').click()
 await page.locator('.action-menu .action-menu-item', { hasText: '删除题库' }).click()
 await page.waitForSelector('.el-message-box', { timeout: 5000 })

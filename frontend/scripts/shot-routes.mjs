@@ -36,7 +36,24 @@ function stub(pathname) {
   if (/^\/api\/banks\/1\/sessions$/.test(pathname)) return { records: SESSIONS, total: 3 }
   if (/^\/api\/questions\/\d+$/.test(pathname)) return ROWS.find((q) => q.questionId === Number(pathname.split('/').pop())) || Q(999)
   if (pathname === '/api/home/overview') return { bankCount: 1, questionCount: 3, dueToday: 0, wrongCount: 0, recent: null }
-  if (pathname === '/api/banks') return { records: [{ id: 1, name: '冒烟题库', description: 'e2e', questionCount: 3, createdAt: '2026-01-01T00:00:00', updatedAt: '2026-01-02T00:00:00' }], total: 1 }
+  if (pathname === '/api/banks') {
+    // 贴近真实使用（按用户反馈截图里的形态造数据）：长中文标题、题量差异大、部分带版本/作者、时间跨度大
+    const rows = [
+      { id: 1, name: '纯图片pdf文件', questionCount: 40, answeredCount: 0, version: '1.0.0', createdAt: '2026-09-12T19:47:00' },
+      { id: 2, name: '2026年安徽省公务员录用考试行政职业能力测验模拟卷（第三套）', questionCount: 125, answeredCount: 12, createdAt: '2026-09-12T19:43:00' },
+      { id: 3, name: '专项智能练习（判断推理）(3)', questionCount: 40, answeredCount: 40, version: '1.0.0', description: '判断推理专项：图形推理 + 逻辑判断', createdAt: '2026-09-11T23:38:00' },
+      { id: 4, name: '专项智能练习（判断推理）(1)', questionCount: 20, answeredCount: 3, createdAt: '2026-09-11T23:19:00' },
+      { id: 5, name: '2024安徽高考真题物理（教师版·含解析）', questionCount: 15, answeredCount: 0, version: '1.0.0', createdAt: '2026-09-11T04:44:00' },
+      { id: 6, name: '2024安徽高考真题物理', questionCount: 15, answeredCount: 15, version: '1.0.0', authorName: 'Nauv', createdAt: '2026-09-11T01:08:00' },
+      { id: 7, name: '2026年安徽省公务员录用考试申论', questionCount: 125, answeredCount: 0, createdAt: '2026-09-10T23:48:00' },
+      { id: 8, name: 'sat-practice-test-6-digital', questionCount: 33, answeredCount: 7, createdAt: '2026-09-10T02:16:00' },
+      { id: 9, name: '2026语文新高考I卷试题', questionCount: 9, answeredCount: 0, createdAt: '2026-09-07T16:45:00' },
+      { id: 10, name: '2026年新高考I卷数学真题', questionCount: 19, answeredCount: 19, version: '1.0.0', createdAt: '2026-09-07T16:40:00' },
+      { id: 11, name: '2026年安徽省公务员录用考试行测（模考一）', questionCount: 125, answeredCount: 0, version: '1.0.0', authorName: 'Nauv', createdAt: '2026-09-07T10:06:00' },
+      { id: 12, name: '2026年安徽省公务员录用考试行测（模考二）', questionCount: 125, answeredCount: 0, createdAt: '2026-09-07T08:45:00' }
+    ]
+    return { records: rows, total: rows.length }
+  }
   if (pathname.startsWith('/api/stats')) return { todayCount: 0, todayCorrect: 0, todayDecided: 0, streakDays: 0, longestStreak: 0, totalAnswered: 0, correctTotal: 0, decidedTotal: 0, totalSeconds: 0, dueToday: 0, overdue: 0, daily: [], levels: [], trend: [], bankMastery: [], wrongHeal: null, recentSessions: [] }
   if (pathname === '/api/ai/settings') return { hasKey: false, baseUrl: '', model: '', presets: [], mineruEnabled: false, thinkingEnabled: false }
   if (pathname === '/api/ai/presets' || pathname === '/api/ai/models') return []
