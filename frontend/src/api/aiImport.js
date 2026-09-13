@@ -55,7 +55,7 @@ export const listJobImages = (jobId) => http.get(`/ai-import/jobs/${jobId}/image
 // 单张临时图片 URL（二进制 image/png；编号不存在 → 404）
 export const getJobImageUrl = (jobId, num) => `/api/ai-import/jobs/${jobId}/images/${num}`
 
-// 任务材料素材列表（资料分析/阅读材料题共享材料；本地检测或模型输出）→ data: [{materialKey, content}]
+// 任务材料素材列表（多题共用的材料；本地检测或模型输出）→ data: [{materialKey, content}]
 export const listMaterialSnippets = (jobId) => http.get(`/ai-import/jobs/${jobId}/material-snippets`)
 
 // 查询 AI 配置（Key 脱敏：hasKey + maskedKey）

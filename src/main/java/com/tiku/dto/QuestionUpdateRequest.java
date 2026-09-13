@@ -29,7 +29,7 @@ public record QuestionUpdateRequest(
         String answerText,
         String analysis,
 
-        //共享材料引用（资料分析组内题，null=不修改）
+        //共享材料引用（多题共用材料，null=不修改）
         Long materialId,
 
         //主观题参考答案（null=不修改；""=清空）

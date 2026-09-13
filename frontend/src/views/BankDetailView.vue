@@ -830,18 +830,18 @@ const { t } = useI18n({
       noRecordHint: '还没有做题记录，点击「{act}」刷第一轮', favStartTip: '一键开刷全部收藏题（收藏模式）', noFavTip: '还没有收藏题',
       reviewPlan: '复习计划', dueTodayN: '今日待复习 {n} 题', reviewOffTip: '关闭时进度照记、错题照收，只是不提醒到期复习；重新开启后到期题会回到队列',
       wrongTab0: '错题', favTab0: '收藏',
-      questions: '题目', materials: '材料', aiAppend: 'AI 追加', batchImport: '批量导入', aiFillAnswers: 'AI 补答案',
+      questions: '题目', materials: '共用材料', aiAppend: 'AI 追加', batchImport: '批量导入', aiFillAnswers: 'AI 补答案',
       aiFillTip: '把本库无答案的客观题分批送 AI 判定回填（答案后配的批量兑现）', exitSelectMode: '退出选择模式', selectModeTip: '勾选若干题目，另存为新题库或并入其他题库',
       cancelSelect: '取消选题', selectSave: '选题另存', addQuestion: '添加题目',
       searchPh: '搜索题干 / 选项关键词', qType: '题型', qScope: '范围', all: '全部', undone: '未做', qCategory: '分类',
       filterResultN: '筛选结果 {n} 题', noMatch: '没有匹配的题目，试试调整筛选条件', noQuestions: '题库还没有题目', addFirstQuestion: '录入第一题',
       clickEditHint: '点击编辑该题（右侧按钮可做题 / AI 解析 / 删除）',
-      noMaterialsTip: '还没有材料。材料用于资料分析题（组内题共用的文字/图片大题干），创建后可在录题时关联。',
+      noMaterialsTip: '还没有共用材料。共用材料是多道题共用的一段文字或图片（阅读材料、图表、案例背景等），创建后可在这里或录题时关联到题目。',
       dupNumberTitle: '该题号在当前列表中重复，可能是重复导入的题目，请删除或修改题号',
       noAnswerTitle: '未配置答案：做题时无法判对错，点击编辑补配',
       authorNamePh: '导出时写入文件的展示名',
-      materialsDialogTitle: '共享材料（资料分析大题干）',
-      materialContentPh: '材料内容（文字 + [图片:文件名] 标记）',
+      materialsDialogTitle: '共用材料',
+      materialContentPh: '共用内容（文字 + [图片:文件名] 标记）',
       /* ---- 题目行菜单 / 导出范围 / 批量删除（2026-09-12） ---- */
       scopeLabel: '导出范围',
       scopeAll: '全部题目', scopeAllDesc: '整库导出（推荐：会登记/沿用发布身份）',
@@ -874,7 +874,7 @@ const { t } = useI18n({
       msgDeleteQuestionsTitle: '删除 {n} 道题',
       msgDeletedQuestions: '已删除 {n} 道题',
       msgDeletedQuestionsPartial: '已删除 {ok} 道，{fail} 道删除失败',
-      editMaterial: '编辑材料', createMaterial: '创建材料', saving: '保存中…', saveEdit: '保存修改', insertImage: '插图',
+      editMaterial: '编辑共用材料', createMaterial: '创建共用材料', saving: '保存中…', saveEdit: '保存修改', insertImage: '插图',
       genByAi: '由 AI 导入生成',
       msgMaxCopy: '一次最多复制 {n} 题，请分批操作',
       msgNeedNewBankName: '请输入新题库名称',
@@ -942,18 +942,18 @@ const { t } = useI18n({
       noRecordHint: 'No practice records yet — click “{act}” for your first round', favStartTip: 'Practice all favorites in one go (favorites mode)', noFavTip: 'No favorites yet',
       reviewPlan: 'Review plan', dueTodayN: '{n} due today', reviewOffTip: 'Progress and mistakes are still recorded while off — only due reminders stop; due questions return when re-enabled',
       wrongTab0: 'Mistakes', favTab0: 'Favorites',
-      questions: 'Questions', materials: 'Materials', aiAppend: 'AI Append', batchImport: 'Batch import', aiFillAnswers: 'AI Fill answers',
+      questions: 'Questions', materials: 'Shared material', aiAppend: 'AI Append', batchImport: 'Batch import', aiFillAnswers: 'AI Fill answers',
       aiFillTip: 'Batch-send unanswered objective questions to AI for judging & filling (for answer keys added later)', exitSelectMode: 'Exit select mode', selectModeTip: 'Select questions to save as a new bank or merge into another',
       cancelSelect: 'Cancel select', selectSave: 'Select & save as', addQuestion: 'Add question',
       searchPh: 'Search stem / options', qType: 'Type', qScope: 'Scope', all: 'All', undone: 'Undone', qCategory: 'Category',
       filterResultN: '{n} results', noMatch: 'No matching questions — try adjusting filters', noQuestions: 'No questions in this bank yet', addFirstQuestion: 'Add your first question',
       clickEditHint: 'Click to edit (right-side buttons: practice / AI analyze / delete)',
-      noMaterialsTip: 'No materials yet. Materials are shared texts/images used by analysis questions; create one and link it when adding questions.',
+      noMaterialsTip: 'No shared material yet. Shared material is one text/image used by several questions (reading passage, chart, case background…). Create it here or link it while editing a question.',
       dupNumberTitle: 'This number appears more than once in the list — likely a duplicate import; delete it or change the number',
       noAnswerTitle: 'No answer configured — practice cannot grade it; click to edit and fill it in',
       authorNamePh: 'Display name written into the exported file',
-      materialsDialogTitle: 'Shared materials (analysis passages)',
-      materialContentPh: 'Material content (text + [image:file-name] markers)',
+      materialsDialogTitle: 'Shared material',
+      materialContentPh: 'Shared content (text + [image:file-name] markers)',
       scopeLabel: 'Export range',
       scopeAll: 'All questions', scopeAllDesc: 'Whole bank (recommended: claims/keeps the publish identity)',
       scopeFavorite: 'Favorites only', scopeFavoriteDesc: 'Export only starred questions (subset, temporary identity)',
@@ -985,7 +985,7 @@ const { t } = useI18n({
       msgDeleteQuestionsTitle: 'Delete {n} questions',
       msgDeletedQuestions: 'Deleted {n} questions',
       msgDeletedQuestionsPartial: 'Deleted {ok}, {failed} failed',
-      editMaterial: 'Edit material', createMaterial: 'Create material', saving: 'Saving…', saveEdit: 'Save changes', insertImage: 'Image',
+      editMaterial: 'Edit shared material', createMaterial: 'Create shared material', saving: 'Saving…', saveEdit: 'Save changes', insertImage: 'Image',
       genByAi: 'Generated by AI import',
       msgMaxCopy: 'You can copy at most {n} questions at a time — please run it in batches',
       msgNeedNewBankName: 'Please enter a name for the new bank',
@@ -1628,7 +1628,7 @@ async function startFavoriteSession() {
   await startSessionWith({ mode: 'FAVORITE' }, null)
 }
 
-/* ---------- {{ t('materials') }}管理（资料分析共享大题干） ---------- */
+/* ---------- {{ t('materials') }}管理（多题共用的大题干/图表） ---------- */
 const materialsVisible = ref(false)
 const materials = ref([])
 const materialContent = ref('')

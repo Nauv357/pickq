@@ -421,7 +421,7 @@ public class AiImportService {
                 }
                 String aiOutput = aiClientService.chatWithImages(vision, systemPrompt, userPrompt, allImages, true);
                 //单次多模态路径（扫描件/纯图片/含图）：sourceText 传 mergedText（可能为 null → 跳过答案证据检查）；
-                //材料组识别启用（资料分析扫描件/图片常见）
+                //材料组识别启用（扫描件/图片里的共用材料常见）
                 parsedResult = modelCalls.parseAndValidate(aiOutput, aiSupplement, mergedText, true, false);
             } else if (hasExtracted) {
                 //单文件 PDF 内嵌图：分块按页归属图片并行（思考模式下图片编号引用）
@@ -604,7 +604,7 @@ public class AiImportService {
         return jobStorageService.readImage(jobId, num);
     }
 
-    // ==================== 材料素材（资料分析/阅读材料题） ====================
+    // ==================== 材料素材（多题共用的材料） ====================
 
     /**
      * 任务材料素材列表（预览页"材料素材区"）：任务结果中的共享材料（本地检测的 m1 或模型输出的材料）。

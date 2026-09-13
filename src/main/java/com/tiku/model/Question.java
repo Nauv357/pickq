@@ -43,7 +43,7 @@ public class Question {
     private Double score = 1.0;
     private String analysis;    //解析
 
-    //共享材料引用（资料分析组内题；见 material 表）
+    //共享材料引用（多题共用材料；见 material 表）
     @TableField("material_id")
     private Long materialId;
 

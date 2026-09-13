@@ -59,7 +59,7 @@ public class ContentPackageFile {
     /** 题目数组 */
     private List<ContentPackageQuestion> questions;
 
-    /** 共享材料数组（资料分析大题干，v1.1 可选扩展） */
+    /** 共享材料数组（多题共用的大题干/图表，v1.1 可选扩展） */
     private List<ContentPackageMaterial> materials;
 
     /** 图片资源（name → base64；题目/材料 content 内 [图片:name] 引用，v1.1 可选扩展） */

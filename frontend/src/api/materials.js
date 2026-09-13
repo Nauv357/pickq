@@ -1,6 +1,6 @@
 import http from './http'
 
-// 共享材料（资料分析大题干）管理
+// 共用材料（多题共用的大题干/图表）管理
 export const listMaterials = (bankId) => http.get(`/banks/${bankId}/materials`)
 
 export const createMaterial = (bankId, content) => http.post(`/banks/${bankId}/materials`, { content })

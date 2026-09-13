@@ -51,7 +51,7 @@
           </div>
           <div class="review-content" v-html="richHtml(q.content)"></div>
 
-          <!-- 共享材料（资料分析组内题，回顾页只展示一次，可折叠） -->
+          <!-- 共用材料（多题共用，回顾页只展示一次，可折叠） -->
           <div v-if="showMaterial(q)" class="review-material" :class="{ collapsed: isMaterialCollapsed(q.materialId) }">
             <div class="material-head" @click="toggleMaterial(q.materialId)">
               <span class="material-title">{{ t('material') }}</span>
@@ -340,7 +340,7 @@ function reviewOptClass(q, key) {
   return classes
 }
 
-/* 共享材料只展示一次（回顾页列表式展示） */
+/* 共用材料只展示一次（回顾页列表式展示） */
 const seenMaterials = new Set()
 function showMaterial(q) {
   if (q.materialContent && !seenMaterials.has(q.materialId)) {
@@ -693,7 +693,7 @@ onMounted(() => {
   display: block;
 }
 
-/* 共享材料（粉笔式卡片：标题栏 + 折叠） */
+/* 共用材料（粉笔式卡片：标题栏 + 折叠） */
 .review-material {
   margin-bottom: 16px;
   background: var(--bg-elev);

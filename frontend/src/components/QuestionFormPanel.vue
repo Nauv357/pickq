@@ -86,18 +86,19 @@
         </div>
       </div>
 
-      <!-- 关联材料（资料分析组内题） -->
+      <!-- 关联共用材料（多题共用的大题干/图表，不限于某类题型） -->
       <div class="field">
-        <label class="field-label">关联材料（资料分析大题干，可选）</label>
+        <label class="field-label">关联共用材料（可选）</label>
         <el-select
           v-model="form.materialId"
-          placeholder="不关联材料"
+          placeholder="不关联共用材料"
           clearable
           style="width: 100%"
           filterable
         >
           <el-option v-for="m in materials" :key="m.id" :label="materialLabel(m)" :value="m.id" />
         </el-select>
+        <p class="form-tip text-muted">多道题共用的一段文字或图片（阅读材料、图表、案例背景等）；没有可留空。</p>
       </div>
 
       <!-- 选项（判断/主观题隐藏） -->

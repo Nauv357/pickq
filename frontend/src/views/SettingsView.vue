@@ -298,7 +298,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { exportStudyRecords, importStudyRecords } from '../api/studyRecords'
@@ -376,14 +376,14 @@ const { t } = useI18n({
       },
       ai: {
         title: 'AI 模型配置',
-        desc: '用于「AI 导入」（文档 / 图片 → 题目）。Key 仅保存在本机配置文件，前端只显示脱敏后的 Key；支持 DeepSeek / 通义 / Kimi / OpenAI / 本地 Ollama 等 OpenAI 兼容端点。',
+        desc: '用于「AI 导入」：把文档、图片整理成题目。API Key 只保存在本机。',
         roleTip:
-          '三者角色：① 文本模型 = 题目整理与思考的主力；② 多模态模型（识图）= 含图文档必需——文字版 Word/PDF 的直传视觉、扫描件的直读都靠它，有图文档务必配置；③ MinerU（可选）= 仅"扫描件/纯图片且含图形图表"需提取版面与题图时使用。纯文字 txt/md 只需文本模型。',
-        guideEntry: '第一次配置、不知道 Key 去哪弄？',
-        guideLink: '点这里看「如何获取 API Key」分步教程 →',
-        presetLabel: '选择服务商（自动填充配置，可手动修改）',
+          '最少只需两步：选「服务商」→ 填「API Key」。含图片或扫描件的文档，再选一个「多模态模型」。',
+        guideEntry: '不知道 Key 去哪申请？',
+        guideLink: '查看分步教程 →',
+        presetLabel: '服务商',
         presetPh: '选择服务商…',
-        presetTip: '选择后自动填入 Base URL 与模型名，只需再填 API Key；也可不选，全部手动填写',
+        presetTip: '选择后自动填好地址与模型，并用你的 Key 查出可用模型（也可全部手动填写）',
         presetVerified: '（{date} 验证）',
         presetNoModel: '（模型名待获取）',
         presetHint: '提示：{hint}',
@@ -401,18 +401,21 @@ const { t } = useI18n({
         keyKeep: '留空 = 保留原有 Key',
         keyCurrent: '（当前：{v}）',
         localNoKeyNeeded: '检测到本机/局域网地址：本地模型（Ollama 等）无需 API Key，可留空',
-        modelText: '模型（文本整理）',
-        modelVision: '多模态模型（图片/扫描件，可留空 = 同文本模型）',
-        modelsFetch: '获取可用模型',
+        modelText: '文本模型（整理题目）',
+        modelVision: '多模态模型（图片/扫描件，留空 = 同文本模型）',
+        modelsFetch: '刷新可用模型',
         modelsFetching: '获取中…',
-        modelsFetchTip: '用当前 Base URL 与 API Key 向服务商查询可用模型，填入两个下拉（也可直接手输模型名）',
-        modelsNeeded: '该预设未预置模型名（模型名易变，以你 Key 实际可用的为准）：点「获取可用模型」列出可用模型',
-        modelsNeededPick: '还没选模型：请从模型下拉中选择（已获取 {n} 个可用模型，也可直接手输）',
-        modelsKeptHint: '该预设未预置模型名，当前沿用你的模型名 {model}；可点「获取可用模型」换成该服务商实际可用的模型',
+        modelsFetchTip: '下拉可直接选，也可手动输入模型名',
+        modelsNeeded: '该预设未预置模型名（模型名易变，以你 Key 实际可用的为准）：点「刷新可用模型」列出可用模型',
+        modelsNeededPick: '还没选模型：请从下拉中选择（已获取 {n} 个可用模型，也可手动输入）',
+        modelsKeptHint: '该预设未预置模型名，当前沿用你的模型名 {model}；可点「刷新可用模型」换成实际可用的模型',
         modelsNeedKey: '请先填写 API Key',
         saveNeedKey: '公网模型服务需要 API Key，请先填写（本机/局域网地址如 Ollama 可留空）',
         modelsNeedBaseUrl: '请先填写 Base URL',
         modelsOk: '已获取 {n} 个可用模型',
+        modelsPickedSuffix: '，已选择 {model}',
+        modelsAutoPicked: '已自动获取可用模型，并选择 {model}（可随时更改）',
+        modelsFetchedKeep: '已获取 {n} 个可用模型，当前使用 {model}',
         modelsResolved: '（实际查询 {url}：路径由服务商补齐，调用失败时可把 Base URL 填成它）',
         modelsEmpty: '该服务未返回任何模型，请手动填写模型名',
         modelsFailInline: '获取失败：{msg}',
@@ -423,17 +426,17 @@ const { t } = useI18n({
         modelFill: '填入',
         modelFilled: '已填入 {model}',
         guideGeneric: '该服务商的 Key 申请页见下方按钮；拿到 Key 后填入「API Key」并保存即可',
-        mineru: 'MinerU 解析 API Key（可选）',
-        mineruTip: '用于 pdf/图片/docx 的结构化解析（版面/OCR/公式/表格→增强文本），AI 整理仍用上方模型；留空 = 使用本地解析路径。申请：',
+        mineru: 'MinerU 解析 Key（可选）',
+        mineruTip: '可选。扫描件、图片的版面与公式识别更准；留空 = 用本地解析。申请：',
         test: '测试连接',
         testing: '测试中…',
         save: '保存配置',
         saving: '保存中…',
-        testTip: '测试连接会先保存当前表单内容',
-        thinkingTip: '「思考模式」在 AI 导入的「处理模式」中按需选择：智能推荐与精细默认开启（更稳更准），最快模式关闭（更快）',
+        testTip: '测试连接会先保存当前配置',
+        thinkingTip: '「思考模式」在导入时选：默认开启更稳更准，最快模式更快。',
         guideTitle: '如何获取 API Key',
         guideWhat:
-          '配置只需填三样：<b>Base URL</b> 与 <b>模型名</b> 选择服务商后会自动填入，你只需拿到并填好 <b>API Key</b>。Key 只在创建页完整显示一次，且只保存在你的本机。',
+          '只需两样：<b>服务商</b>选好后地址与模型会自动填好，你只要拿到并填上 <b>API Key</b>。Key 只在创建页完整显示一次，且只保存在你的本机。',
         close: '关闭',
         open: '打开 {label} 创建页',
         openGuideOk: '已用系统浏览器打开 {label}，请到浏览器中查看',
@@ -524,14 +527,14 @@ const { t } = useI18n({
       },
       ai: {
         title: 'AI Model Setup',
-        desc: 'Used by AI Import (documents / images → questions). Keys are stored only in a local config file; the UI shows masked keys. Works with any OpenAI-compatible endpoint (OpenAI, DeepSeek, Anthropic, Gemini, Groq, Mistral, Ollama…).',
+        desc: 'Used by AI Import to turn documents and images into questions. API keys are stored only on this machine.',
         roleTip:
-          'Three roles: ① text model = the main engine for organizing questions; ② vision (multimodal) model = required for image-bearing documents — direct vision for Word/PDF text and reading scans rely on it; ③ MinerU (optional) = only needed for scans / pure images containing figures & charts. Plain txt/md only needs a text model.',
-        guideEntry: 'New here and don\'t know where to get a key?',
-        guideLink: 'See the step-by-step “How to get an API key” guide →',
-        presetLabel: 'Provider preset (auto-fills config; you can still edit)',
+          'Two steps are enough: pick a provider, then paste your API key. For documents with images or scans, also pick a vision model.',
+        guideEntry: 'Not sure where to get a key?',
+        guideLink: 'See the step-by-step guide →',
+        presetLabel: 'Provider',
         presetPh: 'Select a provider…',
-        presetTip: 'Selecting a provider fills Base URL and model names — you only need to add the API key. Or leave it blank and fill everything manually.',
+        presetTip: 'Picking one fills in the URL and models, then looks up the models your key can use (manual setup still works)',
         presetVerified: ' (verified {date})',
         presetNoModel: ' (model name fetched on demand)',
         presetHint: 'Note: {hint}',
@@ -549,18 +552,21 @@ const { t } = useI18n({
         keyKeep: 'Leave empty to keep the existing key',
         keyCurrent: ' (current: {v})',
         localNoKeyNeeded: 'Local or LAN address detected: local models (Ollama etc.) need no API key — leave it empty',
-        modelText: 'Model (text)',
+        modelText: 'Text model (organizes questions)',
         modelVision: 'Vision model (images / scans; leave empty = same as text model)',
-        modelsFetch: 'Fetch available models',
+        modelsFetch: 'Refresh available models',
         modelsFetching: 'Fetching…',
-        modelsFetchTip: 'Asks the provider for its model list with the current Base URL and API key, then fills both dropdowns (typing any model name by hand still works)',
-        modelsNeeded: 'This preset ships no model name (model names change — yours are whatever your key can actually use): click “Fetch available models” to list them',
+        modelsFetchTip: 'Pick from the dropdown, or just type a model name',
+        modelsNeeded: 'This preset ships no model name (model names change — yours are whatever your key can actually use): click “Refresh available models” to list them',
         modelsNeededPick: 'No model picked yet — choose one from the dropdown ({n} fetched; typing also works)',
-        modelsKeptHint: 'This preset ships no model name — keeping your current model name {model}; click “Fetch available models” to switch to what this provider actually offers',
+        modelsKeptHint: 'This preset ships no model name — keeping your current model name {model}; click “Refresh available models” to switch to what this provider actually offers',
         modelsNeedKey: 'Please enter an API key first',
         saveNeedKey: 'Public model services need an API key — enter one first (local/LAN addresses such as Ollama can stay empty)',
         modelsNeedBaseUrl: 'Please enter a Base URL first',
         modelsOk: 'Fetched {n} available models',
+        modelsPickedSuffix: ' — selected {model}',
+        modelsAutoPicked: 'Fetched the available models and selected {model} (you can change it anytime)',
+        modelsFetchedKeep: 'Fetched {n} available models — currently using {model}',
         modelsResolved: ' (queried {url}: the provider completed the path — use it as the Base URL if calls fail)',
         modelsEmpty: 'The provider returned no models — please type a model name manually',
         modelsFailInline: 'Fetch failed: {msg}',
@@ -572,16 +578,16 @@ const { t } = useI18n({
         modelFilled: '{model} filled in',
         guideGeneric: 'Use the button below to open this provider\'s key page, then paste the key into “API Key” and save.',
         mineru: 'MinerU API Key (optional)',
-        mineruTip: 'Used for structured parsing of pdf/images/docx (layout/OCR/formulas/tables → richer text); question organizing still uses the models above. Leave empty for the local parsing path. Apply at: ',
+        mineruTip: 'Optional. Improves layout and formula recognition for scans and images; leave empty to use local parsing. Apply at: ',
         test: 'Test connection',
         testing: 'Testing…',
         save: 'Save config',
         saving: 'Saving…',
-        testTip: 'Testing saves the current form first',
-        thinkingTip: '“Thinking mode” is chosen per job in the AI import dialog: Smart / Careful default to on (more stable), Fastest turns it off (faster).',
+        testTip: 'Testing saves the current settings first',
+        thinkingTip: '“Thinking mode” is chosen per import: on by default (more accurate), “Fastest” is quicker.',
         guideTitle: 'How to get an API key',
         guideWhat:
-          'You only need three things: <b>Base URL</b> and <b>model name</b> are auto-filled when you pick a provider — you just need an <b>API key</b>. Keys are shown in full only once on the provider page, and are stored only on your machine.',
+          'Just two things: pick a <b>provider</b> (URL and models are filled in for you), then paste your <b>API key</b>. Keys are shown in full only once on the provider page, and are stored only on your machine.',
         close: 'Close',
         open: 'Open the {label} key page',
         openGuideOk: 'Opened {label} in your system browser — check the browser window',
@@ -824,6 +830,8 @@ const testing = ref(false)
 const testResult = ref(null)
 const modelIssue = ref(null) // 测试失败且疑似模型失效：{ replacement, note } → 结果区自愈操作
 const modelOptions = ref([]) // 模型下拉选项（接口返回 + 已配置/预设里的手输值）
+/** 服务商**实际返回**的可用模型（不含预设/手输的额外项）——判断"模型是否还有效"只能用它 */
+const fetchedModels = ref([])
 const modelsFetched = ref(false) // 本次是否已成功拉取过模型列表（决定引导文案：去拉取 / 去下拉里选）
 const modelsFetchedCount = ref(0) // 上次成功拉取到的模型个数（接口实际返回数，不含手输/沿用的值）
 const fetchingModels = ref(false)
@@ -1082,9 +1090,112 @@ function applyPreset(name) {
   if (formText(p.visionModel)) aiForm.value.visionModel = p.visionModel
   // 换了服务商 → 之前拉到的模型列表不再对应当前端点，引导重新获取
   modelsFetched.value = false
+  fetchedModels.value = []
   // 预设里的模型名直接进下拉选项，避免选项里没有时下拉显示为空
   rememberModelOptions(p.model, p.visionModel)
+  // 选完服务商就自动查一次可用模型并选好默认值（用户明确要求：不要让他再点一次"获取可用模型"）
+  autoFetchAfterPreset()
 }
+
+/** 预设里的模型名可能已下线：能查就查一次，查完自动选一个可用模型 */
+async function autoFetchAfterPreset() {
+  if (!canFetchModels()) return
+  await doFetchModels({ silent: true })
+  if (modelsFetched.value) notifyAutoPick()
+}
+
+/** 静默获取完模型后的统一反馈：换了新模型就说换成哪个，没换就说当前用的是哪个 */
+function notifyAutoPick() {
+  const picked = autoPickModels()
+  if (picked) {
+    ElMessage.success(t('ai.modelsAutoPicked', { model: picked }))
+    return
+  }
+  if (formText(aiForm.value.model)) {
+    ElMessage.success(t('ai.modelsFetchedKeep', { n: modelsFetchedCount.value, model: aiForm.value.model }))
+  }
+}
+
+/** 有地址、且（表单里填了 Key / 本机已存 Key / 本机局域网端点免 Key）才值得去查 */
+function canFetchModels() {
+  const baseUrl = formText(aiForm.value.baseUrl)
+  if (!baseUrl) return false
+  if (formText(aiForm.value.apiKey) || hasKey.value) return true
+  return isLocalOrPrivate(baseUrl)
+}
+
+/** 明显不是对话模型的（向量/语音/画图/审核/重排），自动挑选时排除 */
+const NON_CHAT_MODEL = /(embed|embedding|whisper|tts|dall-e|moderation|rerank|image-|stable-diffusion|audio)/i
+/** 常见"好用且便宜"的对话模型优先级（命中越靠前越优先；只用于自动推荐，用户随时可改） */
+const CHAT_MODEL_PREFERENCE = [
+  /deepseek-chat/i, /deepseek-v3/i, /gpt-4o-mini/i, /gpt-4\.1-mini/i, /gpt-4o/i,
+  /claude-3-5-sonnet/i, /claude-sonnet/i, /gemini-2\.5-flash/i, /gemini.*flash/i,
+  /qwen-plus/i, /qwen-max/i, /glm-4-flash/i, /moonshot-v1-8k/i, /llama-3\.3/i, /mistral-large/i
+]
+/** 常见多模态模型特征 */
+const VISION_MODEL_HINT = /(vl|vision|gpt-4o|gpt-4\.1|claude-3|claude-4|gemini|glm-4v|pixtral|llava|internvl|omni)/i
+
+/**
+ * 自动选模型：优先"预设里写的那个"（还在列表里就沿用），否则按优先级挑一个对话模型。
+ * 只改「空着」或「已不在可用列表里」的字段——用户手填的名字如果不在这家服务的列表里，
+ * 那是他自己的选择（可能是自定义别名），不擅自覆盖。
+ */
+function autoPickModels() {
+  // 用"服务商实际返回的模型"做判断：modelOptions 里还混着预设/已保存的模型名（为了让下拉能回显），
+  // 拿它判断"模型是否还有效"永远为真，已下线的模型就换不掉了。
+  const list = fetchedModels.value.length ? fetchedModels.value : modelOptions.value
+  if (!list.length) return ''
+  const preset = selectedPreset.value
+  let picked = ''
+  const inList = (v) => !!v && list.includes(v)
+  const wantText = !formText(aiForm.value.model) || !inList(formText(aiForm.value.model))
+  if (wantText) {
+    const candidate = (formText(preset?.model) && inList(preset.model) && preset.model)
+      || pickByPreference(list)
+    if (candidate) {
+      aiForm.value.model = candidate
+      picked = candidate
+    }
+  }
+  const wantVision = !formText(aiForm.value.visionModel) || !inList(formText(aiForm.value.visionModel))
+  if (wantVision) {
+    const vCandidate = (formText(preset?.visionModel) && inList(preset.visionModel) && preset.visionModel)
+      || list.find((m) => VISION_MODEL_HINT.test(m) && !NON_CHAT_MODEL.test(m))
+    if (vCandidate) aiForm.value.visionModel = vCandidate
+  }
+  rememberModelOptions(aiForm.value.model, aiForm.value.visionModel)
+  return picked
+}
+
+function pickByPreference(list) {
+  const usable = list.filter((m) => !NON_CHAT_MODEL.test(m))
+  const pool = usable.length ? usable : list
+  for (const re of CHAT_MODEL_PREFERENCE) {
+    const hit = pool.find((m) => re.test(m))
+    if (hit) return hit
+  }
+  return pool[0]
+}
+
+/**
+ * 用户把 API Key 填进来之后自动查一次可用模型（不必再点「获取可用模型」）。
+ * 800ms 防抖：边打字边发请求既浪费配额也会刷屏报错。已经查到过就不再打扰。
+ */
+let apiKeyTimer = null
+watch(
+  () => aiForm.value.apiKey,
+  (v) => {
+    clearTimeout(apiKeyTimer)
+    const key = formText(v)
+    if (key.length < 8 || modelsFetched.value || fetchingModels.value) return
+    apiKeyTimer = setTimeout(async () => {
+      if (!canFetchModels()) return
+      await doFetchModels({ silent: true })
+      if (modelsFetched.value) notifyAutoPick()
+    }, 800)
+  }
+)
+onUnmounted(() => clearTimeout(apiKeyTimer))
 
 /**
  * 公网服务商必须填 Key，本机/局域网（Ollama 等）允许留空 —— 口径与后端一致
@@ -1273,11 +1384,17 @@ async function doFetchModels({ silent = false } = {}) {
       modelsFetchedCount.value = 0
       return
     }
-    modelOptions.value = [...new Set(models)]
-    rememberModelOptions(aiForm.value.model, aiForm.value.visionModel)
+    // 下拉只保留「服务商实际返回的模型 + 当前选中的值」：
+    // 之前预设带进来的旧模型名（可能已下线）不再留在列表里误导人；手输的值如果不在列表也仍会显示。
+    const keepCurrent = [formText(aiForm.value.model), formText(aiForm.value.visionModel)].filter(Boolean)
+    const fetched = [...new Set(models)]
+    modelOptions.value = [...new Set([...fetched, ...keepCurrent])]
+    fetchedModels.value = fetched
     modelsError.value = ''
     modelsFetched.value = true
     modelsFetchedCount.value = models.length
+    // 顺手把空着的/已失效的模型名换成列表里的可用模型（静默获取时也要选好，用户回来就能直接保存）
+    const picked = autoPickModels()
     if (!silent) {
       const count = Number(r?.count)
       const n = Number.isFinite(count) && count > 0 ? count : models.length
@@ -1287,6 +1404,7 @@ async function doFetchModels({ silent = false } = {}) {
       if (resolved && resolved.replace(/\/+$/, '') !== baseUrl.replace(/\/+$/, '')) {
         msg += t('ai.modelsResolved', { url: resolved })
       }
+      if (picked) msg += t('ai.modelsPickedSuffix', { model: picked })
       ElMessage.success(msg)
     }
   } catch (e) {

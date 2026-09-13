@@ -145,7 +145,7 @@
             <p class="image-panel-tip text-muted">
               拖材料卡片到题目上，或点「关联」批量设置；展开可编辑材料内容（含表格/图片标记）
             </p>
-            <div v-if="materials.length === 0" class="image-empty text-muted">本任务未检测到共享材料</div>
+            <div v-if="materials.length === 0" class="image-empty text-muted">本任务未检测到共用材料</div>
             <div v-else class="material-snippet-list">
               <div
                 v-for="m in materials"
@@ -194,11 +194,11 @@
         </div>
       </aside>
 
-      <!-- 共享材料（可编辑；确认导入时由后端一并入库） -->
+      <!-- 共用材料（可编辑；确认导入时由后端一并入库） -->
       <div v-if="materials.length" class="preview-materials">
         <div class="section-title">
-          <h2>共享材料（{{ materials.length }}）</h2>
-          <span class="text-muted material-note">材料用于资料分析题，编辑时勿删材料文本</span>
+          <h2>共用材料（{{ materials.length }}）</h2>
+          <span class="text-muted material-note">材料供多道题共用，编辑时勿删材料文本</span>
         </div>
         <div v-for="(m, mi) in materials" :key="m.materialKey" class="material-edit-card">
           <div class="material-edit-head">
@@ -392,8 +392,8 @@
           <div v-else class="card-body">
             <!-- 材料关联（下拉选择或从素材区拖入） -->
             <div v-if="materials.length" class="field">
-              <label class="field-label">共享材料（可选）</label>
-              <el-select v-model="q.materialKey" clearable placeholder="关联共享材料（从右侧素材区拖入或选择）" style="width: 100%">
+              <label class="field-label">共用材料（可选）</label>
+              <el-select v-model="q.materialKey" clearable placeholder="关联共用材料（从右侧素材区拖入或选择）" style="width: 100%">
                 <el-option v-for="m in materials" :key="m.materialKey" :label="m.materialKey" :value="m.materialKey" />
               </el-select>
             </div>
@@ -603,7 +603,7 @@ const { t } = useI18n({
       emptyContent: '题干为空', incompleteOptions: '选项不完整',
       // ---- 渲染态字段标签 ----
       answerLabel: '正确答案', refAnswer: '参考答案', analysisLabel: '解析', notProvided: '未提供',
-      materialTag: '材料：{k}', materialUnlink: '已关联共享材料，点击解除关联',
+      materialTag: '材料：{k}', materialUnlink: '已关联共用材料，点击解除关联',
       aiSupplementTag: 'AI 补答案 · 请核对', expandFull: '展开全部', collapse: '收起',
       scoreTag: '{n} 分', optionEmpty: '（选项 {k} 为空）', answerSep: '、',
       judgeTrue: '正确', judgeFalse: '错误',
@@ -758,7 +758,7 @@ const warningHint = ref('')
 const jobMeta = ref(null)
 const ENGINE_LABEL = { AUTO: '智能推荐（自动路由）', LOCAL: '本地（直传视觉/文本）', MINERU: 'MinerU 增强' }
 const questions = ref([])
-// 共享材料（资料分析大题干，可编辑；确认导入时由后端一并入库）
+// 共用材料（多题共用的大题干/图表，可编辑；确认导入时由后端一并入库）
 const materials = ref([])
 const confirming = ref(false)
 const confirmed = ref(false)
@@ -1005,7 +1005,7 @@ function emptyQuestion() {
     answerText: '',
     analysis: '',
     referenceAnswer: '',
-    materialKey: null, // 关联共享材料（可拖入/下拉/点击设置）
+    materialKey: null, // 关联共用材料（可拖入/下拉/点击设置）
     questionNumber: null, // 源题号；提交前按预览顺序重排 1..N
     answerSource: null // 手动新增题无来源标记
   }
@@ -1034,7 +1034,7 @@ async function loadJob() {
     if (job.status === 'SUCCESS') {
       loading.value = false
       questions.value = (job.questions || []).map(normalize)
-      // 共享材料（资料分析大题干，可编辑）
+      // 共用材料（多题共用的大题干/图表，可编辑）
       materials.value = (job.materials || []).map((m) => ({ materialKey: m.materialKey, content: m.content || '' }))
       loadImages()
       loadMaterialSnippets()
@@ -1109,7 +1109,7 @@ function normalize(q) {
     answerText: q.answerText || '',
     analysis: q.analysis || '',
     referenceAnswer: q.referenceAnswer || '',
-    materialKey: q.materialKey || null, // 关联共享材料（预览编辑时勿删材料文本）
+    materialKey: q.materialKey || null, // 关联共用材料（预览编辑时勿删材料文本）
     questionNumber: q.questionNumber ?? null, // 源文档题号（后端回填；提交前按新顺序重排）
     answerSource
   }

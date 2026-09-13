@@ -18,7 +18,7 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
- * 题目图片存储（资料分析图表、主观题参考答案图等）。
+ * 题目图片存储（材料里的图表、主观题参考答案图等）。
  * 存储：${tiku.data-dir}/images/{bankId}/{yyMMdd}/{uuid}.{ext}
  * 题目 content / reference_answer / material.content 内用标记引用：[图片:文件名]
  * 读取：GET /api/banks/{bankId}/images/{name}

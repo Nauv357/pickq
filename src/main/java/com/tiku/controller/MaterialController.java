@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 共享材料（资料分析大题干）管理。
+ * 共享材料（多题共用的大题干/图表）管理。
  */
 @RestController
 @RequestMapping("/api/banks/{bankId}/materials")

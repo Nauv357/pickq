@@ -37,7 +37,7 @@ public record QuestionCreateRequest(
         String answerText,
         String analysis,
 
-        //共享材料引用（资料分析组内题，可空）
+        //共享材料引用（多题共用材料，可空）
         Long materialId,
 
         //主观题参考答案（文字 + 图片标记 [图片:文件名]，可空）

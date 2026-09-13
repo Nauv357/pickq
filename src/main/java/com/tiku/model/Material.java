@@ -10,7 +10,7 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
 
 /**
- * 共享材料（资料分析大题干：文字 + 图片标记 [图片:文件名]）。
+ * 共享材料（多题共用的大题干/图表：文字 + 图片标记 [图片:文件名]）。
  * 组内题通过 question.material_id 引用；删除题库时级联清理。
  */
 @Data

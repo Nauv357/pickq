@@ -711,7 +711,7 @@ public class DocumentParserService {
         //题号归位归一化：定义/设问句在题号行之前（"正向情绪价值…能力。"/"下列…的是："/"1."）时，
         //移到题号行之后——视觉模型对该版式系统性跳过开头题目（实测判断推理 Q1/Q2/Q11-14 丢失），
         //本地确定性重排后模型输入为正常顺序。保护：只移动短段（≤4 行且 ≤300 字符），
-        //资料分析的长材料段落保持在题号行之前不动。
+        //共用材料的长段落保持在题号行之前不动。
         List<String> work = new ArrayList<>(step1);
         for (int idx = 0; idx < work.size(); idx++) {
             String t = work.get(idx).trim();

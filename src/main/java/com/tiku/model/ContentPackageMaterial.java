@@ -4,7 +4,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * 内容包中的共享材料（资料分析大题干）。
+ * 内容包中的共享材料（多题共用的大题干/图表）。
  * materialKey 在内容包内唯一，题目通过 materialKey 引用；导入后映射为本地 material.id。
  */
 @Data

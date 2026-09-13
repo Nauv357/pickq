@@ -87,7 +87,7 @@ public class AiImportController {
         return ApiResponse.success(aiImportService.listJobImages(id));
     }
 
-    //任务材料素材列表（预览页"材料素材区"：资料分析/阅读材料题的共享材料，用户拖入/点击关联到题目材料区）
+    //任务材料素材列表（预览页"材料素材区"：多题共用的材料，用户拖入/点击关联到题目材料区）
     @GetMapping("/ai-import/jobs/{id}/material-snippets")
     public ApiResponse<List<com.tiku.model.ContentPackageMaterial>> listMaterialSnippets(@PathVariable Long id) {
         return ApiResponse.success(aiImportService.listMaterialSnippets(id));

@@ -91,7 +91,7 @@ public class PracticeSessionService {
             throw new IllegalArgumentException("没有符合条件的题目，请调整练习范围");
         }
 
-        //抽取单位：ALL/SEQUENCE 按材料整组抽取（组 = 同一 material_id 的所有题，资料分析大题干共用）；
+        //抽取单位：ALL/SEQUENCE 按材料整组抽取（组 = 同一 material_id 的所有题，多题共用大题干）；
         //其余模式（TOPIC/REVIEW/WRONG/FAVORITE）每题独立
         List<List<Question>> units = buildUnits(pool, mode);
 

@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.NoSuchElementException;
 
 /**
- * 共享材料（资料分析大题干）管理：随题库生命周期，删除时组内题解除引用。
+ * 共享材料（多题共用的大题干/图表）管理：随题库生命周期，删除时组内题解除引用。
  */
 @Service
 public class MaterialService {
