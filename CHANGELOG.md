@@ -13,7 +13,7 @@
 > - 版本号以 `tauri/src-tauri/tauri.conf.json` 为准，`tauri/src-tauri/Cargo.toml` 必须与之一致；
 > - 发版流程见 `docs/release-notes-guide.md` 的检查清单（构建 → 上传更新频道 → 官网下载链接 → 线上验证 → GitHub Release）。
 
-## [Unreleased]
+## [0.1.19] - 2026-09-14
 
 ### 新增
 - AI 导入新增支持 **Excel（.xls / .xlsx）、CSV、PowerPoint（.ppt / .pptx）与老版 Word（.doc）**：表格按行列、幻灯片按页抽出文字后交给 AI 整理成题目。
