@@ -138,6 +138,16 @@
                 </button>
               </div>
             </div>
+            <!-- 缺图兜底指引：本地解析已能取 PPT/Excel/Word/PDF 的图，仍缺图就是识别层面的问题 →
+                 指向设置里的 MinerU（扫描件/图形题的最后手段）。已经用过 MinerU 的任务不再提示。 -->
+            <p v-if="!mineruUsedInJob" class="mineru-hint text-muted">
+              <TikuIcon name="info" :size="12" class="mineru-hint-icon" />
+              <span>
+                如果导入后发现<strong>大量题目缺图</strong>，可在
+                <button type="button" class="mineru-hint-link" @click="$router.push('/settings')">设置 → AI 配置</button>
+                里配置 MinerU（高级，可选）后重新导入。
+              </span>
+            </p>
           </template>
 
           <!-- 材料 Tab -->
@@ -923,6 +933,8 @@ const usedImageNums = computed(() => {
 const IMAGE_REF_RE = /\[图片\d+\]/
 // 任务是否含图（素材区有图）
 const jobHasImages = computed(() => jobImages.value.length > 0)
+// 本任务是否已经用过 MinerU（用过了就不再提示"去配置 MinerU"）
+const mineruUsedInJob = computed(() => jobMeta.value?.engine === 'MINERU')
 // 是否有任意题目引用了图片（说明自动配图机制在工作；纯文字文档不触发提示）
 const anyQuestionHasImage = computed(() =>
   questions.value.some((q) =>
@@ -1914,6 +1926,36 @@ watch(
   border-radius: 4px;
   padding: 0 4px;
   font-size: 11px;
+}
+/* 缺图兜底指引（素材区图片 Tab 底部）：低饱和提示块，可点进设置配 MinerU */
+.mineru-hint {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  margin: 12px 0 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.mineru-hint-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.mineru-hint strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.mineru-hint-link {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
 }
 .image-empty {
   font-size: 13px;

@@ -22,6 +22,7 @@ import org.apache.poi.xwpf.usermodel.XWPFSDT;
 import org.apache.poi.xwpf.usermodel.XWPFTable;
 import org.apache.poi.xwpf.usermodel.XWPFTableCell;
 import org.apache.xmlbeans.XmlObject;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import javax.imageio.ImageIO;
@@ -54,6 +55,7 @@ import java.util.regex.Pattern;
  * 过滤装饰图（页眉 logo/小图标），按页内视觉顺序排序；逐页文本随 pageTexts 返回，
  * 供分块时按"页"把图片分配到对应文本块。图片编号由 AiImportService 合并时统一分配。
  */
+@Slf4j
 @Service
 public class DocumentParserService {
 
@@ -231,30 +233,44 @@ public class DocumentParserService {
      */
     private ParseResult parseWorkbook(byte[] bytes, boolean legacy) throws IOException {
         StringBuilder sb = new StringBuilder();
+        List<ExtractedImage> extracted = new ArrayList<>();
+        int skipped;
         try (InputStream in = new ByteArrayInputStream(bytes)) {
             if (legacy) {
                 try (org.apache.poi.hssf.usermodel.HSSFWorkbook wb = new org.apache.poi.hssf.usermodel.HSSFWorkbook(in)) {
-                    appendSheets(sb, wb.getNumberOfSheets(), i -> wb.getSheetName(i), i -> wb.getSheetAt(i));
+                    skipped = appendSheets(sb, extracted, wb.getNumberOfSheets(), i -> wb.getSheetName(i), i -> wb.getSheetAt(i));
                 }
             } else {
                 try (org.apache.poi.xssf.usermodel.XSSFWorkbook wb = new org.apache.poi.xssf.usermodel.XSSFWorkbook(in)) {
-                    appendSheets(sb, wb.getNumberOfSheets(), i -> wb.getSheetName(i), i -> wb.getSheetAt(i));
+                    skipped = appendSheets(sb, extracted, wb.getNumberOfSheets(), i -> wb.getSheetName(i), i -> wb.getSheetAt(i));
                 }
             }
         }
+        String warning = skipped > 0
+                ? "Excel 里有 " + skipped + " 张图片无法解码（矢量渲染失败或格式不支持）已跳过，相应题目可能缺图"
+                : null;
         return new ParseResult(legacy ? "XLS" : "XLSX", truncate(sb.toString().trim(), "XLSX"),
-                List.of(), null, List.of(), null, 0, java.util.Set.of());
+                List.of(), null, extracted, warning, 0, java.util.Set.of());
     }
 
-    private void appendSheets(StringBuilder sb, int sheetCount,
-                              java.util.function.IntFunction<String> nameOf,
-                              java.util.function.IntFunction<org.apache.poi.ss.usermodel.Sheet> sheetOf) {
+    /**
+     * 逐工作表输出文本行；工作表里的图片按"锚定行"插到该行文本后面。
+     * 图片不占单元格：Excel 的图是浮动锚定在某个单元格上的（ClientAnchor 的 row1/col1），
+     * 所以"图属于哪一行"是文件里就有的确定信息——比按坐标猜位置可靠。
+     * @return 无法解码（EMF/WMF 渲染失败、WDP 等）而跳过的图片数量
+     */
+    private int appendSheets(StringBuilder sb, List<ExtractedImage> extracted, int sheetCount,
+                             java.util.function.IntFunction<String> nameOf,
+                             java.util.function.IntFunction<org.apache.poi.ss.usermodel.Sheet> sheetOf) {
+        int skipped = 0;
         for (int s = 0; s < sheetCount; s++) {
             org.apache.poi.ss.usermodel.Sheet sheet = sheetOf.apply(s);
             if (sheet == null) {
                 continue;
             }
+            java.util.Map<Integer, List<SheetPicture>> picsByRow = collectSheetPictures(sheet);
             List<String> lines = new ArrayList<>();
+            java.util.Set<Integer> donePicRows = new java.util.LinkedHashSet<>();
             for (org.apache.poi.ss.usermodel.Row row : sheet) {
                 if (row == null) {
                     continue;
@@ -265,8 +281,20 @@ public class DocumentParserService {
                 }
                 String line = String.join(CELL_SEP, trimTrailingEmpty(cells)).trim();
                 // 整行为空（含只有分隔符）的行跳过，避免把上千空行喂给模型
-                if (!line.replace(CELL_SEP.trim(), "").isBlank()) {
-                    lines.add(line);
+                if (line.replace(CELL_SEP.trim(), "").isBlank()) {
+                    continue;
+                }
+                lines.add(line);
+                List<SheetPicture> rowPics = picsByRow.get(row.getRowNum());
+                if (rowPics != null) {
+                    skipped += appendRowPictures(lines, extracted, rowPics, s);
+                    donePicRows.add(row.getRowNum());
+                }
+            }
+            //锚在空行/文本范围之外的图片（浮动图、合并单元格）→ 附在工作表末尾，宁可位置粗也不丢图
+            for (java.util.Map.Entry<Integer, List<SheetPicture>> entry : picsByRow.entrySet()) {
+                if (!donePicRows.contains(entry.getKey())) {
+                    skipped += appendRowPictures(lines, extracted, entry.getValue(), s);
                 }
             }
             if (lines.isEmpty()) {
@@ -280,6 +308,93 @@ public class DocumentParserService {
             }
             sb.append('\n');
         }
+        return skipped;
+    }
+
+    /** 工作表里的一张图：锚定行列 + 图片字节 + 格式（POI 的 PICTURE_TYPE_* 数值） */
+    private record SheetPicture(int row, int col, byte[] data, int picType) {
+    }
+
+    /** 按锚定行收集工作表图片（键 = 行号，升序无关：输出时按行文本顺序取） */
+    private java.util.Map<Integer, List<SheetPicture>> collectSheetPictures(org.apache.poi.ss.usermodel.Sheet sheet) {
+        java.util.Map<Integer, List<SheetPicture>> byRow = new java.util.LinkedHashMap<>();
+        try {
+            if (sheet instanceof org.apache.poi.xssf.usermodel.XSSFSheet xs) {
+                org.apache.poi.xssf.usermodel.XSSFDrawing drawing = xs.getDrawingPatriarch();
+                if (drawing == null) {
+                    return byRow;
+                }
+                for (org.apache.poi.xssf.usermodel.XSSFShape shape : drawing.getShapes()) {
+                    if (!(shape instanceof org.apache.poi.xssf.usermodel.XSSFPicture pic)) {
+                        continue;
+                    }
+                    org.apache.poi.xssf.usermodel.XSSFPictureData pd = pic.getPictureData();
+                    if (pd == null) {
+                        continue;
+                    }
+                    org.apache.poi.xssf.usermodel.XSSFClientAnchor a = pic.getClientAnchor();
+                    addSheetPicture(byRow, a == null ? 0 : Math.max(0, a.getRow1()),
+                            a == null ? 0 : Math.max(0, a.getCol1()), pd.getData(), safePicType(pd::getPictureType));
+                }
+            } else if (sheet instanceof org.apache.poi.hssf.usermodel.HSSFSheet hs) {
+                org.apache.poi.hssf.usermodel.HSSFPatriarch drawing = hs.getDrawingPatriarch();
+                if (drawing == null) {
+                    return byRow;
+                }
+                for (org.apache.poi.hssf.usermodel.HSSFShape shape : drawing.getChildren()) {
+                    if (!(shape instanceof org.apache.poi.hssf.usermodel.HSSFPicture pic)) {
+                        continue;
+                    }
+                    org.apache.poi.hssf.usermodel.HSSFPictureData pd = pic.getPictureData();
+                    if (pd == null) {
+                        continue;
+                    }
+                    org.apache.poi.hssf.usermodel.HSSFClientAnchor a = pic.getClientAnchor();
+                    addSheetPicture(byRow, a == null ? 0 : Math.max(0, a.getRow1()),
+                            a == null ? 0 : Math.max(0, a.getCol1()), pd.getData(), safePicType(pd::getPictureType));
+                }
+            }
+        } catch (Exception e) {
+            //图片收集失败不能让整张表导入失败：文本照常输出，图片缺了由 warning 之外的日志留痕
+            log.warn("Excel 图片收集失败（该工作表图片已跳过）：{}", e.getMessage());
+        }
+        return byRow;
+    }
+
+    private void addSheetPicture(java.util.Map<Integer, List<SheetPicture>> byRow, int row, int col,
+                                 byte[] data, int picType) {
+        if (data == null || data.length == 0) {
+            return;
+        }
+        byRow.computeIfAbsent(row, k -> new ArrayList<>()).add(new SheetPicture(row, col, data, picType));
+    }
+
+    /** 图片格式探测：个别格式（PICT/未知）会抛异常 → 当作未知格式交给 ImageIO 试解 */
+    private int safePicType(java.util.function.IntSupplier supplier) {
+        try {
+            return supplier.getAsInt();
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    /** 把这一行锚定的图片转 PNG + 登记 + 追加 [图片N] 行（紧跟在该行文本之后） */
+    private int appendRowPictures(List<String> lines, List<ExtractedImage> extracted,
+                                  List<SheetPicture> pics, int pageNo) {
+        int skipped = 0;
+        for (SheetPicture pic : pics) {
+            byte[] png = officePictureToPng(pic.data(), pic.picType());
+            if (png == null) {
+                skipped++;
+                continue;
+            }
+            int n = extracted.size() + 1;
+            //坐标只作记录：Excel 没有版面坐标，图片归属靠"标记落在哪一行"，分块不依赖 y
+            extracted.add(new ExtractedImage(pageNo, pic.col(), pic.row(), 0f,
+                    new AiClientService.ImageData("image/png", png)));
+            lines.add("[图片" + n + "]");
+        }
+        return skipped;
     }
 
     private List<String> trimTrailingEmpty(List<String> cells) {
@@ -329,13 +444,14 @@ public class DocumentParserService {
      */
     private ParseResult parseSlides(byte[] bytes, boolean legacy) throws IOException {
         StringBuilder sb = new StringBuilder();
+        SlideAccumulator acc = new SlideAccumulator();
         try (InputStream in = new ByteArrayInputStream(bytes)) {
             if (legacy) {
                 try (org.apache.poi.hslf.usermodel.HSLFSlideShow show =
                              new org.apache.poi.hslf.usermodel.HSLFSlideShow(new org.apache.poi.poifs.filesystem.POIFSFileSystem(in))) {
                     List<org.apache.poi.hslf.usermodel.HSLFSlide> slides = show.getSlides();
                     for (int i = 0; i < slides.size(); i++) {
-                        appendSlideText(sb, i + 1, legacySlideTexts(slides.get(i)));
+                        appendSlideText(sb, i + 1, legacySlideTexts(slides.get(i), acc, i));
                     }
                 }
             } else {
@@ -343,13 +459,27 @@ public class DocumentParserService {
                              new org.apache.poi.xslf.usermodel.XMLSlideShow(in)) {
                     List<org.apache.poi.xslf.usermodel.XSLFSlide> slides = show.getSlides();
                     for (int i = 0; i < slides.size(); i++) {
-                        appendSlideText(sb, i + 1, xslfSlideTexts(slides.get(i)));
+                        appendSlideText(sb, i + 1, xslfSlideTexts(slides.get(i), acc, i));
                     }
                 }
             }
         }
+        String warning = acc.skipped > 0
+                ? "PPT 里有 " + acc.skipped + " 张图片无法解码（矢量渲染失败或格式不支持）已跳过，相应题目可能缺图"
+                : null;
         return new ParseResult(legacy ? "PPT" : "PPTX", truncate(sb.toString().trim(), "PPTX"),
-                List.of(), null, List.of(), null, 0, java.util.Set.of());
+                List.of(), null, acc.extracted, warning, 0, java.util.Set.of());
+    }
+
+    /**
+     * 幻灯片解析累积器：文本流由调用方写入，这里只攒内嵌图（[图片N] 标记就地插进文本行）。
+     * keyToNo：同一张图片文件在多页复用（页眉 logo、背景图、模板装饰）只登记一份，
+     * 其余页只留一个指向它的 [图片N] 标记。
+     */
+    private static final class SlideAccumulator {
+        final List<ExtractedImage> extracted = new ArrayList<>();
+        final java.util.Map<String, Integer> keyToNo = new java.util.HashMap<>();
+        int skipped = 0;
     }
 
     private void appendSlideText(StringBuilder sb, int pageNo, List<String> texts) {
@@ -363,10 +493,22 @@ public class DocumentParserService {
         sb.append('\n');
     }
 
-    private List<String> xslfSlideTexts(org.apache.poi.xslf.usermodel.XSLFSlide slide) {
+    private List<String> xslfSlideTexts(org.apache.poi.xslf.usermodel.XSLFSlide slide,
+                                        SlideAccumulator acc, int pageNo) {
         List<String> out = new ArrayList<>();
-        for (org.apache.poi.sl.usermodel.Shape shape : slide.getShapes()) {
-            if (shape instanceof org.apache.poi.xslf.usermodel.XSLFTable table) {
+        collectXslfShapes(slide.getShapes(), out, acc, pageNo);
+        return out;
+    }
+
+    /** 按形状顺序输出"文本块 / [图片N] 标记"；组合形状递归（PPT 的图文常被放进组合里） */
+    private void collectXslfShapes(List<org.apache.poi.xslf.usermodel.XSLFShape> shapes, List<String> out,
+                                   SlideAccumulator acc, int pageNo) {
+        for (org.apache.poi.xslf.usermodel.XSLFShape shape : shapes) {
+            if (shape instanceof org.apache.poi.xslf.usermodel.XSLFGroupShape group) {
+                collectXslfShapes(group.getShapes(), out, acc, pageNo);
+            } else if (shape instanceof org.apache.poi.xslf.usermodel.XSLFPictureShape picture) {
+                appendSlidePicture(out, acc, pageNo, picture.getPictureData(), picture.getAnchor());
+            } else if (shape instanceof org.apache.poi.xslf.usermodel.XSLFTable table) {
                 for (org.apache.poi.xslf.usermodel.XSLFTableRow row : table.getRows()) {
                     List<String> cells = new ArrayList<>();
                     for (org.apache.poi.xslf.usermodel.XSLFTableCell cell : row.getCells()) {
@@ -384,20 +526,13 @@ public class DocumentParserService {
                 }
             }
         }
-        return out;
     }
 
-    private List<String> legacySlideTexts(org.apache.poi.hslf.usermodel.HSLFSlide slide) {
+    private List<String> legacySlideTexts(org.apache.poi.hslf.usermodel.HSLFSlide slide,
+                                          SlideAccumulator acc, int pageNo) {
         List<String> out = new ArrayList<>();
         // HSLF 没有"占位符"专用 API：直接遍历所有形状里的文本形状（演讲者备注另取）
-        for (org.apache.poi.hslf.usermodel.HSLFShape shape : slide.getShapes()) {
-            if (shape instanceof org.apache.poi.hslf.usermodel.HSLFTextShape textShape) {
-                String text = textShape.getText();
-                if (text != null && !text.isBlank()) {
-                    out.add(text.trim());
-                }
-            }
-        }
+        collectHslfShapes(slide.getShapes(), out, acc, pageNo);
         // 演讲者备注（HSLFNotes 的文本同样来自其形状）
         org.apache.poi.hslf.usermodel.HSLFNotes notes = slide.getNotes();
         if (notes != null) {
@@ -411,6 +546,67 @@ public class DocumentParserService {
             }
         }
         return out;
+    }
+
+    private void collectHslfShapes(List<org.apache.poi.hslf.usermodel.HSLFShape> shapes, List<String> out,
+                                   SlideAccumulator acc, int pageNo) {
+        for (org.apache.poi.hslf.usermodel.HSLFShape shape : shapes) {
+            if (shape instanceof org.apache.poi.hslf.usermodel.HSLFGroupShape group) {
+                collectHslfShapes(group.getShapes(), out, acc, pageNo);
+            } else if (shape instanceof org.apache.poi.hslf.usermodel.HSLFPictureShape picture) {
+                appendSlidePicture(out, acc, pageNo, picture.getPictureData(), picture.getAnchor());
+            } else if (shape instanceof org.apache.poi.hslf.usermodel.HSLFTextShape textShape) {
+                String text = textShape.getText();
+                if (text != null && !text.isBlank()) {
+                    out.add(text.trim());
+                }
+            }
+        }
+    }
+
+    /**
+     * 幻灯片里的一张图 → 转 PNG 登记 + 就地追加 [图片N] 标记。
+     * 标记在形状顺序里的位置就是图在页内的位置（与 docx 的"老路子"一致：图片随文本一起给模型，
+     * 分块时按标记编号精确取图），因此这里给 pageNo/y 坐标只是为了记录来源，分块不依赖它们。
+     * 同一张图片文件在多页复用（logo/背景）只登记一次，但**每页各留一个指向它的标记**：
+     * 标记是"这一页有图"的信号，也是"整页只有一张图"的幻灯片不被当作空页丢掉的依据。
+     */
+    private void appendSlidePicture(List<String> out, SlideAccumulator acc, int pageNo,
+                                    org.apache.poi.sl.usermodel.PictureData data,
+                                    java.awt.geom.Rectangle2D anchor) {
+        if (data == null) {
+            return;
+        }
+        //去重键：ooxml 按 part 名（同一 media 文件），老 .ppt 按图片数据下标
+        String key = null;
+        try {
+            if (data instanceof org.apache.poi.xslf.usermodel.XSLFPictureData x && x.getPackagePart() != null) {
+                key = x.getPackagePart().getPartName().getName();
+            } else if (data instanceof org.apache.poi.hslf.usermodel.HSLFPictureData h) {
+                key = "idx:" + h.getIndex();
+            }
+        } catch (Exception ignored) {
+            //拿不到键 → 不去重（宁可多给一张，也不丢图）
+        }
+        Integer existing = key == null ? null : acc.keyToNo.get(key);
+        if (existing != null) {
+            out.add("[图片" + existing + "]"); //同一张图（logo/背景）：复用编号，不再登记一份
+            return;
+        }
+        int picType = data.getType() == null ? -1 : data.getType().nativeId;
+        byte[] png = officePictureToPng(data.getData(), picType);
+        if (png == null) {
+            acc.skipped++;
+            return;
+        }
+        float x = anchor == null ? 0f : (float) anchor.getX();
+        float y = anchor == null ? 0f : (float) anchor.getY();
+        int n = acc.extracted.size() + 1;
+        acc.extracted.add(new ExtractedImage(pageNo, x, y, 0f, new AiClientService.ImageData("image/png", png)));
+        if (key != null) {
+            acc.keyToNo.put(key, n);
+        }
+        out.add("[图片" + n + "]");
     }
 
     /** 老 Word（.doc / Word 97-2003）：HWPF 取纯文本（段落级），内嵌图片本版不提取 */
@@ -666,11 +862,19 @@ public class DocumentParserService {
      * 绝不把原始矢量字节当 PNG 发给模型（旧实现坏图根因）。
      */
     private byte[] toPortablePng(XWPFPictureData pic) {
-        byte[] data = pic.getData();
+        return officePictureToPng(pic.getData(), pic.getPictureType());
+    }
+
+    /**
+     * Office 图片字节 → 可解码 PNG：栅格图缩放转 PNG；WMF/EMF（MathType 公式、Office 矢量图）
+     * 用 POI HwmfPicture/HemfPicture 渲染为白底 PNG。解码失败/超限 → null（调用方跳过并计数）。
+     * picType 用 POI 的 PICTURE_TYPE_* 数值：Document/Workbook 与 sl 的 PictureType.nativeId 取值一致
+     * （EMF=2 WMF=3 JPEG=5 PNG=6 DIB=7）。
+     */
+    private byte[] officePictureToPng(byte[] data, int picType) {
         if (data == null || data.length == 0 || data.length > MAX_IMAGE_BYTES) {
             return null;
         }
-        int picType = pic.getPictureType();
         if (picType == Document.PICTURE_TYPE_WMF || picType == Document.PICTURE_TYPE_EMF) {
             return renderVectorToPng(data, picType);
         }

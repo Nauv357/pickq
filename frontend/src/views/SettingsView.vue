@@ -189,10 +189,14 @@
                   show-password
                   :placeholder="maskedMineruKey || 'sk-…'"
                 />
-                <p class="form-tip text-muted">
-                  {{ t('ai.mineruTip') }}
-                  <a href="https://mineru.net/apiManage/token" target="_blank" rel="noopener">mineru.net/apiManage/token</a>
-                  {{ hasMineruKey ? t('ai.keyCurrent', { v: maskedMineruKey }) : '' }}
+                <!-- 「缺图才需要」这句话是这一块的定调：展开高级区后要一眼看到，所以单独一行加粗 -->
+                <p class="form-tip">
+                  <strong class="mineru-tip-lead">{{ t('ai.mineruTipLead') }}</strong>
+                  <span class="text-muted">
+                    {{ t('ai.mineruTip') }}
+                    <a href="https://mineru.net/apiManage/token" target="_blank" rel="noopener">mineru.net/apiManage/token</a>
+                    {{ hasMineruKey ? t('ai.keyCurrent', { v: maskedMineruKey }) : '' }}
+                  </span>
                 </p>
               </el-form-item>
             </div>
@@ -442,7 +446,8 @@ const { t } = useI18n({
         mineru: 'MinerU 解析 Key（可选）',
         mineruAdvanced: '高级（可选）：扫描件 / 图形题增强（MinerU）',
         mineruConfigured: '已配置 MinerU Key',
-        mineruTip: '除非你导入后发现大量题目缺图，否则不需要配置（不配置也能正常导入文档、Word、Excel、PPT 与文字版 PDF）。配置后可在导入时开启它重新解析版面。申请：',
+        mineruTipLead: '除非你导入后发现大量题目缺图，否则不需要配置。',
+        mineruTip: '不配置也能正常导入文档、Word、Excel、PPT 与文字版 PDF。配置后可在导入时开启它重新解析版面。申请：',
         test: '测试连接',
         testing: '测试中…',
         save: '保存配置',
@@ -595,7 +600,8 @@ const { t } = useI18n({
         mineru: 'MinerU API Key (optional)',
         mineruAdvanced: 'Advanced (optional): scans & figure questions (MinerU)',
         mineruConfigured: 'MinerU key configured',
-        mineruTip: 'You do not need this unless many questions come out missing their figures after importing (documents, Word, Excel, PowerPoint and text-layer PDFs all work without it). Once configured you can enable it when importing to re-parse the layout. Apply at: ',
+        mineruTipLead: 'You only need this if many questions come out missing their figures after importing.',
+        mineruTip: 'Documents, Word, Excel, PowerPoint and text-layer PDFs all import fine without it. Once configured you can enable it when importing to re-parse the layout. Apply at: ',
         test: 'Test connection',
         testing: 'Testing…',
         save: 'Save config',
@@ -1701,6 +1707,14 @@ async function doImport() {
   margin: 6px 0 0;
   font-size: 12px;
   line-height: 1.6;
+}
+/* MinerU 高级区里的定调句：加粗、略大，展开后第一眼就能看到 */
+.mineru-tip-lead {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-text);
+  margin-bottom: 2px;
 }
 .test-result {
   display: flex;
