@@ -172,7 +172,7 @@ class PublishFromPathTest {
     void publishFromPathRejectsInvalidPackageWithoutRemoteRequest() throws Exception {
         Path file = Files.writeString(dir.resolve("broken.tiku"), "not a package");
 
-        assertEquals("题库文件解析失败：不是有效的题库文件（既不是 .tiku 也不是 v1 JSON）",
+        assertEquals("题库文件解析失败：不是有效的题库文件（既不是题库压缩包 .zip / .tiku，也不是 v1 JSON）",
                 assertThrows(IllegalArgumentException.class,
                         () -> controller().publishFromPath(center, request(file.toString(), null, null, 8L)))
                         .getMessage());

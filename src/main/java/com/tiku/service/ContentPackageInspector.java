@@ -18,20 +18,20 @@ import java.util.regex.Pattern;
  * 用途：桌面端「发布作品」在把 200MB 内容包跨境上传给题库广场之前，先在本地判定这个文件
  * 能不能发布；同时把解析出的元数据（标题/题数/版本/标识）回显给用户确认。
  *
- * <b>两种内容包格式都支持，且按魔数判定、不看扩展名</b>（用户可能选错 .tiku / .json 后缀）：
+ * <b>两种内容包格式都支持，且按魔数判定、不看扩展名</b>（用户可能选错 .zip / .tiku / .json 后缀）：
  * <pre>
- *   v2 .tiku  = zip 容器（PK\x03\x04 魔数）：manifest 条目 = package.json（media/ 下是图片二进制）
+ *   v2 .zip（早期 .tiku）= zip 容器（PK\x03\x04 魔数）：manifest 条目 = package.json（media/ 下是图片二进制）
  *   v1 .json  = 纯 JSON 文件（无 PK 魔数）：schemaVersion = 1，图片以 base64 内联在 images 字段
  * </pre>
  * 两种格式的顶层字段名完全一致（v2 的 manifest 就是同一份 JSON 结构装进 zip，见
  * ContentPackageService.exportTikuPackage / exportContentPackage），所以这里用同一套提取与校验逻辑，
  * 计数口径也一致：questionsCount = questions 数组长度、materialsCount = materials 数组长度；
- * schemaVersion 如实回传（.tiku 容器内一般为 2，纯 JSON 一般为 1）。
+ * schemaVersion 如实回传（题库压缩包内一般为 2，纯 JSON 一般为 1）。
  *
  * 严格校验口径与官网 <code>web/server/utils/package-meta.ts</code> + <code>upload.post.ts</code> 完全一致，
  * 避免"本地通过、服务端拒绝"：
  * <pre>
- *   1. 容器/编码：PK\x03\x04 = v2 .tiku(zip：package.json + media/)；否则按 v1 纯 JSON 解析
+ *   1. 容器/编码：PK\x03\x04 = v2 压缩包(zip：package.json + media/)；否则按 v1 纯 JSON 解析
  *   2. .tiku：条目数 ≤ 4096、必须有 manifest（package.json）、manifest ≤ 10MB、manifest 必须是合法 JSON
  *   3. schemaVersion 必须为数字 1 或 2（纯 JSON 必须是 v1 结构：带 schemaVersion）
  *   4. packageKey / version / title 必须为非空字符串，且 packageKey/version 匹配 ^[\p{L}\p{N}._-]{1,100}$
@@ -59,17 +59,17 @@ public final class ContentPackageInspector {
 
     private static final JsonFactory JSON_FACTORY = new JsonFactory();
 
-    /** 既不是 .tiku 容器也不是合法 v1 JSON */
-    private static final String NOT_A_PACKAGE = "题库文件解析失败：不是有效的题库文件（既不是 .tiku 也不是 v1 JSON）";
-    /** .tiku 容器内的 manifest 不是合法 JSON（或不是对象结构） */
-    private static final String BROKEN_MANIFEST = "题库文件解析失败：.tiku 容器内 manifest（package.json）不是合法 JSON";
+    /** 既不是 题库压缩包也不是合法 v1 JSON */
+    private static final String NOT_A_PACKAGE = "题库文件解析失败：不是有效的题库文件（既不是题库压缩包 .zip / .tiku，也不是 v1 JSON）";
+    /** 题库压缩包内的 manifest 不是合法 JSON（或不是对象结构） */
+    private static final String BROKEN_MANIFEST = "题库文件解析失败：题库压缩包内 manifest（package.json）不是合法 JSON";
     /** 纯 JSON 文件缺少 v1 结构的必备字段 */
     private static final String NOT_V1_SCHEMA = "该 .json 不是 v1 题库文件（缺少 schemaVersion=1）";
     private static final String NOT_V1_QUESTIONS = "该 .json 不是 v1 题库文件（缺少 questions）";
 
     /** 内容包格式（按魔数判定，不看扩展名） */
     private enum Format {
-        /** v2：.tiku zip 容器（package.json manifest + media/ 图片） */
+        /** v2：题库压缩包（.zip / 旧的 .tiku，都是 zip：package.json manifest + media/ 图片） */
         TIKU_CONTAINER,
         /** v1：纯 JSON 文件 */
         PLAIN_JSON
@@ -133,7 +133,7 @@ public final class ContentPackageInspector {
 
     /**
      * 元数据结构问题（顶层不是对象 / JSON 截断 / 末尾多余内容）。
-     * 用独立异常承载，由入口按"是不是 .tiku 容器"翻译成对应的用户可读文案
+     * 用独立异常承载，由入口按"是不是 题库压缩包"翻译成对应的用户可读文案
      * （官网 package-meta.ts 对 v1 JSON 与容器内 package.json 分别给不同 message）。
      */
     private static final class MetaFormatException extends RuntimeException {
@@ -142,7 +142,7 @@ public final class ContentPackageInspector {
         }
     }
 
-    /** 解出 .tiku 容器内 manifest 并解析（容器错误消息加统一前缀，便于前端归类展示） */
+    /** 解出 题库压缩包内 manifest 并解析（容器错误消息加统一前缀，便于前端归类展示） */
     private static Meta readContainerMeta(PackageJsonSupplier supplier) {
         String json;
         try {
@@ -276,7 +276,7 @@ public final class ContentPackageInspector {
 
     /**
      * 校验并组装体检结果；两种格式的字段与计数口径一致，只有"格式相关"的报错文案不同：
-     * - .tiku 容器：沿用官网 message（schemaVersion 需为 1 或 2 / 题库文件中没有题目，无法发布）
+     * - 题库压缩包：沿用官网 message（schemaVersion 需为 1 或 2 / 题库文件中没有题目，无法发布）
      * - 纯 JSON：v1 结构必备字段缺失时给 .json 专属文案，便于用户分辨自己选错了文件
      */
     private static Inspection validate(Meta meta, Format format) {

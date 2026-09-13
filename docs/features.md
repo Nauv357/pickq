@@ -5,7 +5,7 @@
 
 ## 0. 一句话定位
 
-拾题是一个**本地优先（local-first）的题库工具**：你自己录题或从文档用 AI 批量导入，做题记录、错题本、复习计划、备份全部存在本机；需要分享时，把题库导出成 `.tiku` 文件，或登录账号发布到官网广场供他人下载。
+拾题是一个**本地优先（local-first）的题库工具**：你自己录题或从文档用 AI 批量导入，做题记录、错题本、复习计划、备份全部存在本机；需要分享时，把题库导出成 `.zip` 题库文件（就是个标准 zip，可直接解压查看图片与题目；旧版的 `.tiku` 文件同样能导入），或登录账号发布到官网广场供他人下载。
 
 - 桌面端：Windows 桌面应用（Tauri 壳 + 内置 JRE + 本地 Spring Boot 服务 + Vue 3 界面），**数据不出本机**，唯一的外部调用是你自己配置的 AI 接口。
 - 官网/广场（pickq.cn）：账号、题库广场、评论、关注、后台管理（此部分不开源，`web/` 不入库）。
@@ -22,7 +22,7 @@
 | 错题与复习 | 错题本、间隔重复复习队列、暂停某题复习、重置复习进度 | `BankDetailView.vue`（错题/复习页签）、`PracticeView.vue` | `StudyRecordService.updateReviewState` |
 | 学习统计 | 总览、每日热力、题库维度、会话历史 | `StatsView.vue`、`SessionHistoryView.vue` | `StatsController` / `StatsDetailResponse` |
 | 打印试卷 | 纯题目版 / 带答案解析版，浏览器打印或另存 PDF | `PrintPaperView.vue` | 前端渲染 + `window.print()` |
-| 内容包导入导出 | `.tiku` / `.json` 导入导出，跨端与跨人交换 | 题库详情 | `ContentPackageService` / `PackageContainer` / `docs/package-format.md` |
+| 内容包导入导出 | `.zip` / `.tiku` / `.json` 导入导出，跨端与跨人交换 | 题库详情 | `ContentPackageService` / `PackageContainer` / `docs/package-format.md` |
 | 本地作品管理 | 导出记录、批量导出到目录、版本号自增、标记已发布 | `MyWorksView.vue` | `ExportController` / `LocalExportService` / `ExportRecordService` |
 | 发布与广场 | 发布题库到广场、改版本、替换文件、下架；浏览/搜索/收藏/评论/关注/下载导入 | `MyWorksView.vue`、`DiscoverView.vue` | `CenterPublishController` / `CenterProxyController` |
 | 账号 | 账号密码注册登录、邮箱验证、找回密码、GitHub 登录、桌面端内登录广场 | `SettingsView.vue`、官网 `login/register/forgot` | `CenterAuthController`、`web/server/api/auth/**` |
@@ -34,7 +34,7 @@
 ## 2. 题库管理
 
 - 题库字段：名称、描述、作者、来源/出处、分类、`packageKey`（包唯一标识）、版本、复习开关（`review_enabled`）。
-- 导入方式：JSON、`.tiku` 容器、AI 导入；导出方式：JSON、`.tiku`。
+- 导入方式：JSON、题库压缩包（`.zip`；旧版 `.tiku` 同格式）、AI 导入；导出方式：JSON、`.zip` 题库压缩包（v2 容器）。
 - 导入反馈（2026-09-14 修）：导入是同步接口，含图题库在慢机器上要几秒到几十秒，所以**导入期间给出全屏进度**
   （「正在导入题库…（已用 N 秒）」+ 主按钮变成"正在导入题库…"并禁用），且**不设客户端超时**
   （全局 axios 15s 会先中止请求，而后端仍在跑 → 用户看到"点了没反应"，刷新才发现已导入）。
@@ -142,8 +142,8 @@
 
 ## 8. 内容包与本地作品
 
-- 导出：`POST /api/banks/{id}/export`（JSON）、`POST /api/banks/{id}/export-tiku`（`.tiku` 容器）。
-- 本地作品页的「导出文件」：`POST /api/exports/export` 直接写入目标目录，文件名 `{题库名或packageKey}-{版本}.tiku`（清理 Windows 非法字符，同名覆盖以最新为准），并落一条导出记录。
+- 导出：`POST /api/banks/{id}/export`（JSON）、`POST /api/banks/{id}/export-tiku`（`.zip` 题库压缩包）。
+- 本地作品页的「导出文件」：`POST /api/exports/export` 直接写入目标目录，文件名 `{题库名或packageKey}-{版本}.zip`（清理 Windows 非法字符，同名覆盖以最新为准），并落一条导出记录。
 - 默认导出目录：`文档\拾题`，用户改过之后记住（`{数据目录}/export-prefs.json`）。
 - 版本号自增：解析当前版本后补丁号 +1（`1.2` → `1.2.1`；无法解析 → `1.0.0`）。
 - 导出记录可删除；发布成功后标记「已发布」（`mark-published`）。
@@ -167,7 +167,7 @@
 
 **规则**
 - 一个账号在桌面端与官网是同一账号，登录任一即可管理自己的作品。
-- 发布是"先导出为 `.tiku` 再上传"的两步：导出 → 校验（inspect）→ 上传 → 标记已发布。失败不会影响本地题库。
+- 发布是"先导出为 `.zip` 再上传"的两步：导出 → 校验（inspect）→ 上传 → 标记已发布。失败不会影响本地题库。
 
 ## 10. AI 配置
 
@@ -196,7 +196,7 @@
 
 ## 13. 明确不做 / 已知边界
 
-- 不做云端同步：题库与做题数据默认只在本机；跨设备靠 `.tiku` 文件与广场。
+- 不做云端同步：题库与做题数据默认只在本机；跨设备靠 `.zip` 题库文件与广场。
 - 不做账号强绑定：不登录也能用全部本地功能。
 - 不做移动端网页版：手机端计划是独立原生应用（见 `docs/design-mobile.md`）。
 - 已知问题清单（导入解析、题号冲突等）见 `docs/import-issues.md`。

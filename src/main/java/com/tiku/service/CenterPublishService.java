@@ -163,7 +163,7 @@ public class CenterPublishService {
 
     private static void checkFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {
-            throw new IllegalArgumentException("请选择要上传的内容包文件（.tiku 或 .json）");
+            throw new IllegalArgumentException("请选择要上传的内容包文件（.zip / .tiku / .json）");
         }
         if (file.getSize() > MAX_FILE_BYTES) {
             throw new IllegalArgumentException("内容包文件超过 200MB 上限");

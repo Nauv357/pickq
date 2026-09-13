@@ -26,7 +26,7 @@ import java.util.List;
 /**
  * 本地发布中心「导出」侧接口 —— <b>全部免登录（匿名可用）</b>：
  * <pre>
- *   POST   /api/exports/export                 题库 → .tiku 写到本地目录 + 落导出记录
+ *   POST   /api/exports/export                 题库 → .zip 写到本地目录 + 落导出记录
  *   GET    /api/exports                        导出记录列表（时间倒序，附 fileExists）
  *   DELETE /api/exports/{id}?deleteFile=       移除记录（可选同时删磁盘文件）
  *   POST   /api/exports/{id}/mark-published    标记已发布（上传成功后由前端调用）

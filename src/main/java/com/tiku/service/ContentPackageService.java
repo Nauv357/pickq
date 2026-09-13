@@ -96,7 +96,7 @@ public class ContentPackageService {
     }
 
     /**
-     * v2 .tiku 容器导入（zip：package.json + media/）。
+     * v2 题库压缩包导入（zip：package.json + media/）。
      * 图片从 media 二进制重建 base64 map 后走统一导入——checksum 与 v1 同表示（base64），
      * 同内容的 v1/v2 文件指纹一致，存量判断不误判。
      */
@@ -106,7 +106,7 @@ public class ContentPackageService {
         try {
             unpacked = PackageContainer.unpack(container);
         } catch (IOException e) {
-            throw new IllegalArgumentException(".tiku 容器读取失败：" + e.getMessage());
+            throw new IllegalArgumentException("题库压缩包读取失败：" + e.getMessage());
         }
         ContentPackageFile file = parseAndValidate(unpacked.packageText());
         // 包内 package.json 不含 images（图片在 media/）；从 media 重建 base64 表示
@@ -326,8 +326,8 @@ public class ContentPackageService {
     }
 
     /**
-     * .tiku 导出结果：容器字节 + 容器内身份（本地发布中心落导出记录、按版本命名文件用）。
-     * bytes 即 .tiku 文件内容，packageKey/version/title 是写入 package.json 的实际值。
+     * 题库压缩包导出结果：容器字节 + 容器内身份（本地发布中心落导出记录、按版本命名文件用）。
+     * bytes 即导出的 .zip 文件内容，packageKey/version/title 是写入 package.json 的实际值。
      */
     public record TikuExport(byte[] bytes, String packageKey, String version, String title, int questionsCount) {
     }
@@ -337,7 +337,7 @@ public class ContentPackageService {
     }
 
     /**
-     * v2 .tiku 容器导出（zip：package.json + media/ 图片二进制），同时回传容器内身份。
+     * v2 题库压缩包导出（zip：package.json + media/ 图片二进制），同时回传容器内身份。
      * 身份/版本/指纹决策全部复用 v1 导出（exportContentPackage 内部完成）；
      * 图片从 base64 解码为二进制写入 media/，package.json 不含 images 与 checksum。
      * <p>
@@ -372,7 +372,7 @@ public class ContentPackageService {
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("内容包序列化失败", e);
         } catch (IOException e) {
-            throw new IllegalStateException(".tiku 容器打包失败", e);
+            throw new IllegalStateException("题库压缩包打包失败", e);
         }
     }
 

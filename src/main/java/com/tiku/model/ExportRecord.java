@@ -8,7 +8,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import java.time.LocalDateTime;
 
 /**
- * 导出记录（本地发布中心）：「我的作品」把题库导出成 .tiku 落到本地目录后落一条，
+ * 导出记录（本地发布中心）：「我的作品」把题库导出成 .zip 落到本地目录后落一条，
  * 记录文件位置/大小/内容包身份与版本、是否已发布（见 V14__export_records.sql）。
  * <p>
  * 表字段与本地磁盘文件是一对一快照关系：题库后续被改名/改版本都不回写本表，

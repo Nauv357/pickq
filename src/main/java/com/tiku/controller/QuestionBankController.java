@@ -124,7 +124,7 @@ public class QuestionBankController {
         return ApiResponse.success(contentPackageService.importContentPackage(json));
     }
 
-    //导入 .tiku 容器（body = zip 字节，v2），返回导入结果与题库 id
+    //导入题库压缩包（body = zip 字节，v2；.zip 或旧的 .tiku），返回导入结果与题库 id
     @PostMapping(value = "/import-tiku", consumes = "application/octet-stream")
     public ApiResponse<ImportResultResponse> importTikuPackage(@RequestBody byte[] container) {
         return ApiResponse.success(contentPackageService.importTikuPackage(container));
@@ -139,7 +139,7 @@ public class QuestionBankController {
         return ApiResponse.success(contentPackageService.exportContentPackage(id, request));
     }
 
-    //导出 .tiku 容器（v2：zip = package.json + media/），返回文件字节流，前端保存为 .tiku
+    //导出题库压缩包（v2：zip = package.json + media/），返回文件字节流，前端保存为 .zip
     @PostMapping("/{id}/export-tiku")
     public ResponseEntity<byte[]> exportTikuPackage(
             @PathVariable Long id,
@@ -148,7 +148,7 @@ public class QuestionBankController {
         byte[] bytes = contentPackageService.exportTikuPackage(id, request);
         return ResponseEntity.ok()
                 .contentType(org.springframework.http.MediaType.parseMediaType("application/zip"))
-                .header("Content-Disposition", "attachment; filename=\"content.tiku\"")
+                .header("Content-Disposition", "attachment; filename=\"content.zip\"")
                 .body(bytes);
     }
 

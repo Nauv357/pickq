@@ -438,7 +438,7 @@ const { t } = useI18n({
         aiTag: '大多数人的选择',
         aiDesc: '上传 PDF、Word、照片或网页链接，AI 自动整理成题目，逐题确认后即可开刷',
         fileTitle: '别人发来了题库文件',
-        fileDesc: '选择 .tiku / .json 文件（别人分享的现成题库），导入即可用'
+        fileDesc: '选择 .zip / .tiku / .json 题库文件（别人分享的现成题库），导入即可用'
       },
       empty: {
         title: '还没有题库',
@@ -447,7 +447,7 @@ const { t } = useI18n({
         aiTag: '大多数人从这里开始',
         aiDesc: '上传 PDF、Word、照片或网页链接，AI 自动整理成题目，确认后即可开刷',
         fileTitle: '别人发来了题库文件',
-        fileDesc: '.tiku / .json 文件，导入即可用',
+        fileDesc: '.zip / .tiku / .json 文件，导入即可用',
         createTitle: '想自己出题',
         createDesc: '先建一个空题库，逐题录入',
         foot: '想直接刷现成的？',
@@ -562,7 +562,7 @@ const { t } = useI18n({
         aiTag: "Most people start here",
         aiDesc: 'Upload PDF, Word, photos or links; AI turns them into questions — review each one, then practice',
         fileTitle: 'Someone sent me a bank file',
-        fileDesc: 'Pick a .tiku / .json file (a ready-made bank), import and start'
+        fileDesc: 'Pick a .zip / .tiku / .json bank file (a ready-made bank), import and start'
       },
       empty: {
         title: 'No question banks yet',
@@ -571,7 +571,7 @@ const { t } = useI18n({
         aiTag: 'Most people start here',
         aiDesc: 'Upload PDF, Word, photos or links; AI turns them into questions — confirm and practice',
         fileTitle: 'Someone sent me a bank file',
-        fileDesc: '.tiku / .json file, import and go',
+        fileDesc: '.zip / .tiku / .json file, import and go',
         createTitle: 'I want to build my own',
         createDesc: 'Create an empty bank, add questions one by one',
         foot: 'Want ready-made banks?',
@@ -1184,7 +1184,7 @@ async function doImport() {
   if (importing.value) return
   let file
   try {
-    file = await pickFile('.tiku,.json,application/zip,application/json')
+    file = await pickFile('.zip,.tiku,.json,application/zip,application/x-zip-compressed,application/json')
   } catch (e) {
     return // 用户取消选择
   }
@@ -1194,8 +1194,9 @@ async function doImport() {
   startBusy(t('msgImportingFile'))
   let res
   try {
-    // .tiku 容器（v2）按 zip 字节导入；.json 纯文本（v1）按原文导入
-    const isTiku = /\.tiku$/i.test(file.name) || file.type === 'application/zip'
+    // 题库压缩包（v2：.zip，早期导出的 .tiku 是同一格式）按 zip 字节导入；.json 纯文本（v1）按原文导入。
+    // 后缀只用来挑上传路径，真正认定靠内容（后端再校验 zip 魔数 + package.json）。
+    const isTiku = /\.(zip|tiku)$/i.test(file.name) || /zip/i.test(file.type || '')
     if (isTiku) {
       const bytes = await readArrayBuffer(file)
       if (!bytes || bytes.byteLength === 0) {

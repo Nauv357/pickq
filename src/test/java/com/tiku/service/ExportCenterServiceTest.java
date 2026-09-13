@@ -247,8 +247,8 @@ class ExportCenterServiceTest {
                 argThat(request -> "UPGRADE".equals(request.mode())), eq("1.0.1"));
 
         assertEquals(77L, response.id());
-        assertEquals("我的题库_第一套_-1.0.1.tiku", response.fileName(), "Windows 非法字符已清理");
-        assertEquals(out.resolve("我的题库_第一套_-1.0.1.tiku").toString(), response.filePath());
+        assertEquals("我的题库_第一套_-1.0.1.zip", response.fileName(), "Windows 非法字符已清理；后缀为 .zip（容器就是 zip，用户可直接解压）");
+        assertEquals(out.resolve("我的题库_第一套_-1.0.1.zip").toString(), response.filePath());
         assertArrayEquals(tiku, Files.readAllBytes(Path.of(response.filePath())));
         assertEquals(tiku.length, response.sizeBytes());
         assertEquals("1.0.1", response.version());
@@ -384,7 +384,7 @@ class ExportCenterServiceTest {
         // 读记录（离线列表）
         List<ExportRecordResponse> list = recordService.list();
         assertEquals(1, list.size());
-        assertEquals("离线题库-1.0.0.tiku", list.get(0).fileName());
+        assertEquals("离线题库-1.0.0.zip", list.get(0).fileName());
         assertTrue(list.get(0).fileExists());
         assertFalse(list.get(0).published(), "未发布 = 本地记录里的正常状态");
 

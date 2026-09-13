@@ -140,7 +140,7 @@ class CenterPublishForwardTest {
 
     @Test
     void publishLargeFileSpoolsToTempFileAndKeepsBytes() throws Exception {
-        // 大文件必须是合法的 .tiku 容器：发布前会先做本地体检（元数据校验），随机字节会被本地拒绝
+        // 大文件必须是合法的 题库压缩包：发布前会先做本地体检（元数据校验），随机字节会被本地拒绝
         byte[] blob = new byte[5 * 1024 * 1024 + 12345];
         new Random(7).nextBytes(blob);
         Map<String, byte[]> media = new LinkedHashMap<>();
@@ -181,7 +181,7 @@ class CenterPublishForwardTest {
                 () -> controller.publish(center, file, "EXTERNAL", "ftp://x/y", null, null, null)).getMessage());
         assertEquals("托管方式只能是 HOSTED 或 EXTERNAL", assertThrows(IllegalArgumentException.class,
                 () -> controller.publish(center, file, "MAGIC", null, null, null, null)).getMessage());
-        assertEquals("请选择要上传的内容包文件（.tiku 或 .json）", assertThrows(IllegalArgumentException.class,
+        assertEquals("请选择要上传的内容包文件（.zip / .tiku / .json）", assertThrows(IllegalArgumentException.class,
                 () -> controller.publish(center, new MockMultipartFile("file", "a.tiku", null, new byte[0]),
                         null, null, null, null, null)).getMessage());
         assertEquals(0, hits.get());
@@ -220,7 +220,7 @@ class CenterPublishForwardTest {
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
                 () -> new CenterPublishController(authStore).uploadPackFile(center, "mykey", "1.0",
                         new MockMultipartFile("file", "x.tiku", null, "not a package".getBytes(StandardCharsets.UTF_8))));
-        assertEquals("题库文件解析失败：不是有效的题库文件（既不是 .tiku 也不是 v1 JSON）", e.getMessage());
+        assertEquals("题库文件解析失败：不是有效的题库文件（既不是题库压缩包 .zip / .tiku，也不是 v1 JSON）", e.getMessage());
         assertEquals(0, hits.get(), "补传校验不通过不得发出任何公网请求");
     }
 

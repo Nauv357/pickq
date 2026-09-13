@@ -106,12 +106,12 @@ class CenterPublishInspectTest {
         assertEquals("key-1", byJson.packageKey());
         assertEquals(2, byJson.questionsCount());
 
-        // v2 .tiku 容器但文件名是 .json → 必须按 zip 容器解析
+        // v2 题库压缩包但文件名是 .json → 必须按 zip 容器解析
         byte[] zip = tikuBytes("{\"schemaVersion\":2,\"packageKey\":\"kz\",\"version\":\"3.0\",\"title\":\"容器\","
                 + "\"questions\":[{},{}]}", 512);
         ContentPackageInspector.Inspection byZip = new CenterPublishController(authStore).inspectPublishFile(
                 new MockMultipartFile("file", "wrong-ext.json", "application/json", zip)).data();
-        assertEquals(2, byZip.schemaVersion(), "扩展名 .json 但内容是 .tiku 容器 → 按 v2 容器解析");
+        assertEquals(2, byZip.schemaVersion(), "扩展名 .json 但内容是 题库压缩包 → 按 v2 容器解析");
         assertEquals("kz", byZip.packageKey());
         assertEquals(2, byZip.questionsCount());
 
@@ -216,7 +216,7 @@ class CenterPublishInspectTest {
     void errorMessagesAreUserReadableAndSpecific() throws Exception {
         assertEquals("请选择要上传的内容包文件（.tiku 或 .json）", inspectMessage(new byte[0]));
         // 既不是容器也不是 JSON
-        assertEquals("题库文件解析失败：不是有效的题库文件（既不是 .tiku 也不是 v1 JSON）",
+        assertEquals("题库文件解析失败：不是有效的题库文件（既不是题库压缩包 .zip / .tiku，也不是 v1 JSON）",
                 inspectMessage("not json at all".getBytes(StandardCharsets.UTF_8)));
         // ---- 纯 JSON（v1）专属文案：v1 结构必备字段缺失 ----
         assertEquals("该 .json 不是 v1 题库文件（缺少 schemaVersion=1）",
@@ -254,16 +254,16 @@ class CenterPublishInspectTest {
         assertEquals("题库文件缺少标题",
                 inspectMessage(tikuBytes("{\"schemaVersion\":2,\"packageKey\":\"k\",\"version\":\"1\",\"questions\":[{}]}", 0)));
         // 末尾多余内容：与官网 JSON.parse 全量解析一致地报错
-        assertEquals("题库文件解析失败：不是有效的题库文件（既不是 .tiku 也不是 v1 JSON）",
+        assertEquals("题库文件解析失败：不是有效的题库文件（既不是题库压缩包 .zip / .tiku，也不是 v1 JSON）",
                 inspectMessage((v1(null) + "{}").getBytes(StandardCharsets.UTF_8)));
         // 截断的 JSON
-        assertEquals("题库文件解析失败：不是有效的题库文件（既不是 .tiku 也不是 v1 JSON）",
+        assertEquals("题库文件解析失败：不是有效的题库文件（既不是题库压缩包 .zip / .tiku，也不是 v1 JSON）",
                 inspectMessage("{\"schemaVersion\":1,\"packageKey\":\"k\"".getBytes(StandardCharsets.UTF_8)));
         // ---- .tiku（v2 容器）专属文案 ----
-        assertEquals("题库文件解析失败：.tiku 容器内缺少 manifest（package.json）", inspectMessage(zipWithoutPackageJson()));
-        assertEquals("题库文件解析失败：.tiku 容器解压失败（zip 格式损坏）",
+        assertEquals("题库文件解析失败：题库压缩包内缺少 manifest（package.json）", inspectMessage(zipWithoutPackageJson()));
+        assertEquals("题库文件解析失败：题库压缩包解压失败（zip 格式损坏）",
                 inspectMessage("PK\u0003\u0004not a real zip".getBytes(StandardCharsets.ISO_8859_1)));
-        assertEquals("题库文件解析失败：.tiku 容器内 manifest（package.json）不是合法 JSON",
+        assertEquals("题库文件解析失败：题库压缩包内 manifest（package.json）不是合法 JSON",
                 inspectMessage(tikuBytes("{not json", 0)));
         assertEquals("题库文件中 schemaVersion 需为 1 或 2", inspectMessage(tikuBytes("{}", 0)));
         assertEquals("题库文件中没有题目，无法发布",
@@ -344,7 +344,7 @@ class CenterPublishInspectTest {
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
                 () -> new CenterPublishController(authStore).publish(center,
                         new MockMultipartFile("file", "bad.tiku", null, bad), null, null, null, null, null));
-        assertEquals("题库文件解析失败：不是有效的题库文件（既不是 .tiku 也不是 v1 JSON）", e.getMessage());
+        assertEquals("题库文件解析失败：不是有效的题库文件（既不是题库压缩包 .zip / .tiku，也不是 v1 JSON）", e.getMessage());
         assertEquals(0, hits.get(), "校验不通过不得发出任何公网请求");
     }
 
@@ -373,7 +373,7 @@ class CenterPublishInspectTest {
         assertEquals("该 .json 不是 v1 题库文件（缺少 questions）", e.getMessage());
         assertEquals(0, hits.get());
 
-        // .tiku 容器空题数走容器文案
+        // 题库压缩包空题数走容器文案
         byte[] emptyTiku = tikuBytes("{\"schemaVersion\":2,\"packageKey\":\"k\",\"version\":\"1\",\"title\":\"t\",\"questions\":[]}", 0);
         IllegalArgumentException e2 = assertThrows(IllegalArgumentException.class,
                 () -> new CenterPublishController(authStore).publish(center,

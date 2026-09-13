@@ -13,6 +13,11 @@
 > - 版本号以 `tauri/src-tauri/tauri.conf.json` 为准，`tauri/src-tauri/Cargo.toml` 必须与之一致；
 > - 发版流程见 `docs/release-notes-guide.md` 的检查清单（构建 → 上传更新频道 → 官网下载链接 → 线上验证 → GitHub Release）。
 
+## [Unreleased]
+
+### 优化
+- 导出的题库文件后缀从 `.tiku` 改为 `.zip`：容器本来就是标准 zip，现在下载后可以直接双击解压查看图片与题目，不必先手动改后缀。**旧文件不受影响**——`.tiku` 仍然可以正常导入，广场上已发布的 `.tiku` 作品下载文件名也保持原样。
+
 ## [0.1.19] - 2026-09-14
 
 ### 新增

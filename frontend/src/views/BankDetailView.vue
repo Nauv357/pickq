@@ -904,7 +904,7 @@ const { t } = useI18n({
       msgNoChanges: '没有需要保存的修改',
       msgBankUpdated: '题库已更新',
       msgExportedTo: '已导出到：{path}',
-      msgExportedTiku: '已导出 {file}.tiku（可到题库广场发布）',
+      msgExportedTiku: '已导出 {file}.zip（可到题库广场发布；想看图或题目可直接解压）',
       msgExportedJson: '已导出 {file}.json（可到题库广场发布）',
       msgReadFileFailed: '文件读取失败',
       msgJsonInvalid: 'JSON 格式不正确：应为题目数组，或含 questions 字段的对象',
@@ -1015,7 +1015,7 @@ const { t } = useI18n({
       msgNoChanges: 'No changes to save',
       msgBankUpdated: 'Bank updated',
       msgExportedTo: 'Exported to: {path}',
-      msgExportedTiku: 'Exported {file}.tiku (ready to publish on the plaza)',
+      msgExportedTiku: 'Exported {file}.zip (ready to publish; you can also unzip it to inspect questions and images)',
       msgExportedJson: 'Exported {file}.json (ready to publish on the plaza)',
       msgReadFileFailed: 'Failed to read the file',
       msgJsonInvalid: 'Invalid JSON: expected an array of questions, or an object with a questions field',
@@ -1932,7 +1932,7 @@ const exporting = ref(false)
 const exportForm = reactive({ version: '', authorName: '', mode: 'AUTO', format: 'tiku', scope: 'all' })
 
 const formatOptions = [
-  { value: 'tiku', label: '.tiku 容器（推荐）', desc: '图片与文字分离打包，体积小、加载快' },
+  { value: 'tiku', label: '.zip 题库压缩包（推荐）', desc: '就是一个标准 zip：图片与文字分开打包，体积小；想看图或题目可直接解压' },
   { value: 'json', label: '.json 纯文本', desc: '兼容旧版拾题应用；图片以 base64 内嵌，文件较大' }
 ]
 
@@ -2001,10 +2001,10 @@ async function submitExport() {
       ? `${bank.value?.name || '题库'}-选${payload.questionIds.length}题-${version}`
       : `${bank.value?.name || '题库'}-${version}`
     if (exportForm.format === 'tiku') {
-      // v2 .tiku 容器（zip：package.json + media/）——带图题库体积小，推荐
+      // v2 题库压缩包（标准 zip：package.json + media/）——带图题库体积小，且用户可直接解压查看
       const blob = await exportTikuBank(id, payload)
       if (!(blob instanceof Blob) || blob.size === 0) throw new Error('导出失败')
-      const res = await saveBlob(blob, `${baseName}.tiku`)
+      const res = await saveBlob(blob, `${baseName}.zip`)
       if (res && !res.saved) return //桌面版用户取消另存为
       ElMessage.success(res?.path ? t('msgExportedTo', { path: res.path }) : t('msgExportedTiku', { file: baseName }))
     } else {

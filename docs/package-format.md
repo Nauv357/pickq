@@ -14,7 +14,7 @@
 | 文件 | 提供的权威事实 |
 | --- | --- |
 | `sample-content-package.json`（仓库根示例） | v1 文件的真实形状与示例值 |
-| `src/main/java/com/tiku/util/PackageContainer.java` | `.tiku` 容器：`PKG_ENTRY` / `MEDIA_PREFIX` / 魔数判定 / 打包解包 / 容器上限 |
+| `src/main/java/com/tiku/util/PackageContainer.java` | 题库压缩包（`.zip` / 旧的 `.tiku`）：`PKG_ENTRY` / `MEDIA_PREFIX` / 魔数判定 / 打包解包 / 容器上限 |
 | `src/main/java/com/tiku/service/ContentPackageService.java` | 导入导出：字段序列化规则、校验规则、图片收集、checksum 算法、导入四态 |
 | `src/main/java/com/tiku/service/ContentPackageInspector.java` | 桌面端「发布前体检」严格校验（与官网同口径），`KEY_RE` 等 |
 | `src/main/java/com/tiku/model/ContentPackageFile.java` / `ContentPackageQuestion.java` / `ContentPackageMaterial.java` / `OptionItem.java` / `model/enums/QuestionType.java` | 文件模型：字段、类型、顺序、`@JsonInclude` 规则 |
@@ -35,16 +35,20 @@
 
 | 形态 | 扩展名 | `schemaVersion` | 图片存放 | 状态 |
 | --- | --- | --- | --- | --- |
-| **v2 容器** | `.tiku` | 容器内清单为 `2` | `media/` 目录下的二进制 | 推荐，桌面端导出默认 |
+| **v2 容器** | `.zip`（早期为 `.tiku`，同一格式） | 容器内清单为 `2` | `media/` 目录下的二进制 | 推荐，桌面端导出默认 |
 | **v1 纯 JSON** | `.json` | `1` | 顶层 `images` 字段内嵌 base64 | 兼容旧版拾题应用 |
 
 依据：`PackageContainer` 类注释（v2 容器结构）、`ContentPackageService.exportContentPackage`（v1 导出写
 `schemaVersion = 1`）、`exportTikuPackageWithMeta`（v2 导出写 `PackageContainer.SCHEMA_V2 = 2`）。
 
-### 1.1 v2 `.tiku` = zip 容器
+### 1.1 v2 题库压缩包（`.zip`，早期 `.tiku`）= zip 容器
+
+> **为什么后缀是 .zip**：容器本来就是标准 zip，用 .zip 用户下载后可以直接双击解压看图片与题目，
+> 不必先手动改后缀（早期用 .tiku 时的用户反馈）。导入侧一律按内容识别（zip 魔数 + package.json），
+> 所以历史 .tiku 文件、以及广场上早已发布的 .tiku 作品都不受影响。
 
 ```
-计算机基础测试-1.0.0.tiku        ← 本质是 zip（前 4 字节 50 4B 03 04）
+计算机基础测试-1.0.0.zip         ← 标准 zip（前 4 字节 50 4B 03 04），可直接双击解压
 ├── package.json                 ← 清单（UTF-8 文本），内容结构与 v1 完全相同
 └── media/                       ← 图片二进制（可选；纯文字包可以没有）
     └── 260829/
@@ -71,7 +75,7 @@
 
 ### 1.3 判定方式：按 **zip 魔数**，不是扩展名
 
-权威判定一律是**魔数**：前 4 字节 `50 4B 03 04`（`PK\x03\x04`）⇒ `.tiku` 容器，否则按 v1 纯 JSON 解析。
+权威判定一律是**魔数**：前 4 字节 `50 4B 03 04`（`PK\x03\x04`）⇒ zip 容器（`.zip` 或旧的 `.tiku`），否则按 v1 纯 JSON 解析。扩展名只用于挑上传路径，不参与判定。
 
 | 解析方 | 判定实现 |
 | --- | --- |
@@ -417,7 +421,7 @@ const isTiku = /\.tiku$/i.test(file.name) || file.type === 'application/zip'
 | 内容结构 | **完全一致**：同一批顶层字段名、同一题目/材料/选项结构 | **完全一致**（同左） |
 | 解析代价 | 需整文件 `JSON.parse` | 只读 `package.json`（体检走 zip 中央目录随机读） |
 | 上限 | 官网单文件 200MB | 官网单文件 200MB（内容容量因无 base64 膨胀而更大） |
-| 桌面端文件名 | `{题库名}-{version}.json`（另存为对话框决定） | `{题库名或packageKey}-{version}.tiku`（导出到目录时，`LocalExportService.buildFileName`，含 Windows 非法字符清理） |
+| 桌面端文件名 | `{题库名}-{version}.json`（另存为对话框决定） | `{题库名或packageKey}-{version}.zip`（导出到目录时，`LocalExportService.buildFileName`，含 Windows 非法字符清理） |
 
 ### 6.2 向后兼容策略
 

@@ -17,7 +17,7 @@ import java.util.NoSuchElementException;
 import java.util.regex.Pattern;
 
 /**
- * 导出到本地目录（本地发布中心的"导出"入口）：题库 → .tiku 容器 → 写目标目录 → 落导出记录。
+ * 导出到本地目录（本地发布中心的"导出"入口）：题库 → 题库压缩包 → 写目标目录 → 落导出记录。
  * <p>
  * 复用关系：容器打包与身份/版本决策全在 {@link ContentPackageService}（本服务不重复实现导出），
  * 目录默认值与"上次目录"记忆在 {@link ExportPrefsService}，记录在 {@link ExportRecordService}。
@@ -60,7 +60,7 @@ public class LocalExportService {
     /**
      * 导出题库到目录：POST /api/exports/export 的实现。
      * 1. 目录：显式 dir ＞ 上次记忆 ＞ 文档\拾题；不存在则创建，不可写即报错（不写半个文件）；
-     * 2. 打包：.tiku 容器（与 /api/banks/{id}/export-tiku 同一实现），version 提供时覆盖包内 version；
+     * 2. 打包：题库压缩包（与 /api/banks/{id}/export-tiku 同一实现），version 提供时覆盖包内 version；
      * 3. 落盘：{题库名或packageKey}-{version}.tiku（清理 Windows 非法字符），同名覆盖（重复导出同一版本以最新为准）；
      * 4. 记录：写 export_records 并把本次目录记为"上次目录"。
      */
@@ -124,13 +124,18 @@ public class LocalExportService {
         return version;
     }
 
-    /** 文件名：{题库名或packageKey}-{version}.tiku；题库名（用户可改）与版本都做 Windows 非法字符清理 */
+    /**
+     * 文件名：{题库名或packageKey}-{version}.zip；题库名（用户可改）与版本都做 Windows 非法字符清理。
+     * 后缀用 .zip 而非早期的 .tiku：容器本来就是标准 zip（package.json + media/），
+     * 用 .zip 用户拿到后可**直接双击解压**看图片与题目，不必先改后缀（用户反馈）。
+     * 导入侧按内容识别（zip 魔数 + package.json），旧的 .tiku 文件照常可用。
+     */
     private static String buildFileName(QuestionBank bank, ContentPackageService.TikuExport export) {
         String base = (bank.getName() == null || bank.getName().isBlank())
                 ? export.packageKey()
                 : bank.getName();
         String version = (export.version() == null || export.version().isBlank()) ? "1.0.0" : export.version();
-        return sanitizeFileName(base) + "-" + sanitizeFileName(version) + ".tiku";
+        return sanitizeFileName(base) + "-" + sanitizeFileName(version) + ".zip";
     }
 
     /**

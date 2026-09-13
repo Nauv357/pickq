@@ -16,11 +16,11 @@ import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 
 /**
- * 内容包容器（.tiku = zip）读写。
+ * 内容包容器（.zip = zip；早期版本导出为 .tiku，同一格式）读写。
  *
  * v2 容器结构（schemaVersion = 2）：
  * <pre>
- *   xxx-1.0.0.tiku            ← zip
+ *   xxx-1.0.0.zip             ← zip（早期为 .tiku，内容一致）
  *   ├── package.json          ← ContentPackageFile 序列化（images 字段不写入；图片在 media/）
  *   └── media/                ← 图片二进制，路径与题干 [图片:name] 引用一致（如 260829/ab12.png）
  * </pre>
@@ -39,8 +39,8 @@ public final class PackageContainer {
     public static final String MEDIA_PREFIX = "media/";
 
     /** 体检（只读元数据）路径的 manifest 相关文案：入口名固定 package.json（官网 package-meta.ts 只认这个名字） */
-    private static final String MISSING_MANIFEST = ".tiku 容器内缺少 manifest（package.json）";
-    private static final String MANIFEST_TOO_LARGE = ".tiku 容器内 manifest（package.json）过大";
+    private static final String MISSING_MANIFEST = "题库压缩包内缺少 manifest（package.json）";
+    private static final String MANIFEST_TOO_LARGE = "题库压缩包内 manifest（package.json）过大";
 
     private static final int MAX_ENTRIES = 4096;
     private static final long MAX_ENTRY_BYTES = 100L * 1024 * 1024;
@@ -58,7 +58,7 @@ public final class PackageContainer {
                 && (data[2] & 0xFF) == 0x03 && (data[3] & 0xFF) == 0x04;
     }
 
-    /** 魔数识别（文件态，只读前 4 字节：200MB 级 .tiku 判定 zip 不读全文件） */
+    /** 魔数识别（文件态，只读前 4 字节：200MB 级压缩包判定 zip 不读全文件） */
     public static boolean isZipContainer(Path file) throws IOException {
         try (InputStream in = Files.newInputStream(file)) {
             byte[] head = new byte[4];
@@ -66,7 +66,7 @@ public final class PackageContainer {
         }
     }
 
-    /** 打包 .tiku：package.json 字节 + media 条目（name 形如 260829/ab12.png → media/260829/ab12.png） */
+    /** 打包容器（.zip）：package.json 字节 + media 条目（name 形如 260829/ab12.png → media/260829/ab12.png） */
     public static byte[] pack(byte[] packageJson, Map<String, byte[]> media) throws IOException {
         ByteArrayOutputStream bos = new ByteArrayOutputStream();
         try (ZipOutputStream zos = new ZipOutputStream(bos)) {
@@ -88,10 +88,10 @@ public final class PackageContainer {
         return bos.toByteArray();
     }
 
-    /** 解包 .tiku：返回 package.json 字节与 media map（name → 字节）；非法/超限抛 IllegalArgumentException */
+    /** 解包容器（.zip / .tiku）：返回 package.json 字节与 media map（name → 字节）；非法/超限抛 IllegalArgumentException */
     public static Unpacked unpack(byte[] zipData) throws IOException {
         if (!isZipContainer(zipData)) {
-            throw new IllegalArgumentException("文件不是 .tiku 容器（zip 格式）");
+            throw new IllegalArgumentException("文件不是题库压缩包（zip 格式；.zip 或旧的 .tiku 均可）");
         }
         byte[] pkg = null;
         Map<String, byte[]> media = new LinkedHashMap<>();
@@ -102,22 +102,22 @@ public final class PackageContainer {
             while ((entry = zis.getNextEntry()) != null) {
                 count++;
                 if (count > MAX_ENTRIES) {
-                    throw new IllegalArgumentException(".tiku 容器条目过多");
+                    throw new IllegalArgumentException("题库压缩包条目过多");
                 }
                 String name = entry.getName();
                 if (entry.isDirectory()) {
                     continue;
                 }
                 if (name.contains("..") || name.startsWith("/")) {
-                    throw new IllegalArgumentException(".tiku 容器含非法路径：" + name);
+                    throw new IllegalArgumentException("题库压缩包含非法路径：" + name);
                 }
                 if (entry.getSize() > MAX_ENTRY_BYTES) {
-                    throw new IllegalArgumentException(".tiku 容器条目过大：" + name);
+                    throw new IllegalArgumentException("题库压缩包条目过大：" + name);
                 }
                 byte[] content = readAll(zis, entry.getSize());
                 total += content.length;
                 if (total > MAX_TOTAL_BYTES) {
-                    throw new IllegalArgumentException(".tiku 容器解压后过大");
+                    throw new IllegalArgumentException("题库压缩包解压后过大");
                 }
                 if (PKG_ENTRY.equals(name)) {
                     pkg = content;
@@ -128,7 +128,7 @@ public final class PackageContainer {
             }
         }
         if (pkg == null) {
-            throw new IllegalArgumentException(".tiku 容器缺少 package.json");
+            throw new IllegalArgumentException("题库压缩包缺少 package.json");
         }
         return new Unpacked(pkg, media);
     }
@@ -145,7 +145,7 @@ public final class PackageContainer {
      */
     public static String readPackageJson(byte[] zipData) {
         if (!isZipContainer(zipData)) {
-            throw new IllegalArgumentException(".tiku 容器不是 zip 格式");
+            throw new IllegalArgumentException("题库压缩包不是 zip 格式");
         }
         long discarded = 0;
         int count = 0;
@@ -154,7 +154,7 @@ public final class PackageContainer {
             while ((entry = zis.getNextEntry()) != null) {
                 count++;
                 if (count > MAX_ENTRIES) {
-                    throw new IllegalArgumentException(".tiku 容器条目过多");
+                    throw new IllegalArgumentException("题库压缩包条目过多");
                 }
                 if (entry.isDirectory()) {
                     continue;
@@ -165,11 +165,11 @@ public final class PackageContainer {
                 discarded += drain(zis, MAX_TOTAL_BYTES - discarded);
             }
         } catch (IOException e) {
-            throw new IllegalArgumentException(".tiku 容器解压失败（zip 格式损坏）");
+            throw new IllegalArgumentException("题库压缩包解压失败（zip 格式损坏）");
         }
         if (count == 0) {
             // 有 PK 魔数但一个条目都读不出来 = zip 结构损坏（ZipInputStream 对坏头会直接返回 null）
-            throw new IllegalArgumentException(".tiku 容器解压失败（zip 格式损坏）");
+            throw new IllegalArgumentException("题库压缩包解压失败（zip 格式损坏）");
         }
         throw new IllegalArgumentException(MISSING_MANIFEST);
     }
@@ -182,7 +182,7 @@ public final class PackageContainer {
     public static String readPackageJson(Path zipFile) {
         try (ZipFile zf = new ZipFile(zipFile.toFile(), StandardCharsets.UTF_8)) {
             if (zf.size() > MAX_ENTRIES) {
-                throw new IllegalArgumentException(".tiku 容器条目过多");
+                throw new IllegalArgumentException("题库压缩包条目过多");
             }
             ZipEntry entry = zf.getEntry(PKG_ENTRY);
             if (entry == null) {
@@ -195,9 +195,9 @@ public final class PackageContainer {
                 return pkgText(readLimited(in, MAX_PKG_ENTRY_BYTES));
             }
         } catch (ZipException e) {
-            throw new IllegalArgumentException(".tiku 容器解压失败（zip 格式损坏）");
+            throw new IllegalArgumentException("题库压缩包解压失败（zip 格式损坏）");
         } catch (IOException e) {
-            throw new IllegalArgumentException(".tiku 容器读取失败：" + e.getMessage());
+            throw new IllegalArgumentException("题库压缩包读取失败：" + e.getMessage());
         }
     }
 
@@ -223,7 +223,7 @@ public final class PackageContainer {
         while ((n = in.read(buf)) != -1) {
             read += n;
             if (read > limit) {
-                throw new IllegalArgumentException(".tiku 容器解压后过大");
+                throw new IllegalArgumentException("题库压缩包解压后过大");
             }
         }
         return read;

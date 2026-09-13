@@ -327,7 +327,7 @@
                 ref="pubInput"
                 class="file-input"
                 type="file"
-                accept=".tiku,.json"
+                accept=".zip,.tiku,.json,application/zip,application/x-zip-compressed,application/json"
                 :disabled="pubBusy"
                 @change="onPickPublishFile"
               />
@@ -583,7 +583,7 @@
               ref="fileInput"
               class="file-input"
               type="file"
-              accept=".tiku,.json"
+              accept=".zip,.tiku,.json,application/zip,application/x-zip-compressed,application/json"
               :disabled="fileBusy"
               @change="onPickUploadFile"
             />
@@ -667,7 +667,7 @@ const { t } = useI18n({
       exportsTotal: '共 {n} 个导出文件',
       exportsLoadFail: '加载导出记录失败',
       exportsEmptyTitle: '还没有导出过题库文件',
-      exportsEmptyDesc: '在「本地题库」区点「导出文件…」即可生成 .tiku 文件，导出后可在这里发布。',
+      exportsEmptyDesc: '在「本地题库」区点「导出文件…」即可生成 .zip 题库文件，导出后可在这里发布。',
       fromBank: '来源：{name}',
       exportedOn: '导出于 {d}',
       notPublishedYet: '未发布',
@@ -696,18 +696,18 @@ const { t } = useI18n({
       pubFromBank: '本地题库：{name}',
       pubFromExport: '已导出文件：{name}',
       pubFromManual: '手动选择的题库文件',
-      pubOriginExported: '（发布时会先导出为 .tiku 文件，再直接上传）',
+      pubOriginExported: '（发布时会先导出为 .zip 题库文件，再直接上传）',
       pubFileLabel: '题库文件',
       pubChooseFile: '选择题库文件',
       pubChooseAgain: '重新选择文件',
-      pubFileHint: '支持 .tiku 与 .json 两种题库文件，单个文件不超过 200MB',
+      pubFileHint: '支持 .zip / .tiku / .json 题库文件，单个文件不超过 200MB',
       pubFileChosen: '已选择：{name}（{size}）',
       pubManualHint: '手动选文件发布：文件会直接从本机上传到广场（可看进度、可取消）',
       /* 选中文件后本地体检（后端只解析元数据，不合格就不用跨境上传） */
       inspecting: '正在检查题库文件…',
       inspectResultTitle: '已识别',
       inspectFail: '题库文件检查未通过',
-      inspectFailTip: '该文件无法发布，请重新选择题库文件（支持 .tiku 与 .json 两种格式）',
+      inspectFailTip: '该文件无法发布，请重新选择题库文件（支持 .zip / .tiku / .json）',
       inspectTitleLabel: '标题',
       inspectQuestionsLabel: '题目',
       inspectVersionLabel: '版本',
@@ -748,7 +748,7 @@ const { t } = useI18n({
       pubHostedDesc: '文件上传到拾题中心，广场上可直接导入',
       pubExternalDesc: '只在中心登记元数据，下载链接由你自己提供',
       pubUrlLabel: '下载链接',
-      pubUrlPh: 'https://…（.tiku 或 .json 直链）',
+      pubUrlPh: 'https://…（.zip / .tiku / .json 直链）',
       pubUrlHint: '需为能直接下载题库文件的 http(s) 直链；网盘页面链接无法直接导入',
       pubUploading: '已上传 {p}%，请保持窗口打开',
       pubServerBusy: '文件已上传，正在等待中心处理…',
@@ -760,7 +760,7 @@ const { t } = useI18n({
       publishing: '发布中…',
       cancel: '取消',
       cancelUpload: '取消上传',
-      msgNeedFile: '请先选择题库文件（.tiku 或 .json）',
+      msgNeedFile: '请先选择题库文件（.zip / .tiku / .json）',
       msgNeedBank: '请选择要发布的本地题库',
       msgNeedRecord: '请选择要发布的导出文件',
       msgNeedVersion: '请填写版本号',

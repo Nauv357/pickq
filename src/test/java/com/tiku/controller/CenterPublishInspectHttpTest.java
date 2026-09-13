@@ -79,10 +79,10 @@ class CenterPublishInspectHttpTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(400))
                 .andExpect(jsonPath("$.message").value(
-                        "题库文件解析失败：不是有效的题库文件（既不是 .tiku 也不是 v1 JSON）"));
+                        "题库文件解析失败：不是有效的题库文件（既不是题库压缩包 .zip / .tiku，也不是 v1 JSON）"));
     }
 
-    /** v2 .tiku 容器经 HTTP 也要如实回传 schemaVersion=2 */
+    /** v2 题库压缩包经 HTTP 也要如实回传 schemaVersion=2 */
     @Test
     void inspectEndpointAcceptsTikuContainer() throws Exception {
         java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
@@ -120,7 +120,7 @@ class CenterPublishInspectHttpTest {
         mockMvc.perform(multipart("/api/center/publish").file(file).param("center", "http://127.0.0.1:1"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value(
-                        "题库文件解析失败：不是有效的题库文件（既不是 .tiku 也不是 v1 JSON）"));
+                        "题库文件解析失败：不是有效的题库文件（既不是题库压缩包 .zip / .tiku，也不是 v1 JSON）"));
     }
 
     @Test
@@ -141,7 +141,7 @@ class CenterPublishInspectHttpTest {
                 }))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value(
-                        "题库文件解析失败：不是有效的题库文件（既不是 .tiku 也不是 v1 JSON）"));
+                        "题库文件解析失败：不是有效的题库文件（既不是题库压缩包 .zip / .tiku，也不是 v1 JSON）"));
     }
 
     /** 补传：格式合法但 packageKey/version 与登记不一致 → 本地 400（官网 file.put.ts 同样会拒绝） */
