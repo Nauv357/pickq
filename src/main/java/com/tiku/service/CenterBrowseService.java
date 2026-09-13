@@ -2,16 +2,21 @@ package com.tiku.service;
 
 import com.tiku.dto.ImportResultResponse;
 import com.tiku.util.PackageContainer;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 
 /** 题库广场浏览、导入与登录后互动用例。 */
+@Slf4j
 @Service
 public class CenterBrowseService {
 
     private static final long MAX_PACKAGE_BYTES = 512L * 1024 * 1024;
+    /** 内容包下载的单次读超时：60s 对慢网/大文件偏紧（用户实测遇到下载超时），放宽到 3 分钟；
+     *  这是"单次 read 无数据"的超时，正常下载中不会触发。 */
+    private static final int DOWNLOAD_READ_TIMEOUT_MS = 180_000;
 
     private final ContentPackageService contentPackageService;
     private final CenterUrlPolicy urlPolicy;
@@ -46,7 +51,7 @@ public class CenterBrowseService {
     public ImportResultResponse importFromCenter(String center, String packageKey, String version) {
         String base = urlPolicy.centerBase(center);
         String path = "/api/packs/" + encode(packageKey) + "/" + encode(version) + "/file";
-        return importContentBytes(httpClient.getBytes(urlPolicy.appendPath(base, path), 60_000, MAX_PACKAGE_BYTES));
+        return downloadAndImport(urlPolicy.appendPath(base, path), "从广场下载");
     }
 
     public ImportResultResponse importExternal(String url) {
@@ -54,7 +59,29 @@ public class CenterBrowseService {
         if (downloadUrl.isEmpty()) {
             throw new IllegalArgumentException("下载链接需为 http(s) 链接");
         }
-        return importContentBytes(httpClient.getBytes(downloadUrl, 60_000, MAX_PACKAGE_BYTES));
+        return downloadAndImport(downloadUrl, "从作者外链下载");
+    }
+
+    /**
+     * 下载内容包并导入。超时/连接失败要给出**能照做**的提示（用户实测反馈：下载超时后界面只报一句
+     * 含糊错误，不知道是网速、文件太大还是站方问题，也不知道下一步能做什么）。
+     */
+    private ImportResultResponse downloadAndImport(String url, String what) {
+        long startedAt = System.currentTimeMillis();
+        byte[] bytes;
+        try {
+            bytes = httpClient.getBytes(url, DOWNLOAD_READ_TIMEOUT_MS, MAX_PACKAGE_BYTES);
+        } catch (IllegalStateException e) {
+            String detail = e.getMessage() == null ? "" : e.getMessage();
+            if (detail.contains("timed out") || detail.contains("Timeout") || detail.contains("Read timed out")) {
+                throw new IllegalStateException(what + "超时（网络较慢或文件较大）：可稍后重试，"
+                        + "或先用浏览器下载该文件，再在题库页点「导入」选择本地文件", e);
+            }
+            throw new IllegalStateException(what + "失败：" + detail
+                    + "；也可以先用浏览器下载该文件，再在题库页点「导入」选择本地文件", e);
+        }
+        log.info("{}完成：{} 字节，用时 {} ms", what, bytes.length, System.currentTimeMillis() - startedAt);
+        return importContentBytes(bytes);
     }
 
     public String forwardJson(String method, String center, String path, String body) {

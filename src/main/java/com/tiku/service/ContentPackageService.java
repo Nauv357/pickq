@@ -125,6 +125,20 @@ public class ContentPackageService {
     /** 导入核心：解析后的内容包 → 题库 + 题目（冲突检测：全新 / 已导入 / 版本并存 / 分支导入） */
     @Transactional
     public ImportResultResponse importContentPackage(ContentPackageFile file) {
+        long startedAt = System.currentTimeMillis();
+        ImportResultResponse result = doImportContentPackage(file);
+        long cost = System.currentTimeMillis() - startedAt;
+        if (cost > 3000) {
+            //慢导入留痕：用户反馈过"点导入没反应"（前端 15s 超时中止、后端仍在跑），
+            //有这条日志才能区分"导入本身慢"与"别的原因"，也便于之后按数据量定位。
+            log.warn("内容包导入耗时 {} ms（{} 题 / {} 张图 / 结果 {}）", cost,
+                    file.getQuestions() == null ? 0 : file.getQuestions().size(),
+                    file.getImages() == null ? 0 : file.getImages().size(), result.result());
+        }
+        return result;
+    }
+
+    private ImportResultResponse doImportContentPackage(ContentPackageFile file) {
         if (file.getQuestions() == null) {
             file.setQuestions(List.of());
         }

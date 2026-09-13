@@ -25,12 +25,14 @@ export const getBankQuestionNav = (id, params) => http.get(`/banks/${id}/questio
 export const getPracticeQuestions = (id, params) => http.get(`/banks/${id}/questions/practice`, { params })
 
 // 导入内容包（body = 内容包 JSON 原文，v1）→ data = { result, bankId, message }
+// timeout: 0 = 不设客户端超时：含图题库在慢机器上可能超过全局 15s，超时中止会让"后端已导入成功、
+// 界面却当作失败"（用户实测：点导入没反应，刷新后题库其实已经在了）。
 export const importBank = (jsonText) =>
-  http.post('/banks/import', jsonText, { headers: { 'Content-Type': 'text/plain; charset=utf-8' } })
+  http.post('/banks/import', jsonText, { headers: { 'Content-Type': 'text/plain; charset=utf-8' }, timeout: 0 })
 
 // 导入 .tiku 容器（body = zip 字节，v2）→ data = { result, bankId, message }
 export const importTikuBank = (bytes) =>
-  http.post('/banks/import-tiku', bytes, { headers: { 'Content-Type': 'application/octet-stream' } })
+  http.post('/banks/import-tiku', bytes, { headers: { 'Content-Type': 'application/octet-stream' }, timeout: 0 })
 
 // 导出内容包 JSON（v1，兼容格式）→ data = 内容包 JSON
 export const exportBank = (id, data) => http.post(`/banks/${id}/export`, data)

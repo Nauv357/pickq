@@ -429,6 +429,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import TikuIcon from '../components/TikuIcon.vue'
 import { centerPacksUrl, getCenterUrl } from '../utils/center'
 import { openExternal } from '../utils/external'
+import { startBusy, stopBusy } from '../utils/busy'
 import http from '../api/http'
 import { useI18n } from 'vue-i18n'
 
@@ -764,8 +765,9 @@ async function importExternal(w) {
     return
   }
   importingKey.value = w.packageKey
+  startBusy(t('importing'))
   try {
-    const r = await http.post('/center/import-external', { url: w.downloadUrl })
+    const r = await http.post('/center/import-external', { url: w.downloadUrl }, { timeout: 0 })
     const map = {
       ALREADY_IMPORTED: { type: 'info', text: t('msgAlreadyImportedText', { title: w.title }) },
       BRANCHED: { type: 'warning', text: t('msgBranchedImport') },
@@ -781,6 +783,7 @@ async function importExternal(w) {
     ElMessage.info(t('msgDirectImportFailed'))
     if (msg) console.warn('[discover] import-external failed:', msg)
   } finally {
+    stopBusy()
     importingKey.value = ''
   }
 }
@@ -880,12 +883,15 @@ function backFromAuthor() {
 async function importPack(w) {
   if (importingKey.value) return
   importingKey.value = w.packageKey
+  // 下载 + 导入都在后端同步完成，慢网/大文件可能几十秒：给出全屏进度（含已用秒数），
+  // 且请求不设客户端超时（否则 15s 就被中止，后端却还在下，用户只看到"没反应"）
+  startBusy(t('importing'))
   try {
     const r = await http.post('/center/import', {
       center: getCenterUrl(),
       packageKey: w.packageKey,
       version: w.version
-    })
+    }, { timeout: 0 })
     const map = {
       ALREADY_IMPORTED: { type: 'info', text: t('msgAlreadyImportedText', { title: w.title }) },
       BRANCHED: { type: 'warning', text: t('msgBranchedImport') },
@@ -898,6 +904,7 @@ async function importPack(w) {
     const msg = e?.response?.data?.message || e?.message || t('msgImportFailed')
     ElMessage.error(typeof msg === 'string' ? msg : t('msgImportFailed'))
   } finally {
+    stopBusy()
     importingKey.value = ''
   }
 }

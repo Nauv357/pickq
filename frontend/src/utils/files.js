@@ -80,10 +80,16 @@ export function readTextFile(file) {
 
 /**
  * 读取文件为 ArrayBuffer（.tiku 容器等二进制）
+ *
+ * ⚠️ 曾经漏了 `onload`（自首个版本起）：Promise 永远不 settle，于是
+ * `.tiku` 文件导入点下去**一个请求都不会发出**，界面毫无反应（用户实测反馈）；
+ * 更糟的是调用方 `doImport` 的 finally 不执行、`importing` 卡在 true，
+ * 之后每次点「导入」都被守卫直接 return——表现为"点了没反应，刷新后（此前的导入）又是在的"。
  */
 export function readArrayBuffer(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
+    reader.onload = () => resolve(reader.result)
     reader.onerror = () => reject(new Error('文件读取失败'))
     reader.readAsArrayBuffer(file)
   })
@@ -91,6 +97,7 @@ export function readArrayBuffer(file) {
 
 /**
  * 触发隐藏的 <input type="file"> 选择文件
+ * 用户取消（对话框关闭）时也要 reject：否则 Promise 永远挂着，调用方一直 await。
  */
 export function pickFile(accept = '.json,application/json') {
   return new Promise((resolve, reject) => {
@@ -102,6 +109,7 @@ export function pickFile(accept = '.json,application/json') {
       if (file) resolve(file)
       else reject(new Error('未选择文件'))
     }
+    input.oncancel = () => reject(new Error('未选择文件'))
     input.click()
   })
 }

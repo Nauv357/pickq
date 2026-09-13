@@ -7,9 +7,9 @@
         <p class="page-desc">{{ t('pageDesc') }}</p>
       </div>
       <div class="header-actions">
-        <button ref="importMainBtn" class="btn btn-primary" @click="openImportChoice">
+        <button ref="importMainBtn" class="btn btn-primary" :disabled="importing" @click="openImportChoice">
           <TikuIcon name="upload" :size="15" />
-          {{ t('act.import') }}
+          {{ importing ? t('msgImportingFile') : t('act.import') }}
         </button>
         <button class="btn btn-secondary" :disabled="total < 2" @click="openMerge">
           <TikuIcon name="package" :size="15" />
@@ -81,7 +81,7 @@
 
         <!-- 次级入口 -->
         <div class="onboard-subrow">
-          <button class="onboard-sub" @click="doImport">
+          <button class="onboard-sub" :disabled="importing" @click="doImport">
             <TikuIcon name="upload" :size="16" />
             <span class="onboard-sub-body">
               <span class="onboard-sub-title">{{ t('empty.fileTitle') }}</span>
@@ -416,6 +416,7 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { createBank, deleteBank, getBanks, getHomeOverview, importBank, importTikuBank, mergeBanks, updateBank } from '../api/banks'
 import { formatDate } from '../utils/format'
+import { startBusy, stopBusy } from '../utils/busy'
 import { pickFile, readArrayBuffer, readTextFile } from '../utils/files'
 import { openLocalFolder } from '../utils/external'
 import http from '../api/http'
@@ -500,6 +501,7 @@ const { t } = useI18n({
       msgNeedNewBankName: '请输入新题库名称',
       msgMergeDone: '合并完成：{n} 道题已复制进「{name}」（源题库保留，题号已从 1 重新编排）',
       msgFileEmpty: '文件内容为空',
+    msgImportingFile: '正在导入题库…',
       msgImportCreated: '导入成功',
       msgAlreadyImported: '该题库文件已导入过',
       msgVersionAdded: '已并存导入新版本',
@@ -623,6 +625,7 @@ const { t } = useI18n({
       msgNeedNewBankName: 'Please enter a name for the new bank',
       msgMergeDone: 'Merge complete: {n} questions copied into “{name}” (source banks are kept; numbering restarts from 1)',
       msgFileEmpty: 'The file is empty',
+    msgImportingFile: 'Importing bank…',
       msgImportCreated: 'Import succeeded',
       msgAlreadyImported: 'This bank file has already been imported',
       msgVersionAdded: 'Imported as a new version alongside the existing one',
@@ -1186,6 +1189,10 @@ async function doImport() {
     return // 用户取消选择
   }
   importing.value = true
+  // 全屏"正在导入…（已用 N 秒）"：导入是同步接口，含图题库在慢机器上要几十秒，
+  // 期间界面若无任何变化，用户会以为点击没生效（实测反馈）；后端继续跑、刷新才看到已导入。
+  startBusy(t('msgImportingFile'))
+  let res
   try {
     // .tiku 容器（v2）按 zip 字节导入；.json 纯文本（v1）按原文导入
     const isTiku = /\.tiku$/i.test(file.name) || file.type === 'application/zip'
@@ -1195,21 +1202,28 @@ async function doImport() {
         ElMessage.warning(t('msgFileEmpty'))
         return
       }
-      const res = await importTikuBank(bytes)
-      await handleImportResult(res)
+      res = await importTikuBank(bytes)
     } else {
       const text = await readTextFile(file)
       if (!text.trim()) {
         ElMessage.warning(t('msgFileEmpty'))
         return
       }
-      const res = await importBank(text)
-      await handleImportResult(res)
+      res = await importBank(text)
     }
   } catch (e) {
     /* 400（文件格式错误等）由拦截器提示 */
+    return
   } finally {
+    // 遮罩与按钮禁用只覆盖"请求进行中"：导入成功后还要弹"去查看/留在此页"确认框，
+    // 全屏遮罩（lock）盖在上面会让确认框点不动。
+    stopBusy()
     importing.value = false
+  }
+  try {
+    await handleImportResult(res)
+  } catch (e) {
+    /* 结果提示/跳转失败不影响导入本身 */
   }
 }
 
