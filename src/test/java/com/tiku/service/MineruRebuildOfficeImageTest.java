@@ -90,7 +90,7 @@ class MineruRebuildOfficeImageTest {
     @Test
     void extractsXlsxTableImagesAtCellPosition() throws Exception {
         // xlsx 的真实形态：MinerU 不产出 image 条目，只在 table 的单元格 HTML 里写 <img src="images/…">
-        // （实测 2 个工作表 6 张图全靠这个引用）→ 必须按单元格位置提出来，且标记要落在所在行
+        // （实测 2 个工作表共 10 处引用、6 张不同的图）→ 必须按单元格位置提出来，且标记要落在所在行
         String contentList = """
                 [
                   [

@@ -418,7 +418,7 @@ public class MineruParseService {
                         continue;
                     }
                     //表格 HTML 里的内嵌插图：MinerU 对 xlsx 不产出 image 条目，而是在 table 的单元格里写
-                    //<img src="images/xx.jpg">（实测 2 个工作表 6 张图全靠这个引用）。整份表格 HTML 是
+                    //<img src="images/xx.jpg">（实测 2 个工作表共 10 处引用、6 张不同的图）。整份表格 HTML 是
                     //一个文本块 → 把 img 标签换成占位符（保留在单元格原位），结算时再插 [图片N] 登记图片：
                     //位置天然是"所在行/格"，比 PPT（无坐标只能追加在末尾）更准。
                     List<String> inlineImgs = new ArrayList<>();
