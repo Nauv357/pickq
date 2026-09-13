@@ -1402,14 +1402,20 @@ loadOverview()
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* 「…」：平时不显示（常显会让卡片显得杂乱），悬停/键盘聚焦时淡入；触屏设备常显 */
-.bank-more {
+/* 「…」：平时不显示（常显会让卡片显得杂乱），悬停/键盘聚焦时淡入；触屏设备常显。
+   只要三个点，**不要方框**（无边框、无底色，悬停也只变色）——用户明确要求。 */
+.bank-head .bank-more {
   flex-shrink: 0;
   width: 24px;
   height: 24px;
   opacity: 0;
   color: var(--text-muted);
   transition: opacity var(--ease), color var(--ease);
+}
+.bank-card .bank-more,
+.bank-card .bank-more:hover:not(:disabled) {
+  background: none;
+  border: none;
 }
 .bank-card:hover .bank-more,
 .bank-more:focus-visible {

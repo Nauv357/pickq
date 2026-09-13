@@ -1265,27 +1265,7 @@ onUnmounted(() => {
 }
 
 /* 图标按钮 */
-.icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: none;
-  background: transparent;
-  border-radius: 7px;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all var(--ease);
-}
-.icon-btn:hover:not(:disabled) {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-.icon-btn:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
-}
+
 .icon-btn.active {
   color: var(--accent, #409eff);
   background: color-mix(in srgb, var(--accent, #409eff) 12%, transparent);

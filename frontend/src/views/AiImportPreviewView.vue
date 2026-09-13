@@ -1577,31 +1577,6 @@ watch(
   border-radius: 999px;
   padding: 2px 10px;
 }
-.icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: none;
-  background: transparent;
-  border-radius: 7px;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all var(--ease);
-}
-.icon-btn:hover:not(:disabled) {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-.icon-btn.danger:hover {
-  background: var(--danger-soft);
-  color: var(--danger);
-}
-.icon-btn:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
-}
 .card-body {
   padding: 16px 18px;
   display: flex;

@@ -2670,27 +2670,8 @@ loadTopicOptions() // 分类筛选选项（与 TOPIC 会话共用，幂等）
   flex-shrink: 0;
 }
 
-.icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: none;
-  background: transparent;
-  border-radius: 7px;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all var(--ease);
-}
-.icon-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-.icon-btn.danger:hover {
-  background: var(--danger-soft);
-  color: var(--danger);
-}
+/* 图标按钮的基类见 styles/main.css 的 `.icon-btn:not(.btn)`（此前这里各写一份，
+   题库列表漏写导致「…」出现浏览器默认方框） */
 
 .q-empty {
   display: flex;
