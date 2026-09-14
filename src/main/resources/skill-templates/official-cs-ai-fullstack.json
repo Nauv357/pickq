@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "templateId": "official.cs-ai-fullstack",
+  "name": "AI 时代的现代化全栈",
+  "version": "2026.09",
+  "goalHint": "3–6 个月内具备全栈 / AI 应用开发岗位的面试与实战能力",
+  "source": { "type": "official", "updatedAt": "2026-09-14", "license": "自建（不引用第三方路线内容）" },
+  "stages": [
+    {
+      "id": "s1",
+      "name": "前端基础",
+      "nodes": [
+        { "id": "fe.html", "name": "HTML 与语义化", "level": 3, "weight": 0.8, "prereq": [], "keywords": ["标签语义", "表单", "可访问性", "SEO 基础"] },
+        { "id": "fe.css", "name": "CSS 布局与响应式", "level": 3, "weight": 0.9, "prereq": ["fe.html"], "keywords": ["Flex", "Grid", "盒模型", "响应式", "媒体查询"] },
+        { "id": "fe.js", "name": "JavaScript 核心", "level": 3, "weight": 1.2, "prereq": ["fe.html"], "keywords": ["作用域", "闭包", "原型", "事件循环", "Promise", "ES6"] },
+        { "id": "fe.dom", "name": "DOM 与浏览器原理", "level": 3, "weight": 0.9, "prereq": ["fe.js"], "keywords": ["DOM 操作", "事件冒泡", "渲染流程", "重排重绘", "存储"] }
+      ]
+    },
+    {
+      "id": "s2",
+      "name": "前端工程化与框架",
+      "nodes": [
+        { "id": "fe.ts", "name": "TypeScript", "level": 3, "weight": 1.1, "prereq": ["fe.js"], "keywords": ["类型系统", "泛型", "类型体操", "接口", "类型收窄"] },
+        { "id": "fe.vue", "name": "Vue 3 组件开发", "level": 3, "weight": 1.0, "prereq": ["fe.js"], "keywords": ["组件通信", "响应式原理", "组合式 API", "生命周期", "插槽"] },
+        { "id": "fe.state", "name": "状态管理与路由", "level": 3, "weight": 0.8, "prereq": ["fe.vue"], "keywords": ["Pinia", "Vue Router", "路由守卫", "状态设计"] },
+        { "id": "fe.build", "name": "构建与打包", "level": 3, "weight": 0.8, "prereq": ["fe.ts"], "keywords": ["Vite", "打包优化", "按需加载", "环境变量", "Tree shaking"] },
+        { "id": "fe.net", "name": "前后端交互与联调", "level": 3, "weight": 0.9, "prereq": ["fe.js"], "keywords": ["HTTP", "REST", "CORS", "鉴权", "错误处理", "SSE"] }
+      ]
+    },
+    {
+      "id": "s3",
+      "name": "后端与 API",
+      "nodes": [
+        { "id": "be.java", "name": "Java 与面向对象", "level": 3, "weight": 1.1, "prereq": [], "keywords": ["集合", "泛型", "异常", "并发基础", "JVM 基础"] },
+        { "id": "be.spring", "name": "Spring Boot 应用开发", "level": 3, "weight": 1.2, "prereq": ["be.java"], "keywords": ["IoC", "AOP", "REST 接口", "参数校验", "全局异常", "事务"] },
+        { "id": "be.design", "name": "接口设计与分层", "level": 3, "weight": 1.0, "prereq": ["be.spring"], "keywords": ["分层架构", "DTO", "幂等", "分页", "统一响应"] },
+        { "id": "be.auth", "name": "鉴权与会话", "level": 3, "weight": 0.9, "prereq": ["be.spring"], "keywords": ["JWT", "Session", "OAuth", "权限模型", "越权防护"] },
+        { "id": "be.async", "name": "异步任务与长连接", "level": 3, "weight": 0.8, "prereq": ["be.spring"], "keywords": ["线程池", "任务队列", "SSE", "WebSocket", "超时与重试"] }
+      ]
+    },
+    {
+      "id": "s4",
+      "name": "数据与存储",
+      "nodes": [
+        { "id": "db.sql", "name": "SQL 与数据建模", "level": 3, "weight": 1.1, "prereq": [], "keywords": ["范式", "连表", "聚合", "事务隔离", "索引"] },
+        { "id": "db.orm", "name": "ORM 与持久层", "level": 3, "weight": 0.8, "prereq": ["db.sql"], "keywords": ["MyBatis", "实体映射", "N+1", "逻辑删除", "迁移"] },
+        { "id": "db.perf", "name": "查询优化", "level": 3, "weight": 0.9, "prereq": ["db.sql"], "keywords": ["执行计划", "索引失效", "慢查询", "分页优化"] },
+        { "id": "db.cache", "name": "缓存与一致性", "level": 3, "weight": 0.8, "prereq": ["db.perf"], "keywords": ["缓存策略", "失效", "穿透雪崩", "一致性"] }
+      ]
+    },
+    {
+      "id": "s5",
+      "name": "AI 应用开发",
+      "nodes": [
+        { "id": "ai.llm", "name": "大模型 API 与提示工程", "level": 3, "weight": 1.2, "prereq": ["be.spring"], "keywords": ["Chat Completions", "系统提示", "结构化输出", "JSON 模式", "token 成本"] },
+        { "id": "ai.stream", "name": "流式输出与交互体验", "level": 3, "weight": 0.9, "prereq": ["ai.llm"], "keywords": ["SSE 流式", "增量渲染", "中断", "错误恢复"] },
+        { "id": "ai.rag", "name": "检索增强（RAG）", "level": 3, "weight": 1.0, "prereq": ["ai.llm", "db.sql"], "keywords": ["切块", "向量化", "召回", "重排", "引用溯源"] },
+        { "id": "ai.agent", "name": "工具调用与 Agent", "level": 3, "weight": 0.9, "prereq": ["ai.llm"], "keywords": ["Function calling", "工具编排", "多步推理", "失败回退"] },
+        { "id": "ai.eval", "name": "AI 效果评估与成本", "level": 3, "weight": 0.7, "optional": true, "prereq": ["ai.llm"], "keywords": ["评测集", "准确率", "回归", "成本优化", "缓存"] }
+      ]
+    },
+    {
+      "id": "s6",
+      "name": "工程化与交付",
+      "nodes": [
+        { "id": "ops.git", "name": "Git 与协作", "level": 3, "weight": 0.8, "prereq": [], "keywords": ["分支模型", "rebase", "冲突", "code review"] },
+        { "id": "ops.test", "name": "测试与质量", "level": 3, "weight": 0.9, "prereq": ["be.design"], "keywords": ["单元测试", "集成测试", "契约测试", "回归"] },
+        { "id": "ops.deploy", "name": "部署与运维", "level": 3, "weight": 0.9, "prereq": ["ops.git"], "keywords": ["Docker", "Nginx", "CI/CD", "日志", "监控"] },
+        { "id": "ops.perf", "name": "性能与可用性", "level": 3, "weight": 0.7, "optional": true, "prereq": ["ops.deploy"], "keywords": ["压测", "缓存", "限流", "降级", "容量"] }
+      ]
+    },
+    {
+      "id": "s7",
+      "name": "面试冲刺",
+      "nodes": [
+        { "id": "itv.algo", "name": "手写代码与算法", "level": 3, "weight": 1.2, "prereq": ["be.java"], "keywords": ["数组", "链表", "哈希", "二叉树", "动态规划", "手写 Promise"] },
+        { "id": "itv.project", "name": "项目讲述与追问", "level": 3, "weight": 1.1, "prereq": ["be.design"], "keywords": ["STAR", "技术选型", "难点", "收益量化", "追问准备"] },
+        { "id": "itv.fundamental", "name": "计算机基础八股", "level": 3, "weight": 1.0, "prereq": [], "keywords": ["网络", "操作系统", "数据结构", "数据库原理", "HTTP/HTTPS"] },
+        { "id": "itv.system", "name": "系统设计", "level": 3, "weight": 0.9, "optional": true, "prereq": ["itv.fundamental", "db.perf"], "keywords": ["高并发", "分库分表", "消息队列", "限流", "设计题"] }
+      ]
+    }
+  ]
+}

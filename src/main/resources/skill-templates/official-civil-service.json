@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "templateId": "official.civil-service",
+  "name": "公务员行测（通用）",
+  "version": "2026.09",
+  "goalHint": "按行测五大模块系统过一遍，找出薄弱模块并逐项过关",
+  "source": { "type": "official", "updatedAt": "2026-09-14", "license": "自建（不引用第三方路线内容）" },
+  "stages": [
+    {
+      "id": "m1",
+      "name": "常识判断",
+      "nodes": [
+        { "id": "gk.cs.politics", "name": "政治与法律常识", "level": 3, "weight": 0.9, "prereq": [], "keywords": ["宪法", "民法典", "时政", "党史"] },
+        { "id": "gk.cs.science", "name": "科技与生活常识", "level": 3, "weight": 0.8, "prereq": [], "keywords": ["物理常识", "化学常识", "生物常识", "生活百科", "新科技"] },
+        { "id": "gk.cs.culture", "name": "人文与地理常识", "level": 3, "weight": 0.8, "prereq": [], "keywords": ["历史", "文学", "地理", "传统文化"] }
+      ]
+    },
+    {
+      "id": "m2",
+      "name": "言语理解与表达",
+      "nodes": [
+        { "id": "gk.yy.logic", "name": "逻辑填空", "level": 3, "weight": 1.1, "prereq": [], "keywords": ["实词辨析", "成语", "关联词", "语境分析", "感情色彩"] },
+        { "id": "gk.yy.read", "name": "片段阅读", "level": 3, "weight": 1.1, "prereq": [], "keywords": ["主旨概括", "意图判断", "细节理解", "标题填入", "态度观点"] },
+        { "id": "gk.yy.order", "name": "语句表达", "level": 3, "weight": 0.9, "prereq": ["gk.yy.read"], "keywords": ["语句排序", "语句衔接", "下文推断", "病句"] }
+      ]
+    },
+    {
+      "id": "m3",
+      "name": "数量关系",
+      "nodes": [
+        { "id": "gk.sl.math", "name": "数学运算", "level": 3, "weight": 1.1, "prereq": [], "keywords": ["方程", "比例", "工程问题", "行程问题", "利润问题", "容斥"] },
+        { "id": "gk.sl.count", "name": "排列组合与概率", "level": 3, "weight": 1.0, "prereq": ["gk.sl.math"], "keywords": ["排列组合", "概率", "抽屉原理", "最值问题"] },
+        { "id": "gk.sl.geo", "name": "几何与图表", "level": 3, "weight": 0.8, "optional": true, "prereq": ["gk.sl.math"], "keywords": ["平面几何", "立体几何", "坐标系", "图形计数"] }
+      ]
+    },
+    {
+      "id": "m4",
+      "name": "判断推理",
+      "nodes": [
+        { "id": "gk.pd.figure", "name": "图形推理", "level": 3, "weight": 1.2, "prereq": [], "keywords": ["位置规律", "样式规律", "数量规律", "属性规律", "空间重构", "立体拼合"] },
+        { "id": "gk.pd.define", "name": "定义判断", "level": 3, "weight": 1.0, "prereq": [], "keywords": ["关键词提取", "要件分析", "多定义", "择优"] },
+        { "id": "gk.pd.analogy", "name": "类比推理", "level": 3, "weight": 0.9, "prereq": [], "keywords": ["逻辑关系", "言语关系", "经验常识", "语法关系"] },
+        { "id": "gk.pd.logic", "name": "逻辑判断", "level": 3, "weight": 1.2, "prereq": ["gk.pd.define"], "keywords": ["翻译推理", "真假推理", "加强削弱", "原因解释", "朴素逻辑"] }
+      ]
+    },
+    {
+      "id": "m5",
+      "name": "资料分析",
+      "nodes": [
+        { "id": "gk.zl.concept", "name": "核心概念与公式", "level": 3, "weight": 1.2, "prereq": [], "keywords": ["增长率", "增长量", "比重", "平均数", "倍数", "同比环比"] },
+        { "id": "gk.zl.calc", "name": "速算技巧", "level": 3, "weight": 1.1, "prereq": ["gk.zl.concept"], "keywords": ["估算法", "首数法", "特征数字", "错位加减", "有效数字"] },
+        { "id": "gk.zl.integrated", "name": "综合分析题", "level": 3, "weight": 0.9, "prereq": ["gk.zl.calc"], "keywords": ["多选项判断", "陷阱", "单位", "时间范围"] }
+      ]
+    }
+  ]
+}
