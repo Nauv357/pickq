@@ -118,6 +118,16 @@ public class QuestionBankController {
         return ApiResponse.success(questionBankService.deleteQuestionBank(id));
     }
 
+    /**
+     * 一次性整理：把旧的「分类」值并入「试卷 / 章节」（归属维度），只在归属为空时填。
+     * 界面上「分类」已下线，老题库（从旧文件导入、分类有值）用这个动作把内容搬过去。
+     */
+    @PostMapping("/{id}/merge-category-into-topic")
+    public ApiResponse<java.util.Map<String, Object>> mergeCategoryIntoTopic(@PathVariable Long id) {
+        int n = questionBankService.mergeCategoryIntoTopic(id);
+        return ApiResponse.success(java.util.Map.of("affected", n));
+    }
+
     //导入内容包（body = 内容包 JSON 原文，v1 纯文本），返回导入结果与题库 id
     @PostMapping("/import")
     public ApiResponse<ImportResultResponse> importContentPackage(@RequestBody String json) {

@@ -228,10 +228,17 @@
             <el-option :label="t('wrongTab0')" value="wrong" />
             <el-option :label="t('undone')" value="undone" />
           </el-select>
-          <el-select v-model="qCategory" :placeholder="t('qCategory')" clearable filterable style="width: 140px" @change="applyFilter">
-            <el-option v-for="c in categoryOptions" :key="c" :label="c" :value="c" />
+          <el-select v-model="qTopic" :placeholder="t('qTopic')" clearable filterable style="width: 150px" @change="applyFilter">
+            <el-option v-for="c in topicOptions" :key="c" :label="c" :value="c" />
           </el-select>
           <span v-if="filterActive" class="q-filter-hint text-muted">{{ t('filterResultN', { n: qTotal }) }}</span>
+        </div>
+
+        <!-- 老题库遗留的「分类」值：一次性并入「试卷 / 章节」。
+             分类已从界面下线，这里只在确实有数据时出现，处理完自动消失。 -->
+        <div v-if="legacyCategories.length" class="q-legacy-tip">
+          <span class="text-muted">{{ t('legacyCategoryTip') }}</span>
+          <button class="btn btn-ghost btn-sm" @click="mergeLegacyCategory">{{ t('legacyCategoryBtn') }}</button>
         </div>
 
         <!-- 加载中 -->
@@ -571,33 +578,20 @@
             </div>
           </el-form-item>
           <template v-if="sessionForm.mode === 'TOPIC'">
-            <el-form-item label="主题（可多选）">
+            <el-form-item label="试卷 / 章节（可多选）">
               <el-select
                 v-model="selectedTopics"
                 multiple
                 collapse-tags
                 collapse-tags-tooltip
-                placeholder="不限主题"
+                placeholder="不限试卷 / 章节"
                 style="width: 100%"
                 clearable
               >
                 <el-option v-for="t in topicOptions" :key="t" :label="t" :value="t" />
               </el-select>
             </el-form-item>
-            <el-form-item label="分类（可多选）">
-              <el-select
-                v-model="selectedCategories"
-                multiple
-                collapse-tags
-                collapse-tags-tooltip
-                placeholder="不限分类"
-                style="width: 100%"
-                clearable
-              >
-                <el-option v-for="c in categoryOptions" :key="c" :label="c" :value="c" />
-              </el-select>
-            </el-form-item>
-            <p class="form-tip text-muted">同时选择主题与分类时，题目需同时命中；只选一组时按该组筛选</p>
+            <p class="form-tip text-muted">不选就是整套题里按顺序出。</p>
           </template>
           <el-form-item label="题目数量（留空 = 范围内全部）">
             <el-input-number v-model="sessionForm.count" :min="1" :max="500" controls-position="right" style="width: 200px" placeholder="全部" />
@@ -841,7 +835,10 @@ const { t } = useI18n({
       questions: '题目', materials: '共用材料', aiAppend: 'AI 追加', batchImport: '批量导入', aiFillAnswers: 'AI 补答案',
       aiFillTip: '把本库无答案的客观题分批送 AI 判定回填（答案后配的批量兑现）', exitSelectMode: '退出选择模式', selectModeTip: '勾选若干题目，另存为新题库或并入其他题库',
       cancelSelect: '取消选题', selectSave: '选题另存', addQuestion: '添加题目',
-      searchPh: '搜索题干 / 选项关键词', qType: '题型', qScope: '范围', all: '全部', undone: '未做', qCategory: '分类',
+      searchPh: '搜索题干 / 选项关键词', qType: '题型', qScope: '范围', all: '全部', undone: '未做', qTopic: '试卷/章节',
+      legacyCategoryTip: '这个题库里还有老版本写入的「分类」值（现在只保留「试卷 / 章节」一个归属字段）。',
+      legacyCategoryBtn: '把「分类」并入「试卷 / 章节」',
+      legacyCategoryDone: '已把 {n} 题的「分类」并入「试卷 / 章节」（原有内容没被覆盖）',
       filterResultN: '筛选结果 {n} 题', noMatch: '没有匹配的题目，试试调整筛选条件', noQuestions: '题库还没有题目', addFirstQuestion: '录入第一题',
       clickEditHint: '点击编辑该题（右侧按钮可做题 / AI 解析 / 删除）',
       noMaterialsTip: '还没有共用材料。共用材料是多道题共用的一段文字或图片（阅读材料、图表、案例背景等），创建后可在这里或录题时关联到题目。',
@@ -953,7 +950,10 @@ const { t } = useI18n({
       questions: 'Questions', materials: 'Shared material', aiAppend: 'AI Append', batchImport: 'Batch import', aiFillAnswers: 'AI Fill answers',
       aiFillTip: 'Batch-send unanswered objective questions to AI for judging & filling (for answer keys added later)', exitSelectMode: 'Exit select mode', selectModeTip: 'Select questions to save as a new bank or merge into another',
       cancelSelect: 'Cancel select', selectSave: 'Select & save as', addQuestion: 'Add question',
-      searchPh: 'Search stem / options', qType: 'Type', qScope: 'Scope', all: 'All', undone: 'Undone', qCategory: 'Category',
+      searchPh: 'Search stem / options', qType: 'Type', qScope: 'Scope', all: 'All', undone: 'Undone', qTopic: 'Paper / chapter',
+      legacyCategoryTip: 'This bank still has legacy “category” values (only the paper/chapter field remains now).',
+      legacyCategoryBtn: 'Merge “category” into “paper / chapter”',
+      legacyCategoryDone: 'Merged “category” into “paper / chapter” for {n} questions (existing values untouched)',
       filterResultN: '{n} results', noMatch: 'No matching questions — try adjusting filters', noQuestions: 'No questions in this bank yet', addFirstQuestion: 'Add your first question',
       clickEditHint: 'Click to edit (right-side buttons: practice / AI analyze / delete)',
       noMaterialsTip: 'No shared material yet. Shared material is one text/image used by several questions (reading passage, chart, case background…). Create it here or link it while editing a question.',
@@ -1055,7 +1055,7 @@ const { t } = useI18n({
 })
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { batchCreateQuestions, aiFillAnswers, copyQuestionSelection, deleteBank, exportBank, exportTikuBank, getBank, getBankQuestionNav, getBankQuestions, getBanks, setReviewEnabled, updateBank } from '../api/banks'
+import { batchCreateQuestions, aiFillAnswers, copyQuestionSelection, deleteBank, exportBank, exportTikuBank, getBank, getBankQuestionNav, getBankQuestions, getBanks, mergeCategoryIntoTopic, setReviewEnabled, updateBank } from '../api/banks'
 import { deleteQuestion, getQuestion, setFavorite } from '../api/questions'
 import { getBankProgress, getReviewDue, getReviewSummary, getWrongQuestions, resetReviewStates } from '../api/studyRecords'
 import { createSession, getBankCategories } from '../api/sessions'
@@ -1119,7 +1119,7 @@ const offset = computed(() => (qPage.value - 1) * qPageSize)
 const qKeyword = ref('')
 const qType = ref('')
 const qScope = ref('')
-const qCategory = ref('')
+const qTopic = ref('')
 const typeFilterOptions = [
   { value: 'SINGLE', label: '单选' },
   { value: 'MULTIPLE', label: '多选' },
@@ -1128,7 +1128,7 @@ const typeFilterOptions = [
 ]
 // {{ t('aiFillAnswers') }}只处理客观题
 const objectiveTypeOptions = typeFilterOptions.filter((t) => t.value !== 'SUBJECTIVE')
-const filterActive = computed(() => !!(qKeyword.value || qType.value || qScope.value || qCategory.value))
+const filterActive = computed(() => !!(qKeyword.value || qType.value || qScope.value || qTopic.value))
 
 /* 重复题号统计（第十一轮：当前列表内 questionNumber 出现 >1 即标红，纯前端） */
 const duplicateNums = computed(() => {
@@ -1155,7 +1155,7 @@ async function loadQuestions() {
       keyword: qKeyword.value.trim() || undefined,
       questionType: qType.value || undefined,
       scope: qScope.value || undefined,
-      category: qCategory.value || undefined
+      topic: qTopic.value || undefined
     })
     questions.value = data.records || []
     qTotal.value = Number(data.total || 0)
@@ -1536,7 +1536,7 @@ const sessionCreating = ref(false)
 const sessionModes = [
   { value: 'ALL', label: '全部随机', desc: '未做过的题优先，不足再随机补充' },
   { value: 'SEQUENCE', label: '顺序刷题', desc: '按题号顺序逐题刷' },
-  { value: 'TOPIC', label: '按分类', desc: '按主题/分类筛选（可多选）' },
+  { value: 'TOPIC', label: '按试卷 / 章节', desc: '按归属筛选（可多选）' },
   { value: 'REVIEW', label: '复习队列', desc: '今日到期待复习的题目' },
   { value: 'WRONG', label: '错题', desc: '最近一次答错的题目' },
   { value: 'FAVORITE', label: '收藏', desc: '已收藏的题目' }
@@ -1544,17 +1544,16 @@ const sessionModes = [
 
 const sessionForm = reactive({ mode: 'ALL', count: null })
 
-// TOPIC 多选：选项来自后端 categories 聚合接口
+// TOPIC 多选：选项来自后端 categories 聚合接口（只取归属 topic；「分类」已下线，不再出现在界面）
 const topicOptions = ref([])
-const categoryOptions = ref([])
 const selectedTopics = ref([])
-const selectedCategories = ref([])
+// 老题库里"只有分类、没有归属"的遗留值：有值时才提示一次性并入归属，处理完自动消失
+const legacyCategories = ref([])
 
 function openSession() {
   sessionForm.mode = 'ALL'
   sessionForm.count = null
   selectedTopics.value = []
-  selectedCategories.value = []
   sessionVisible.value = true
 }
 
@@ -1564,11 +1563,27 @@ function onModeSelect(mode) {
 }
 
 async function loadTopicOptions() {
-  if (topicOptions.value.length || categoryOptions.value.length) return
+  if (topicOptions.value.length || legacyCategories.value.length) return
   try {
     const data = await getBankCategories(id)
-    topicOptions.value = data.topics || []
-    categoryOptions.value = data.categories || []
+    legacyCategories.value = data.categories || []
+    // 老题库可能有"只有分类、没有归属"的题：把分类值也并进选项，用户才能筛到它们
+    const merged = [...(data.topics || []), ...legacyCategories.value]
+    topicOptions.value = [...new Set(merged.filter(Boolean))]
+  } catch (e) {
+    /* 拦截器已提示 */
+  }
+}
+
+/** 把遗留的「分类」并入「试卷 / 章节」（只在归属为空时填，不覆盖已有内容） */
+async function mergeLegacyCategory() {
+  try {
+    const res = await mergeCategoryIntoTopic(id)
+    ElMessage.success(t('legacyCategoryDone', { n: res?.affected ?? 0 }))
+    topicOptions.value = []
+    legacyCategories.value = []
+    await loadTopicOptions()
+    await loadQuestions()
   } catch (e) {
     /* 拦截器已提示 */
   }
@@ -1577,9 +1592,7 @@ async function loadTopicOptions() {
 async function submitSession() {
   const body = { mode: sessionForm.mode, count: sessionForm.count || null }
   if (sessionForm.mode === 'TOPIC') {
-    // 后端字段：topic/category 为多选数组（IN 语义），两组之间 AND
     body.topic = selectedTopics.value
-    body.category = selectedCategories.value
   }
   await startSessionWith(body)
 }
@@ -1744,14 +1757,14 @@ async function startPracticeAt(questionId) {
   sessionCreating.value = true
   try {
     // 后端 SEQUENCE + startQuestionId：从该题按题号顺序抽 20 题
-    // 带当前列表筛选（关键词/题型/范围/分类）→ 从"筛选结果"内该题往后刷
+    // 带当前列表筛选（关键词/题型/范围/归属）→ 从"筛选结果"内该题往后刷
     const data = await createSession(id, {
       mode: 'SEQUENCE',
       startQuestionId: questionId,
       count: 20,
       keyword: qKeyword.value.trim() || undefined,
       questionType: qType.value || undefined,
-      category: qCategory.value ? [qCategory.value] : undefined,
+      topic: qTopic.value ? [qTopic.value] : undefined,
       scope: qScope.value || undefined
     })
     if (!data.total || data.questions.length === 0) {
@@ -2572,6 +2585,13 @@ loadTopicOptions() // 分类筛选选项（与 TOPIC 会话共用，幂等）
   margin-bottom: 14px;
 }
 .q-filter-hint {
+  font-size: 12px;
+}
+.q-legacy-tip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
   font-size: 12px;
 }
 .q-row {

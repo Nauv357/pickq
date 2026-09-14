@@ -216,12 +216,10 @@
         <p class="form-tip text-muted">主观题不做自动判题，做题后由用户对照参考答案自评（对=满分 / 部分对=一半 / 错=0 分）</p>
       </div>
 
-      <!-- 附属字段 -->
+      <!-- 附属字段。册数与「分类」已从界面下线（2026-09-15 字段收敛）：
+           册数没人用（导入时不产生），分类与「试卷/章节」语义重叠——
+           两者仍在 payload 里原样带回去，所以只改这两栏不会抹掉老数据。 -->
       <div class="field-grid">
-        <div class="field">
-          <label class="field-label">册数</label>
-          <el-input-number v-model="form.volume" :min="1" :max="999" controls-position="right" style="width: 100%" />
-        </div>
         <div class="field">
           <label class="field-label">题号</label>
           <el-input-number v-model="form.questionNumber" :min="1" :max="99999" controls-position="right" style="width: 100%" />
@@ -230,13 +228,9 @@
           <label class="field-label">分值{{ form.questionType === 'SUBJECTIVE' ? '（默认 5）' : '' }}</label>
           <el-input-number v-model="form.score" :min="0.5" :max="100" :step="0.5" controls-position="right" style="width: 100%" />
         </div>
-        <div class="field">
-          <label class="field-label">主题</label>
-          <el-input v-model="form.topic" placeholder="如：交通信号" maxlength="100" />
-        </div>
-        <div class="field">
-          <label class="field-label">分类</label>
-          <el-input v-model="form.category" placeholder="如：基础题" maxlength="100" />
+        <div class="field field-wide">
+          <label class="field-label">试卷 / 章节</label>
+          <el-input v-model="form.topic" placeholder="这题从哪来，如：2024 国考行测 / 第二章 函数（可留空）" maxlength="100" />
         </div>
       </div>
 
@@ -802,8 +796,9 @@ function buildPayload() {
     questionType: form.questionType,
     questionNumber: form.questionNumber,
     content: form.content,
-    topic: form.topic || null,
-    category: form.category || null,
+    // 归属（试卷/章节）：传空串表示"清掉"，后端会把空白归一成 null
+    topic: form.topic,
+    category: form.category,
     score: form.score,
     analysis: form.analysis || null
   }
@@ -1375,6 +1370,10 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 14px;
+}
+/* 「试卷 / 章节」占满整行：它是归属维度，比册数/题号更常改 */
+.field-wide {
+  grid-column: 1 / -1;
 }
 
 /* 底部 */

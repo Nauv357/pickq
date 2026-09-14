@@ -250,7 +250,9 @@ public class AiImportPromptFactory {
                 answerKeys: 正确答案 key 数组（单选/判断一个，多选多个；主观题空数组）
                 answerText: 答案文字（可选）  analysis: 解析（可选）
                 referenceAnswer: 主观题参考答案（仅 SUBJECTIVE，可选）
-                topic: 主题（可选）  category: 分类（可选）  score: 分值（默认1，主观题默认5）
+                topic: 所属试卷/章节（可选；按原文的卷名/章名/节名**原样**填写，如"2024 年国考行测""第二章 函数"。
+                       同一份材料里的题尽量用同一个值；原文没有这种层级标题就留空，不要自己编）
+                score: 分值（默认1，主观题默认5）
                 answerSource: "ORIGINAL" 或 "AI_SUPPLEMENT"（见下方答案规则）
 
                 共享材料规则（多题共用的大题干/图表/阅读材料）：

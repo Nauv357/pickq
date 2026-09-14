@@ -178,11 +178,18 @@ class QuestionTaggingServiceTest {
         assertEquals(2, r2.cachedGroups());
         assertEquals(4, r2.taggedQuestions());
 
-        // ③ 待确认队列：按节点聚合 + 带样例题干
-        var pending = tagging.pending(BANK_ID, TEMPLATE);
-        var figure = pending.stream().filter(p -> p.nodeId().equals("gk.pd.figure.num")).findFirst().orElseThrow();
-        assertEquals(2, figure.questionCount());
-        assertEquals(2, figure.samples().size(), "要带样例题干，用户才能核对而不是盲点确认");
+        // ③ 审阅清单：以题为单位，带状态与当前标签（界面据此就地查看/修改）
+        var pendingPage = tagging.review(BANK_ID, TEMPLATE, "pending", null, 1, 50);
+        assertEquals(4, pendingPage.total(), "4 道有 topic 的题都有未确认建议");
+        assertEquals(4, pendingPage.counts().pending());
+        assertEquals(2, pendingPage.counts().untagged(), "没有 topic 的 2 题此时一条标签都没有");
+        var row = pendingPage.records().stream().filter(r -> r.questionId().equals(graph)).findFirst().orElseThrow();
+        assertEquals("pending", row.status());
+        assertEquals(1, row.tags().size(), "编造的节点必须被丢弃，只剩真实节点");
+        assertEquals("gk.pd.figure.num", row.tags().get(0).nodeId());
+        assertEquals("图形推理·数量与属性", row.tags().get(0).name(), "清单里要带节点名，界面才能直接显示");
+        assertTrue(row.preview() != null && !row.preview().isBlank(), "每道题要带题干预览，用户才能分辨是哪一题");
+        assertTrue(row.questionNumber() != null, "要带题号，便于在列表里定位");
 
         // ④ 确认：确认后参与门控（confirmed=1）
         assertEquals(2, tagging.apply(BANK_ID, TEMPLATE, "confirm", "gk.pd.figure.num", null, null));
@@ -232,11 +239,10 @@ class QuestionTaggingServiceTest {
         assertThrows(IllegalArgumentException.class,
                 () -> tagging.setUserTags(noTopic, TEMPLATE, List.of("gk.not.exist")));
 
-        // ⑩ 逐题处理（用户实测：只给三条样例题干无法精确分配）
-        var pendingAfter = tagging.pending(BANK_ID, TEMPLATE);
-        var concept = pendingAfter.stream().filter(x -> x.nodeId().equals("gk.zl.growth")).findFirst().orElseThrow();
-        assertTrue(concept.questions().size() >= 1, "该节点下要能列出具体是哪几题");
-        var first = concept.questions().get(0);
+        // ⑩ 逐题处理（用户实测：只给三条样例题干无法精确分配 → 现在按题列出并可就地改）
+        var growthRows = tagging.review(BANK_ID, TEMPLATE, "all", "gk.zl.growth", 1, 50);
+        assertEquals(2, growthRows.total(), "按知识点筛题：资料分析那 2 题");
+        var first = growthRows.records().get(0);
         assertTrue(first.preview() != null && !first.preview().isBlank(), "每道题要带题干预览，用户才能分辨");
         assertTrue(first.questionNumber() != null, "要带题号，便于在列表里定位");
 
@@ -249,19 +255,29 @@ class QuestionTaggingServiceTest {
         assertTrue(tagging.tagsOf(first.questionId()).stream()
                         .anyMatch(QuestionTaggingService.QuestionTag::confirmed), "已确认的标签要保留下来");
 
-        // ⑪ 按状态列题：界面据此把"未匹配的 N 题"摊开逐题打开去修
-        assertTrue(tagging.questionsByStatus(BANK_ID, TEMPLATE, "pending", 1, 50).size() >= 1, "待确认清单要能列题");
-        assertTrue(tagging.questionsByStatus(BANK_ID, TEMPLATE, "confirmed", 1, 50).size() >= 1, "已确认清单要能列题");
+        // ⑪ 就地改标签（action=set）：把这些题的标签设定成给定节点，写成用户标注；
+        //    反复设置不能累积出重复标签（界面上的下拉会被反复使用）
+        assertEquals(1, tagging.apply(BANK_ID, TEMPLATE, "set", null, List.of("gk.sl.econ"), List.of(first.questionId())));
+        assertEquals(1, tagging.apply(BANK_ID, TEMPLATE, "set", null, List.of("gk.sl.econ"), List.of(first.questionId())));
+        var edited = tagging.tagsOf(first.questionId());
+        assertEquals(1, edited.size(), "重复设置应替换而不是追加：" + edited);
+        assertEquals("gk.sl.econ", edited.get(0).nodeId());
+        assertEquals("user", edited.get(0).source());
+        assertTrue(edited.get(0).confirmed());
+        assertEquals(0, tagging.apply(BANK_ID, TEMPLATE, "set", null, List.of("gk.sl.econ"), null),
+                "set 不给 questionIds 时不做任何事（危险动作必须显式给题）");
+        // 清空标签 = newNodes 传空数组
+        assertEquals(0, tagging.apply(BANK_ID, TEMPLATE, "set", null, List.of(), List.of(first.questionId())));
+        assertTrue(tagging.tagsOf(first.questionId()).isEmpty(), "空数组表示把这题的标签清掉");
 
-        // ⑫ 主题回填：AI 的分组结果顺手写回题目主题（题库没填主题时），让题库更规整；
-        //    默认不覆盖已有主题（资料分析那两题本来就有主题，所以显式按题覆盖才生效）
-        assertEquals(1, tagging.backfillTopic(BANK_ID, TEMPLATE, null, List.of(noTopic), "图形推理", false));
-        assertEquals("图形推理", questionMapper.selectById(noTopic).getTopic(), "主题已写入");
-        assertEquals(0, tagging.backfillTopic(BANK_ID, TEMPLATE, null, List.of(noTopic), "别的主题", false),
-                "默认不覆盖已有主题");
-        assertEquals(1, tagging.backfillTopic(BANK_ID, TEMPLATE, null, List.of(noTopic), "覆盖后的主题", true),
-                "显式 overwrite 时才覆盖");
-        assertEquals("覆盖后的主题", questionMapper.selectById(noTopic).getTopic());
+        // ⑫ 按状态列题：界面据此把"未匹配的题"摊开逐题补
+        assertTrue(tagging.review(BANK_ID, TEMPLATE, "pending", null, 1, 50).total() >= 1, "待确认清单要能列题");
+        assertTrue(tagging.review(BANK_ID, TEMPLATE, "confirmed", null, 1, 50).total() >= 1, "已确认清单要能列题");
+        assertTrue(tagging.review(BANK_ID, TEMPLATE, "untagged", null, 1, 50).total() >= 1, "未匹配清单要能列题");
+        var allPage = tagging.review(BANK_ID, TEMPLATE, "all", null, 1, 50);
+        assertEquals(6, allPage.total(), "全部 = 总题数");
+        assertEquals(allPage.counts().confirmed() + allPage.counts().pending() + allPage.counts().untagged(),
+                allPage.counts().total(), "三段不重叠且相加 = 总题数");
     }
 
     @Test

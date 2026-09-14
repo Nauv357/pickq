@@ -506,12 +506,8 @@
 
             <div class="field-grid">
               <div class="field">
-                <label class="field-label">主题</label>
-                <el-input v-model="q.topic" placeholder="可选" maxlength="100" />
-              </div>
-              <div class="field">
-                <label class="field-label">分类</label>
-                <el-input v-model="q.category" placeholder="可选" maxlength="100" />
+                <label class="field-label">试卷 / 章节</label>
+                <el-input v-model="q.topic" placeholder="这题从哪来，如：2024 国考行测 / 第一章（可留空）" maxlength="100" />
               </div>
             </div>
 

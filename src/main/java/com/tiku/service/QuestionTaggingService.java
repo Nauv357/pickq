@@ -20,11 +20,13 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -106,21 +108,23 @@ public class QuestionTaggingService {
                                 boolean truncated, String message) {
     }
 
-    /** 待确认队列里的一项：一个节点下有哪些题（来自哪些分组） */
-    public record PendingNode(String nodeId, String name, int questionCount, double avgConfidence,
-                              List<String> groups, List<SampleQuestion> samples, List<PendingQuestion> questions) {
-    }
-
     /**
-     * 待确认队列里的**单题**：用户实测反馈"每个分类下只简略显示三条样例题干，根本分辨不出是哪一题"，
-     * 所以要能列出该节点下的全部题（含题号、题型、题干、置信度），并支持逐题处理。
+     * 审阅清单里的一题：状态 + 当前标签（含来源与把握）。
+     *
+     * 为什么不再按节点聚合、也不再只给三条样例题干：用户实测反馈"每个分类下只简略显示题目简单信息，
+     * 我根本分辨不出来是哪一题，在此界面可以说完全无法对题目精确分配 tag"。所以清单以**题**为单位，
+     * 每题带上它的全部标签，界面可以就地改。
      */
-    public record PendingQuestion(Long questionId, Integer questionNumber, String type, String preview,
-                                  double confidence) {
+    public record ReviewQuestion(Long questionId, Integer questionNumber, String type, String preview,
+                                 String status, List<QuestionTag> tags) {
     }
 
-    /** 队列里的样例题（供 UI 让人一眼判断"这些题确实属于这个知识点吗"） */
-    public record SampleQuestion(Long questionId, String preview) {
+    /** 审阅清单分页 + **同一份快照**算出来的计数（数字与清单不可能打架） */
+    public record ReviewPage(int total, int page, int size, Counts counts, List<ReviewQuestion> records) {
+    }
+
+    /** 四段（含"可用于判定掌握"）计数，全部由同一份快照派生 */
+    public record Counts(int total, int confirmed, int pending, int untagged, int usable) {
     }
 
     /** 单题标签（题目详情/编辑用） */
@@ -264,8 +268,10 @@ public class QuestionTaggingService {
             }
         }
 
-        // 未标注数以**数据库现状**为准：模型漏答、返回无法解析、节点被丢弃的题都要如实算作未标注
-        int withoutUsableTag = questionSkillMapper.countQuestionsWithoutSkills(bankId, templateId);
+        // 未标注数以**数据库现状**为准：模型漏答、返回无法解析、节点被丢弃的题都要如实算作未标注。
+        // 口径 = 还没有"可用于判定掌握的标签"的题数（与覆盖页的 usable 互补），界面按它的减少显示进度
+        Counts after = countsOf(snapshot(bankId, templateId));
+        int withoutUsableTag = after.total() - after.usable();
         log.info("题库 {} 打标签完成：分组 {}（命中缓存 {}），AI 调用 {}，已标注 {} 题，未标注 {} 题{}",
                 bankId, groups.size(), cached, aiCalls, tagged, withoutUsableTag, truncated ? "（达到调用上限，未跑完）" : "");
         return new SuggestResult(templateId, template.graphVersion(), groups.size(), resolved.size(), cached,
@@ -466,53 +472,139 @@ public class QuestionTaggingService {
         return out;
     }
 
-    // ==================== 待确认队列 / 确认 / 覆盖 ====================
+    // ==================== 读侧：一份快照，所有口径都由它派生 ====================
 
-    /** 待确认队列：按节点聚合（AI 未确认的建议） */
-    public List<PendingNode> pending(Long bankId, String templateId) {
-        SkillGraphService.SkillTemplate template = graphService.template(templateId);
-        List<QuestionSkill> rows = questionSkillMapper.selectList(new LambdaQueryWrapper<QuestionSkill>()
-                .eq(QuestionSkill::getBankId, bankId)
-                .eq(QuestionSkill::getTemplateId, templateId)
-                .eq(QuestionSkill::getSource, SOURCE_AI)
-                .eq(QuestionSkill::getConfirmed, false)
-                .eq(QuestionSkill::getShadowed, false)
-                .select(QuestionSkill::getQuestionId, QuestionSkill::getNodeId,
-                        QuestionSkill::getConfidence, QuestionSkill::getOrigin));
-        Map<String, List<QuestionSkill>> byNode = new LinkedHashMap<>();
-        for (QuestionSkill r : rows) {
-            byNode.computeIfAbsent(r.getNodeId(), k -> new ArrayList<>()).add(r);
-        }
-        List<PendingNode> out = new ArrayList<>();
-        byNode.forEach((nodeId, list) -> {
-            double avg = list.stream().mapToDouble(r -> r.getConfidence() == null ? 0 : r.getConfidence()).average().orElse(0);
-            Set<String> origins = new LinkedHashSet<>();
-            for (QuestionSkill r : list) {
-                if (r.getOrigin() != null) {
-                    origins.add(r.getOrigin());
-                }
-            }
-            List<PendingQuestion> questions = pendingQuestionsOf(list);
-            List<Long> sampleIds = questions.stream().map(PendingQuestion::questionId).limit(3).toList();
-            out.add(new PendingNode(nodeId, nameOf(template, nodeId), questions.size(),
-                    Math.round(avg * 100) / 100.0, List.copyOf(origins), previewsOf(sampleIds), questions));
-        });
-        out.sort(Comparator.comparingInt(PendingNode::questionCount).reversed());
-        return out;
+    public static final String STATUS_ALL = "all";
+    public static final String STATUS_CONFIRMED = "confirmed";
+    public static final String STATUS_PENDING = "pending";
+    public static final String STATUS_UNTAGGED = "untagged";
+
+    /**
+     * 题库标签状态快照：题目、每题标签、每题状态**一次算清**。
+     *
+     * 为什么坚持"只有一个来源"：用户实测出现过「26 待标注 vs 16 待确认」——概览用一套 SQL、
+     * 清单用另一套 SQL，两边口径一旦不一致就自相矛盾，用户无法判断还剩多少题没处理。
+     * 现在概览数字、清单条数、节点覆盖全部从这一个快照派生，"数字与清单对不上"在结构上不可能发生。
+     */
+    private record Snapshot(List<Question> questions, Map<Long, List<QuestionSkill>> tags,
+                            Map<Long, String> status) {
     }
 
-    /** 样例题干（截断）：让用户在确认前能核对，而不是盲点"确认" */
-    private List<SampleQuestion> previewsOf(List<Long> questionIds) {
-        if (questionIds.isEmpty()) {
-            return List.of();
+    private Snapshot snapshot(Long bankId, String templateId) {
+        SkillGraphService.SkillTemplate template = graphService.template(templateId);
+        List<Question> questions = questionMapper.selectList(new LambdaQueryWrapper<Question>()
+                .eq(Question::getBankId, bankId)
+                .orderByAsc(Question::getVolume)
+                .orderByAsc(Question::getQuestionNumber)
+                .orderByAsc(Question::getId));
+        List<QuestionSkill> rows = questionSkillMapper.selectList(new LambdaQueryWrapper<QuestionSkill>()
+                .eq(QuestionSkill::getBankId, bankId)
+                .eq(QuestionSkill::getTemplateId, templateId));
+        Map<Long, List<QuestionSkill>> tags = new LinkedHashMap<>();
+        for (QuestionSkill r : rows) {
+            if (Boolean.TRUE.equals(r.getShadowed())) {
+                continue;
+            }
+            // 技能图换过之后，指向已不存在的节点的旧标签不算数（否则覆盖数字会虚高）
+            if (!template.nodeIds().contains(r.getNodeId())) {
+                continue;
+            }
+            tags.computeIfAbsent(r.getQuestionId(), k -> new ArrayList<>()).add(r);
         }
-        List<Question> qs = questionMapper.selectList(new LambdaQueryWrapper<Question>()
-                .in(Question::getId, questionIds)
-                .select(Question::getId, Question::getContent));
-        List<SampleQuestion> out = new ArrayList<>();
-        for (Question q : qs) {
-            out.add(new SampleQuestion(q.getId(), truncate(oneLine(q.getContent()), 80)));
+        Map<Long, String> status = new LinkedHashMap<>();
+        for (Question q : questions) {
+            status.put(q.getId(), statusOf(tags.getOrDefault(q.getId(), List.of())));
         }
+        return new Snapshot(questions, tags, status);
+    }
+
+    /** 每题状态：有已确认标签 = confirmed；只有 AI 未确认建议 = pending；什么都没有 = untagged */
+    private static String statusOf(List<QuestionSkill> rows) {
+        if (rows.stream().anyMatch(r -> Boolean.TRUE.equals(r.getConfirmed()))) {
+            return STATUS_CONFIRMED;
+        }
+        if (rows.stream().anyMatch(r -> SOURCE_AI.equals(r.getSource()))) {
+            return STATUS_PENDING;
+        }
+        return STATUS_UNTAGGED;
+    }
+
+    /**
+     * 门控口径（与 {@link QuestionSkill#GATE_MIN_CONFIDENCE} 一致）：
+     * 已确认，或 AI 高置信。低置信建议只作参考，绝不参与"是否掌握"的判断。
+     */
+    private static boolean usable(QuestionSkill r) {
+        return Boolean.TRUE.equals(r.getConfirmed())
+                || (r.getConfidence() != null && r.getConfidence() >= QuestionSkill.GATE_MIN_CONFIDENCE);
+    }
+
+    private Counts countsOf(Snapshot snap) {
+        int confirmed = 0;
+        int pending = 0;
+        int untagged = 0;
+        int usable = 0;
+        for (Question q : snap.questions()) {
+            String st = snap.status().get(q.getId());
+            if (STATUS_CONFIRMED.equals(st)) {
+                confirmed++;
+            } else if (STATUS_PENDING.equals(st)) {
+                pending++;
+            } else {
+                untagged++;
+            }
+            if (snap.tags().getOrDefault(q.getId(), List.of()).stream().anyMatch(QuestionTaggingService::usable)) {
+                usable++;
+            }
+        }
+        return new Counts(snap.questions().size(), confirmed, pending, untagged, usable);
+    }
+
+    /**
+     * 审阅清单（界面主列表）：以**题**为单位，带每题当前标签与状态，可就地查看与修改。
+     *
+     * @param status all（默认）/ confirmed / pending / untagged
+     * @param nodeId 可选：只看挂了该节点的题（按知识点分组批量处理时用）
+     */
+    public ReviewPage review(Long bankId, String templateId, String status, String nodeId, int page, int size) {
+        SkillGraphService.SkillTemplate template = graphService.template(templateId);
+        Snapshot snap = snapshot(bankId, templateId);
+        String want = status == null || status.isBlank() ? STATUS_ALL : status;
+        List<Question> filtered = new ArrayList<>();
+        for (Question q : snap.questions()) {
+            if (!STATUS_ALL.equals(want) && !want.equals(snap.status().get(q.getId()))) {
+                continue;
+            }
+            if (nodeId != null && !nodeId.isBlank()) {
+                List<QuestionSkill> rows = snap.tags().getOrDefault(q.getId(), List.of());
+                if (rows.stream().noneMatch(r -> nodeId.equals(r.getNodeId()))) {
+                    continue;
+                }
+            }
+            filtered.add(q);
+        }
+        int safeSize = Math.max(1, Math.min(size, 200));
+        int safePage = Math.max(1, page);
+        int from = Math.min((safePage - 1) * safeSize, filtered.size());
+        int to = Math.min(from + safeSize, filtered.size());
+        List<ReviewQuestion> records = new ArrayList<>();
+        for (Question q : filtered.subList(from, to)) {
+            records.add(new ReviewQuestion(q.getId(), q.getQuestionNumber(),
+                    q.getQuestionType() == null ? "" : q.getQuestionType().name(),
+                    truncate(oneLine(q.getContent()), 120),
+                    snap.status().get(q.getId()),
+                    tagsFrom(snap.tags().getOrDefault(q.getId(), List.of()), template)));
+        }
+        return new ReviewPage(filtered.size(), safePage, safeSize, countsOf(snap), records);
+    }
+
+    private List<QuestionTag> tagsFrom(List<QuestionSkill> rows, SkillGraphService.SkillTemplate template) {
+        List<QuestionTag> out = new ArrayList<>();
+        for (QuestionSkill r : rows) {
+            out.add(new QuestionTag(r.getNodeId(), nameOf(template, r.getNodeId()), r.getSource(),
+                    r.getConfidence() == null ? 0 : r.getConfidence(),
+                    Boolean.TRUE.equals(r.getConfirmed()), r.getOrigin()));
+        }
+        out.sort(Comparator.comparing(QuestionTag::nodeId));
         return out;
     }
 
@@ -544,17 +636,34 @@ public class QuestionTaggingService {
         if (question == null) {
             throw new IllegalArgumentException("题目不存在：" + questionId);
         }
-        List<String> target = nodeIds == null ? List.of() : nodeIds.stream().filter(s -> s != null && !s.isBlank()).distinct().toList();
+        return writeUserTags(question, template, templateId, normalizeNodes(template, nodeIds));
+    }
+
+    /** 校验并归一化节点清单（去空、去重、必须在词表里） */
+    private List<String> normalizeNodes(SkillGraphService.SkillTemplate template, List<String> nodeIds) {
+        List<String> target = nodeIds == null ? List.of()
+                : nodeIds.stream().filter(s -> s != null && !s.isBlank()).distinct().toList();
         for (String n : target) {
             if (!template.nodeIds().contains(n)) {
                 throw new IllegalArgumentException("技能节点不存在：" + n);
             }
         }
-        // 清掉该题在**所有模板**下的 AI 建议（用户已给出正确答案，AI 猜测没有意义）
+        return target;
+    }
+
+    /**
+     * 把某题的标签**设定**为给定节点（写成 source=user、confirmed=1）。
+     *
+     * 同时清掉该题在**所有模板**下的 AI 建议（用户已经给出答案，AI 的猜测没有意义），
+     * 以及同模板下旧的用户标注——否则反复修改会累积出重复的用户标签。
+     * 「就地改标签」「批量设为知识点」「改挂」三条路径都收敛到这里，行为一致。
+     */
+    private int writeUserTags(Question question, SkillGraphService.SkillTemplate template, String templateId,
+                              List<String> target) {
+        Long questionId = question.getId();
         questionSkillMapper.delete(new LambdaQueryWrapper<QuestionSkill>()
                 .eq(QuestionSkill::getQuestionId, questionId)
                 .eq(QuestionSkill::getSource, SOURCE_AI));
-        // 清掉同模板下的旧用户标注（重新设定）
         questionSkillMapper.delete(new LambdaQueryWrapper<QuestionSkill>()
                 .eq(QuestionSkill::getQuestionId, questionId)
                 .eq(QuestionSkill::getTemplateId, templateId)
@@ -579,10 +688,12 @@ public class QuestionTaggingService {
     }
 
     /**
-     * 批量确认 / 改节点 / 拒绝：
-     * - action=confirm：把该节点下 AI 建议置为已确认（一条 SQL 级别的批量，前端一次点击）；
-     * - action=retag：把这些题改挂到给定节点（写成 source=user，覆盖 AI 与作者）；
-     * - action=reject：删除该节点下的 AI 建议。
+     * 批量确认 / 设定标签 / 改挂 / 拒绝：
+     * - action=confirm：把给定节点（或给定题）的 AI 建议置为已确认；
+     * - action=set：把这些题的标签**设定**为给定节点（界面上"就地改标签/批量设为知识点"），
+     *   没有 questionIds 时不动作（危险动作必须显式给题）；
+     * - action=retag：按节点批量改挂（用 AI 建议反查题目，等价于对这批题执行 set）；
+     * - action=reject：删除 AI 建议（已确认的标签不动）。
      */
     @Transactional
     public int apply(Long bankId, String templateId, String action, String nodeId,
@@ -590,47 +701,34 @@ public class QuestionTaggingService {
         SkillGraphService.SkillTemplate template = graphService.template(templateId);
         if ("reject".equals(action)) {
             int n = 0;
-            // 只丢"建议"：已确认的标签不动（要撤掉已确认的标签，请在题目编辑里改知识点）
+            // 只丢"建议"：已确认的标签不动（要撤掉已确认的标签，请把标签设成别的或空）
             for (QuestionSkill r : selectAiRows(bankId, templateId, nodeId, questionIds, true)) {
                 questionSkillMapper.deleteById(r.getId());
                 n++;
             }
             return n;
         }
-        if ("retag".equals(action)) {
-            List<String> target = newNodes == null ? List.of() : newNodes;
-            for (String t : target) {
-                if (!template.nodeIds().contains(t)) {
-                    throw new IllegalArgumentException("技能节点不存在：" + t);
-                }
+        if ("retag".equals(action) || "set".equals(action)) {
+            List<String> target = normalizeNodes(template, newNodes);
+            List<Long> ids;
+            if ("set".equals(action)) {
+                ids = questionIds == null ? List.of() : questionIds.stream().filter(Objects::nonNull).distinct().toList();
+            } else {
+                ids = questionIds == null || questionIds.isEmpty()
+                        ? selectAiRows(bankId, templateId, nodeId, null, false).stream().map(QuestionSkill::getQuestionId).distinct().toList()
+                        : questionIds;
             }
-            List<Long> ids = questionIds == null || questionIds.isEmpty()
-                    ? selectAiRows(bankId, templateId, nodeId, null, false).stream().map(QuestionSkill::getQuestionId).distinct().toList()
-                    : questionIds;
             int n = 0;
             for (Long qid : ids) {
-                questionSkillMapper.delete(new LambdaQueryWrapper<QuestionSkill>()
-                        .eq(QuestionSkill::getQuestionId, qid)
-                        .eq(QuestionSkill::getSource, SOURCE_AI));
-                for (String t : target) {
-                    QuestionSkill row = new QuestionSkill();
-                    row.setQuestionId(qid);
-                    row.setBankId(bankId);
-                    row.setNodeId(t);
-                    row.setTemplateId(templateId);
-                    row.setSource(SOURCE_USER);
-                    row.setConfidence(1.0);
-                    row.setConfirmed(true);
-                    row.setOrigin(ORIGIN_MANUAL);
-                    row.setShadowed(false);
-                    row.setUpdatedAt(LocalDateTime.now());
-                    questionSkillMapper.insert(row);
-                    n++;
+                Question q = questionMapper.selectById(qid);
+                if (q == null || !bankId.equals(q.getBankId())) {
+                    continue;
                 }
+                n += writeUserTags(q, template, templateId, target);
             }
             return n;
         }
-        // confirm（可按题：界面上逐题点"确认此题"）；已确认的无需重复处理
+        // confirm（可按题：界面上逐题点"确认"）；已确认的无需重复处理
         List<QuestionSkill> rows = selectAiRows(bankId, templateId, nodeId, questionIds, true);
         for (QuestionSkill r : rows) {
             r.setConfirmed(true);
@@ -659,94 +757,27 @@ public class QuestionTaggingService {
         return questionSkillMapper.selectList(w);
     }
 
-    /** 某个节点下待确认的单题（含题号/题型/题干/置信度），供界面逐题处理 */
-    private List<PendingQuestion> pendingQuestionsOf(List<QuestionSkill> rows) {
-        Map<Long, Double> conf = new LinkedHashMap<>();
-        for (QuestionSkill r : rows) {
-            conf.merge(r.getQuestionId(), r.getConfidence() == null ? 0 : r.getConfidence(), Math::max);
-        }
-        if (conf.isEmpty()) {
-            return List.of();
-        }
-        List<Question> questions = questionMapper.selectList(new LambdaQueryWrapper<Question>()
-                .in(Question::getId, conf.keySet())
-                .select(Question::getId, Question::getQuestionNumber, Question::getQuestionType, Question::getContent));
-        List<PendingQuestion> out = new ArrayList<>();
-        for (Question q : questions) {
-            out.add(new PendingQuestion(q.getId(), q.getQuestionNumber(),
-                    q.getQuestionType() == null ? "" : q.getQuestionType().name(),
-                    truncate(oneLine(q.getContent()), 120), conf.getOrDefault(q.getId(), 0.0)));
-        }
-        out.sort(Comparator.comparing(PendingQuestion::questionNumber, Comparator.nullsLast(Integer::compareTo)));
-        return out;
-    }
-
-    /**
-     * 按标签状态列题（confirmed / pending / untagged），供界面把"未匹配的 26 题"这类清单摊开，
-     * 逐题打开去修——这是"用户根本分辨不出是哪一题"的直接解法。
-     */
-    public List<PendingQuestion> questionsByStatus(Long bankId, String templateId, String status, int page, int size) {
-        graphService.template(templateId); // 模板不存在 → 直接报错（可照做）
-        int safeSize = Math.max(1, Math.min(size, 200));
-        int offset = Math.max(0, (Math.max(1, page) - 1) * safeSize);
-        List<Question> questions = questionSkillMapper.selectQuestionsByTagStatus(bankId, templateId, status, safeSize, offset);
-        List<PendingQuestion> out = new ArrayList<>();
-        for (Question q : questions) {
-            out.add(new PendingQuestion(q.getId(), q.getQuestionNumber(),
-                    q.getQuestionType() == null ? "" : q.getQuestionType().name(),
-                    truncate(oneLine(q.getContent()), 120), 0));
-        }
-        return out;
-    }
-
-    /**
-     * 把一组题的主题（topic）回填成给定词：题库没填主题/分类时，AI 的分组结果可以顺手写回去，
-     * 让题库本身更规整（也帮助将来的"按组映射"）。默认只填空值，不覆盖作者已写的内容。
-     */
-    @Transactional
-    public int backfillTopic(Long bankId, String templateId, String nodeId, List<Long> questionIds,
-                             String topic, boolean overwrite) {
-        graphService.template(templateId);
-        if (topic == null || topic.isBlank()) {
-            throw new IllegalArgumentException("缺少要写入的主题名称");
-        }
-        List<Long> ids = questionIds == null || questionIds.isEmpty()
-                ? selectAiRows(bankId, templateId, nodeId, null, false).stream().map(QuestionSkill::getQuestionId).distinct().toList()
-                : questionIds;
-        int n = 0;
-        for (Long id : ids) {
-            Question q = questionMapper.selectById(id);
-            if (q == null) {
-                continue;
-            }
-            boolean empty = q.getTopic() == null || q.getTopic().isBlank();
-            if (!empty && !overwrite) {
-                continue;
-            }
-            q.setTopic(truncate(oneLine(topic), 100));
-            q.setUpdatedAt(java.time.LocalDateTime.now());
-            questionMapper.updateById(q);
-            n++;
-        }
-        log.info("题库 {} 回填主题「{}」：{} 题（覆盖已有={}）", bankId, topic, n, overwrite);
-        return n;
-    }
-
     /** 覆盖地图：路线节点在题库里的题量（<3 视为证据不足，不参与门控） */
     public Coverage coverage(Long bankId, String templateId) {
         SkillGraphService.SkillTemplate template = graphService.template(templateId);
-        int total = Math.toIntExact(questionMapper.selectCount(new LambdaQueryWrapper<Question>()
-                .eq(Question::getBankId, bankId)));
-        int confirmed = questionSkillMapper.countConfirmedQuestions(bankId, templateId);
-        int pending = questionSkillMapper.countPendingQuestions(bankId, templateId);
-        int untagged = questionSkillMapper.countQuestionsWithoutAnyTag(bankId, templateId);
-        int usable = questionSkillMapper.countCoveredQuestions(bankId, templateId);
+        Snapshot snap = snapshot(bankId, templateId);
+        Counts c = countsOf(snap);
+        Map<String, Integer> perNode = new LinkedHashMap<>();
+        for (List<QuestionSkill> rows : snap.tags().values()) {
+            Set<String> counted = new HashSet<>();
+            for (QuestionSkill r : rows) {
+                if (usable(r) && counted.add(r.getNodeId())) {
+                    perNode.merge(r.getNodeId(), 1, Integer::sum);
+                }
+            }
+        }
         List<NodeCoverage> nodes = new ArrayList<>();
         for (SkillGraphService.NodeView n : template.nodes()) {
-            int count = questionSkillMapper.countCoveredQuestionsInNode(bankId, templateId, n.nodeId());
+            int count = perNode.getOrDefault(n.nodeId(), 0);
             nodes.add(new NodeCoverage(n.nodeId(), n.name(), n.stageName(), count, count >= 3, count > 0));
         }
-        return new Coverage(templateId, template.graphVersion(), total, confirmed, pending, untagged, usable, nodes);
+        return new Coverage(templateId, template.graphVersion(), c.total(), c.confirmed(), c.pending(),
+                c.untagged(), c.usable(), nodes);
     }
 
     // ==================== 工具 ====================

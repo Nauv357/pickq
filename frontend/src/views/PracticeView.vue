@@ -440,7 +440,7 @@ onUnmounted(stopElapsedTimer)
 const MODE_LABELS = {
   ALL: '全部随机',
   SEQUENCE: '顺序刷题',
-  TOPIC: '按分类',
+  TOPIC: '按试卷 / 章节',
   REVIEW: '复习队列',
   WRONG: '错题重做',
   FAVORITE: '收藏'

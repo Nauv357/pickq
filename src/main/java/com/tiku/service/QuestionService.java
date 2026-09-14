@@ -317,10 +317,11 @@ public class QuestionService {
             question.setOptions(request.options());
         }
         if (request.topic() != null) {
-            question.setTopic(request.topic());
+            // 空白归一成 null：界面上把「试卷 / 章节」清空时要真的清掉，而不是留一个空串
+            question.setTopic(blankToNull(request.topic()));
         }
         if (request.category() != null) {
-            question.setCategory(request.category());
+            question.setCategory(blankToNull(request.category()));
         }
         if (request.score() != null) {
             question.setScore(request.score());
@@ -390,6 +391,11 @@ public class QuestionService {
         return question;
     }
 
+    /** 空白归一成 null：归属（试卷/章节）等可选文本传空串时应当真的清空 */
+    private static String blankToNull(String s) {
+        return s == null || s.isBlank() ? null : s.trim();
+    }
+
     private Question toEntity(QuestionCreateRequest request){
         Question question = new Question();
         question.setExternalId(generateExternalId(request.questionType()));
@@ -398,8 +404,8 @@ public class QuestionService {
         question.setQuestionNumber(request.questionNumber());
         question.setContent(request.content());
         question.setOptions(request.options());
-        question.setTopic(request.topic());
-        question.setCategory(request.category());
+        question.setTopic(blankToNull(request.topic()));
+        question.setCategory(blankToNull(request.category()));
         question.setScore(request.score() == null ? 1.0 : request.score());
         question.setAnswerKeys(joinTrimmedKeys(request.answerKeys()));
         question.setAnswerText(request.answerText());

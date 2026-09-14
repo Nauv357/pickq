@@ -82,9 +82,9 @@ class SkillControllerHttpTest {
 
         // 3 道同 topic 的题（一组映射即可覆盖，节点题量 ≥3 → 证据充足）
         for (int i = 0; i < 3; i++) {
-            jdbc.update("INSERT INTO question (external_id, question_type, content, topic, volume, score, bank_id, deleted) "
-                            + "VALUES (?, 'SINGLE', ?, '图形推理', 0, 1, ?, 0)",
-                    "HTTP_" + System.nanoTime() + "_" + i, "第 " + i + " 道图形推理题", BANK_ID);
+            jdbc.update("INSERT INTO question (external_id, question_type, question_number, content, topic, volume, score, bank_id, deleted) "
+                            + "VALUES (?, 'SINGLE', ?, ?, '图形推理', 0, 1, ?, 0)",
+                    "HTTP_" + System.nanoTime() + "_" + i, i + 1, "第 " + (i + 1) + " 道图形推理题", BANK_ID);
         }
     }
 
@@ -149,26 +149,75 @@ class SkillControllerHttpTest {
                 .andExpect(jsonPath("$.data.taggedQuestions", is(3)))
                 .andExpect(jsonPath("$.data.withoutUsableTag", is(0)));
 
-        // 待确认队列（带样例题干）
-        mockMvc.perform(get("/api/banks/{id}/skills/pending", BANK_ID).param("templateId", TEMPLATE))
+        // 审阅清单：以**题**为单位，带状态与当前标签（界面就地改标签就靠它）
+        mockMvc.perform(get("/api/banks/{id}/skills/questions", BANK_ID)
+                        .param("templateId", TEMPLATE).param("status", "pending"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data[0].nodeId", is("gk.pd.figure.num")))
-                .andExpect(jsonPath("$.data[0].questionCount", is(3)))
-                .andExpect(jsonPath("$.data[0].samples", hasSize(greaterThan(0))));
+                .andExpect(jsonPath("$.data.total", is(3)))
+                .andExpect(jsonPath("$.data.counts.pending", is(3)))
+                .andExpect(jsonPath("$.data.counts.untagged", is(0)))
+                .andExpect(jsonPath("$.data.records[0].status", is("pending")))
+                .andExpect(jsonPath("$.data.records[0].questionNumber", greaterThan(0)))
+                .andExpect(jsonPath("$.data.records[0].preview", org.hamcrest.Matchers.not(org.hamcrest.Matchers.emptyString())))
+                .andExpect(jsonPath("$.data.records[0].tags[0].nodeId", is("gk.pd.figure.num")))
+                .andExpect(jsonPath("$.data.records[0].tags[0].name", is("图形推理·数量与属性")))
+                .andExpect(jsonPath("$.data.records[0].tags[0].source", is("ai")))
+                .andExpect(jsonPath("$.data.records[0].tags[0].confirmed", is(false)));
 
-        // 覆盖地图：3 题同节点 → 证据充足
+        // 按知识点筛题（按组批量处理时用）
+        mockMvc.perform(get("/api/banks/{id}/skills/questions", BANK_ID)
+                        .param("templateId", TEMPLATE).param("status", "all").param("nodeId", "gk.pd.figure.num"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total", is(3)));
+        mockMvc.perform(get("/api/banks/{id}/skills/questions", BANK_ID)
+                        .param("templateId", TEMPLATE).param("status", "all").param("nodeId", "gk.zl.growth"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total", is(0)));
+
+        // 覆盖地图：3 题同节点 → 证据充足；清单条数与概览数字必须一致（用户实测过的口径打架）
         mockMvc.perform(get("/api/banks/{id}/skills/coverage", BANK_ID).param("templateId", TEMPLATE))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.totalQuestions", is(3)))
+                .andExpect(jsonPath("$.data.pendingQuestions", is(3)))
                 .andExpect(jsonPath("$.data.usableQuestions", is(3)))
                 .andExpect(jsonPath("$.data.nodes[?(@.nodeId=='gk.pd.figure.num')].evidenceEnough", hasSize(1)));
 
-        // 批量确认
+        // 就地改标签：把这些题的标签设定为给定节点（source=user），并清掉旧的 AI 建议
+        Long someQid = firstQuestionId();
+        mockMvc.perform(post("/api/banks/{id}/skills/apply", BANK_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"action\":\"set\",\"newNodes\":[\"gk.pd.analogy\"],\"questionIds\":[" + someQid + "],"
+                                + "\"templateId\":\"" + TEMPLATE + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.affected", is(1)));
+        mockMvc.perform(get("/api/banks/{id}/skills/questions", BANK_ID)
+                        .param("templateId", TEMPLATE).param("status", "confirmed"))
+                .andExpect(jsonPath("$.data.records[0].tags[0].nodeId", is("gk.pd.analogy")))
+                .andExpect(jsonPath("$.data.records[0].tags[0].source", is("user")));
+
+        // 同一题再设一次：不能累积出重复的用户标签（就地改标签会被反复使用）
+        mockMvc.perform(post("/api/banks/{id}/skills/apply", BANK_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"action\":\"set\",\"newNodes\":[\"gk.pd.analogy\"],\"questionIds\":[" + someQid + "],"
+                                + "\"templateId\":\"" + TEMPLATE + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.affected", is(1)));
+        mockMvc.perform(get("/api/questions/{id}/skills", someQid))
+                .andExpect(jsonPath("$.data", hasSize(1)));
+
+        // set 不给 questionIds → 不做任何事（危险动作必须显式给题）
+        mockMvc.perform(post("/api/banks/{id}/skills/apply", BANK_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"action\":\"set\",\"newNodes\":[\"gk.pd.analogy\"],\"templateId\":\"" + TEMPLATE + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.affected", is(0)));
+
+        // 批量确认（剩下的 2 题）
         mockMvc.perform(post("/api/banks/{id}/skills/apply", BANK_ID)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"action\":\"confirm\",\"nodeId\":\"gk.pd.figure.num\",\"templateId\":\"" + TEMPLATE + "\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.affected", is(3)));
+                .andExpect(jsonPath("$.data.affected", is(2)));
         mockMvc.perform(get("/api/banks/{id}/skills/coverage", BANK_ID).param("templateId", TEMPLATE))
                 .andExpect(jsonPath("$.data.confirmedQuestions", is(3)));
 
@@ -191,5 +240,36 @@ class SkillControllerHttpTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"templateId\":\"" + TEMPLATE + "\",\"nodeIds\":[\"gk.nope\"]}"))
                 .andExpect(status().isBadRequest());
+    }
+
+    /**
+     * 「分类」下线后的一次性整理：把只有分类、没有归属的题补上归属，不覆盖已有归属。
+     */
+    @Test
+    void mergeCategoryIntoTopicOnlyFillsEmptyTopic() throws Exception {
+        Long bankId = 990003L;
+        jdbc.update("DELETE FROM question WHERE bank_id = ?", bankId);
+        jdbc.update("INSERT INTO question (external_id, question_type, content, topic, category, volume, score, bank_id, deleted) "
+                        + "VALUES (?, 'SINGLE', '只有分类', NULL, '基础题', 0, 1, ?, 0)",
+                "MERGE_" + System.nanoTime() + "_a", bankId);
+        jdbc.update("INSERT INTO question (external_id, question_type, content, topic, category, volume, score, bank_id, deleted) "
+                        + "VALUES (?, 'SINGLE', '两者都有', '2024 国考', '基础题', 0, 1, ?, 0)",
+                "MERGE_" + System.nanoTime() + "_b", bankId);
+        jdbc.update("INSERT INTO question_bank (id, name, created_at, updated_at) VALUES (?, '整理测试', NOW(), NOW())",
+                bankId);
+        try {
+            mockMvc.perform(post("/api/banks/{id}/merge-category-into-topic", bankId))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.affected", is(1)));
+            String filled = jdbc.queryForObject(
+                    "SELECT topic FROM question WHERE bank_id = ? AND content = '只有分类'", String.class, bankId);
+            String untouched = jdbc.queryForObject(
+                    "SELECT topic FROM question WHERE bank_id = ? AND content = '两者都有'", String.class, bankId);
+            org.junit.jupiter.api.Assertions.assertEquals("基础题", filled, "只有分类的题应把分类并入归属");
+            org.junit.jupiter.api.Assertions.assertEquals("2024 国考", untouched, "已有归属的题不能被覆盖");
+        } finally {
+            jdbc.update("DELETE FROM question WHERE bank_id = ?", bankId);
+            jdbc.update("DELETE FROM question_bank WHERE id = ?", bankId);
+        }
     }
 }

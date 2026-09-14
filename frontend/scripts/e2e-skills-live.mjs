@@ -181,20 +181,39 @@ try {
   ].find((p) => existsSync(p))
   if (!CHROME) {
     console.error('找不到 Chrome / Edge')
-    aiServer.close()
     process.exit(2)
   }
   browser = await chromium.launch({ executablePath: CHROME, headless: true })
   const page = await browser.newPage({ viewport: { width: 1500, height: 950 } })
   const pageErrors = []
   page.on('pageerror', (e) => pageErrors.push(String(e.message || e)))
-  // 题目编辑器打开时会请求 /api/questions/{id}/skills —— 顺便记下"打开的是哪一题"，
-  // 后面要按 id 复查"编辑页选的标签有没有真的写库"
+  // 题目编辑器打开时会请求 /api/questions/{id}/skills —— 顺便记下"打开的是哪一题"，后面按 id 复查
   let openedQuestionId = null
   page.on('request', (r) => {
     const m = new URL(r.url()).pathname.match(/^\/api\/questions\/(\d+)\/skills$/)
     if (m) openedQuestionId = Number(m[1])
   })
+
+  const flat = (s) => String(s).replace(/\s+/g, ' ')
+  const textOf = async (loc) => flat(await loc.innerText())
+  const reviewApi = (status, extra = '') =>
+    api(`/banks/${bankId}/skills/questions?templateId=${TPL}&status=${status}&size=200${extra}`)
+  /** 多选下拉选完不会自动收起，按 Esc 关掉，否则会挡住下一次点击 */
+  const closeDropdown = async () => {
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(300)
+  }
+  /** 点行内标签下拉的右端空白处（中间是已选标签上的 ✕，会变成删除标签） */
+  const openTagSelect = async (row) => {
+    const box = await row.locator('.skill-tag-select .el-select__wrapper').boundingBox()
+    await page.mouse.click(box.x + box.width - 10, box.y + box.height / 2)
+  }
+  const pickNode = async (name) => {
+    const option = page.locator('.el-select-dropdown__item:visible', { hasText: name }).first()
+    await option.waitFor({ state: 'visible', timeout: 8000 })
+    await option.click()
+    await closeDropdown()
+  }
 
   await page.goto(`${UI}/banks/${bankId}`, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(2000)
@@ -206,9 +225,9 @@ try {
   await page.locator('.skill-toolbar-right button').first().click()
   await page.waitForSelector('.el-message--success', { timeout: 180000 })
   await page.waitForTimeout(1500)
-  await page.screenshot({ path: `${SHOTS}/1-待确认.png` })
+  await page.screenshot({ path: `${SHOTS}/1-审阅清单.png` })
 
-  const cover = flat(await page.locator('.skill-cover').innerText())
+  const cover = await textOf(page.locator('.skill-cover'))
   console.log(`  界面概览：${cover}`)
   check('覆盖概览显示三段口径', /已确认/.test(cover) && /待确认/.test(cover) && /未匹配/.test(cover), cover)
 
@@ -216,130 +235,106 @@ try {
   console.log(`  模型调用：${aiCalls.map((c) => `${c.groups ? '分组' : '逐题'}×${c.mappings}`).join(' / ') || '(无)'}`)
   console.log(`  后端口径：总 ${cov.totalQuestions} / 已确认 ${cov.confirmedQuestions} / 待确认 ${cov.pendingQuestions} / 未匹配 ${cov.untaggedQuestions} / 可用于判定 ${cov.usableQuestions}`)
   check('三段相加 = 总题数（真数据对账）', cov.confirmedQuestions + cov.pendingQuestions + cov.untaggedQuestions === cov.totalQuestions, JSON.stringify(cov).slice(0, 200))
+
   // 用户实测的「26 待标注 vs 16 待确认」本质是"概览数字"和"清单长度"两套口径打架，
   // 所以这里强制对账：概览里的每个数字，都必须等于按状态查出来的清单条数。
-  const [pendList, untagList, confList] = await Promise.all([
-    api(`/banks/${bankId}/skills/questions?templateId=${TPL}&status=pending&size=200`),
-    api(`/banks/${bankId}/skills/questions?templateId=${TPL}&status=untagged&size=200`),
-    api(`/banks/${bankId}/skills/questions?templateId=${TPL}&status=confirmed&size=200`)
+  const [allList, pendList, untagList, confList] = await Promise.all([
+    reviewApi('all'),
+    reviewApi('pending'),
+    reviewApi('untagged'),
+    reviewApi('confirmed')
   ])
   check(
     '概览数字 = 清单条数（待确认/未匹配/已确认逐项对账）',
-    cov.pendingQuestions === pendList.length && cov.untaggedQuestions === untagList.length && cov.confirmedQuestions === confList.length,
-    `概览 ${cov.pendingQuestions}/${cov.untaggedQuestions}/${cov.confirmedQuestions} vs 清单 ${pendList.length}/${untagList.length}/${confList.length}`
+    cov.pendingQuestions === pendList.total && cov.untaggedQuestions === untagList.total && cov.confirmedQuestions === confList.total,
+    `概览 ${cov.pendingQuestions}/${cov.untaggedQuestions}/${cov.confirmedQuestions} vs 清单 ${pendList.total}/${untagList.total}/${confList.total}`
   )
+  check('概览数字 = 清单条数（全部）', cov.totalQuestions === allList.total, `${cov.totalQuestions} vs ${allList.total}`)
   check('标签数符合预期（假模型 12 题命中、12 题编不出节点）', cov.pendingQuestions + cov.confirmedQuestions === 12 && cov.untaggedQuestions === 12, `tagged=${cov.pendingQuestions + cov.confirmedQuestions} untagged=${cov.untaggedQuestions}`)
   check('低置信建议也在队列里（不参与判定掌握）', cov.usableQuestions < cov.pendingQuestions + cov.confirmedQuestions, `usable=${cov.usableQuestions}`)
-  check('有题拿到了知识点（不是全未匹配）', cov.pendingQuestions + cov.confirmedQuestions > 0, `pending=${cov.pendingQuestions}`)
-  check('编造节点的题落到未匹配', cov.untaggedQuestions > 0, `untagged=${cov.untaggedQuestions}`)
   check('界面数字与后端一致（总题数、未匹配、可用于判定）', cover.includes(String(cov.totalQuestions)) && cover.includes(String(cov.untaggedQuestions)) && cover.includes(String(cov.usableQuestions)), cover)
 
-  const items = page.locator('.skill-item')
-  check('待确认队列有节点', (await items.count()) > 0, String(await items.count()))
-  const rowCount = await items.first().locator('.skill-q').count()
-  check('默认展开、逐题列出真实题目', rowCount > 0, String(rowCount))
-  const rowText = flat(await items.first().locator('.skill-q').first().innerText())
-  check('单题带题号与真实题干片段', /^\d+/.test(rowText) && rowText.length > 12, rowText.slice(0, 120))
-  console.log(`  首题行：${rowText.slice(0, 140)}`)
-  await page.screenshot({ path: `${SHOTS}/2-逐题清单.png` })
+  /* ---------- 清单：以题为单位，标签就地可改 ---------- */
+  const rows = page.locator('.skill-row')
+  check('清单以题为单位（24 题全列出）', (await rows.count()) === 24, String(await rows.count()))
+  const rowText = await textOf(rows.first())
+  check('行内有题号 + 状态 + 真实题干', /^\d+/.test(rowText) && rowText.length > 12, rowText.slice(0, 120))
+  console.log(`  首行：${rowText.slice(0, 140)}`)
 
-  await page.locator('.el-tabs__item', { hasText: '未匹配' }).click()
-  await page.waitForTimeout(1200)
-  const untaggedRows = page.locator('.el-tab-pane:visible .skill-q')
-  const uCount = await untaggedRows.count()
-  check('未匹配页签列出题目（真数据）', uCount > 0, String(uCount))
-  console.log(`  未匹配前 3 行：${(await untaggedRows.allInnerTexts()).slice(0, 3).map(flat).join(' | ').slice(0, 200)}`)
-  await page.screenshot({ path: `${SHOTS}/3-未匹配.png` })
-
-  /* 逐题确认 → 复查真写库 */
-  await page.locator('.el-tabs__item', { hasText: '待确认' }).click()
-  await page.waitForTimeout(700)
-  const targetRow = page.locator('.skill-item').first().locator('.skill-q').first()
-  const targetText = flat(await targetRow.innerText())
-  await targetRow.locator('button', { hasText: '确认此题' }).click()
-  await page.waitForTimeout(1800)
-  const afterConfirm = await api(`/banks/${bankId}/skills/coverage?templateId=${TPL}`)
-  check('逐题确认真的写库（已确认 +1）', afterConfirm.confirmedQuestions === cov.confirmedQuestions + 1, `before=${cov.confirmedQuestions} after=${afterConfirm.confirmedQuestions}`)
-  check('确认后三段仍然对得上账', afterConfirm.confirmedQuestions + afterConfirm.pendingQuestions + afterConfirm.untaggedQuestions === afterConfirm.totalQuestions, JSON.stringify(afterConfirm).slice(0, 200))
-  console.log(`  已确认的那题：${targetText.slice(0, 110)}`)
-
-  /* 设为主题 → 复查题目 topic */
-  const topicName = flat(await page.locator('.skill-item').first().locator('.skill-node').first().innerText())
-  await page.locator('.skill-item').first().locator('button', { hasText: '设为主题' }).click()
-  await page.waitForTimeout(1800)
-  const list = await api(`/banks/${bankId}/questions?page=1&size=200`)
-  const records = list.records || list
-  const withTopic = records.filter((q) => q.topic === topicName).length
-  check(`「设为主题」把「${topicName}」写进了题目主题`, withTopic > 0, `withTopic=${withTopic}/${records.length}`)
-
-  /* 打开题目 */
-  await page.locator('.el-tabs__item', { hasText: '未匹配' }).click()
-  await page.waitForTimeout(1200)
-  const firstUntagged = page.locator('.el-tab-pane:visible .skill-q').first()
-  const openText = flat(await firstUntagged.innerText())
-  await firstUntagged.locator('button', { hasText: '打开题目' }).click()
-  await page.waitForTimeout(1200)
-  const focusCount = await page.locator('.editor-dialog .skill-focus').count()
-  await page.waitForTimeout(1300)
-  check('「打开题目」跳到编辑器且弹窗已关闭', !(await page.locator('.el-dialog .skill-toolbar').isVisible().catch(() => false)))
-  const editorText = flat(await page.locator('.editor-dialog').innerText().catch(() => ''))
-  const stem = openText.replace(/^\d+\s*/, '').slice(0, 10)
-  check('编辑器里打开的正是那一题', editorText.includes(stem), `找「${stem}」于：${editorText.slice(0, 120)}`)
-  await page.screenshot({ path: `${SHOTS}/4-打开题目.png` })
-
-  /* 编辑页里手动指定知识点（用户反馈："甚至编辑页面都没有显示 tag"）→ 保存后复查写库 */
-  const skillField = page.locator('.editor-dialog .field').filter({ has: page.locator('label.field-label', { hasText: '知识点' }) })
-  check('编辑器里有「知识点」字段', (await skillField.count()) > 0, String(await skillField.count()))
-  check('知识点栏被滚到视野内并高亮（不用自己找）', focusCount > 0, String(focusCount))
-  check('空标签时给出可照做的提示', /还没有知识点标签/.test(editorText), editorText.slice(0, 160))
-  await skillField.locator('.el-select__wrapper').click()
-  await page.waitForTimeout(300)
-  await page.keyboard.type('增长')
-  await page.waitForTimeout(900)
-  if (process.env.E2E_DEBUG) {
-    const info = await page.evaluate(() => ({
-      wrappers: document.querySelectorAll('.editor-dialog .el-select__wrapper').length,
-      dropdowns: [...document.querySelectorAll('.el-select-dropdown')].map((d) => ({
-        visible: !!(d.offsetWidth || d.offsetHeight),
-        items: [...d.querySelectorAll('.el-select-dropdown__item')].map((i) => i.textContent).slice(0, 6)
-      }))
-    }))
-    console.log('  [debug]', JSON.stringify(info))
-    await page.screenshot({ path: `${SHOTS}/debug-select.png` })
-  }
-  const opt = page.locator('.el-select-dropdown__item:visible').first()
-  const optName = flat(await opt.innerText())
-  await opt.click()
-  await page.waitForTimeout(300)
-  await page.locator('.editor-dialog .foot-actions button', { hasText: '保存并关闭' }).click()
-  await page.waitForTimeout(2500)
-  const tags = openedQuestionId ? await api(`/questions/${openedQuestionId}/skills`) : []
-  check(
-    `编辑页选的「${optName}」真的写库了（source=user）`,
-    tags.some((t) => t.source === 'user' && t.confirmed),
-    `questionId=${openedQuestionId} → ${JSON.stringify(tags).slice(0, 200)}`
-  )
-  const afterEditor = await api(`/banks/${bankId}/skills/coverage?templateId=${TPL}`)
-  check('补完标签后概览里它不再算未匹配', afterEditor.untaggedQuestions === afterConfirm.untaggedQuestions - 1, `${afterConfirm.untaggedQuestions} → ${afterEditor.untaggedQuestions}`)
-
-  /* 再看"已经有 AI 建议的题"：编辑页要能显示现有标签（用户反馈的第二半："看不到 tag"） */
-  await page.locator('button', { hasText: '知识点' }).first().click()
-  await page.waitForSelector('.skill-toolbar', { timeout: 8000 })
+  // 状态筛选器（可点击的数字，不是页签）
+  await page.locator('.skill-chip', { hasText: '待确认' }).click()
   await page.waitForTimeout(800)
-  // 弹窗会停在上次看的页签上，先切回「待确认」再取行
-  await page.locator('.el-tabs__item', { hasText: '待确认' }).click()
+  check('点「待确认」后清单只剩待确认的题', (await rows.count()) === cov.pendingQuestions, String(await rows.count()))
+  await page.screenshot({ path: `${SHOTS}/2-待确认.png` })
+
+  /* ---------- 就地改标签 → 真写库（用户要的核心） ---------- */
+  const targetRow = rows.first()
+  const targetText = await textOf(targetRow)
+  await openTagSelect(targetRow)
+  await pickNode('计算问题')
+  await page.waitForTimeout(1500)
+  const afterEdit = await api(`/banks/${bankId}/skills/coverage?templateId=${TPL}`)
+  check('就地改标签真的写库了（待确认 → 已确认 +1）', afterEdit.confirmedQuestions === cov.confirmedQuestions + 1 && afterEdit.pendingQuestions === cov.pendingQuestions - 1, `${JSON.stringify(cov)} → ${JSON.stringify(afterEdit)}`)
+  console.log(`  就地改成「计算问题」的是：${targetText.slice(0, 100)}`)
+  await page.screenshot({ path: `${SHOTS}/3-就地改标签.png` })
+
+  /* ---------- 行内确认 AI 建议 ---------- */
+  await page.locator('.skill-chip', { hasText: '待确认' }).click()
   await page.waitForTimeout(700)
-  const taggedRow = page.locator('.el-tab-pane:visible .skill-item').first().locator('.skill-q').first()
-  const taggedStem = flat(await taggedRow.innerText())
-  await taggedRow.locator('button', { hasText: '打开题目' }).click()
-  await page.waitForTimeout(2500)
-  const taggedEditor = flat(await page.locator('.editor-dialog').innerText().catch(() => ''))
-  check('编辑页显示已有标签（当前：xxx（AI 建议/你标注的））', /当前：/.test(taggedEditor) && /(AI 建议|你标注的|作者标注)/.test(taggedEditor), taggedEditor.slice(0, 200))
-  const taggedField = page.locator('.editor-dialog .field').filter({ has: page.locator('label.field-label', { hasText: '知识点' }) })
-  const picked = flat(await taggedField.locator('.el-select__wrapper').first().innerText().catch(() => ''))
-  check('下拉里已回填该标签（不用重新选）', picked.length > 0 && !/请选择/.test(picked), picked)
-  console.log(`  带标签的题：${taggedStem.slice(0, 90)} → 下拉显示「${picked}」`)
-  await page.screenshot({ path: `${SHOTS}/5-编辑页标签.png` })
+  const confirmRow = rows.first()
+  await confirmRow.locator('button', { hasText: '确认' }).first().click()
+  await page.waitForTimeout(1500)
+  const afterConfirm = await api(`/banks/${bankId}/skills/coverage?templateId=${TPL}`)
+  check('行内「确认」把 AI 建议转为已确认', afterConfirm.confirmedQuestions === afterEdit.confirmedQuestions + 1, `${afterEdit.confirmedQuestions} → ${afterConfirm.confirmedQuestions}`)
+  check('确认后三段仍然对得上账', afterConfirm.confirmedQuestions + afterConfirm.pendingQuestions + afterConfirm.untaggedQuestions === afterConfirm.totalQuestions, JSON.stringify(afterConfirm).slice(0, 200))
+
+  /* ---------- 看题干：就地展开，不跳转 ---------- */
+  const docStem = await textOf(rows.first().locator('.skill-stem'))
+  await rows.first().locator('button', { hasText: '看题干' }).click()
+  await page.waitForTimeout(1200)
+  const detailText = await textOf(page.locator('.skill-detail').first())
+  check('「看题干」就地展开（能看到选项/解析）', detailText.includes('选项甲') || detailText.length > 20, detailText.slice(0, 120))
+  check('展开不跳转（弹窗仍在）', await page.locator('.el-dialog .skill-toolbar').isVisible())
+  console.log(`  展开的题：${docStem.slice(0, 80)}`)
+
+  /* ---------- 未匹配：就地补标签 ---------- */
+  await page.locator('.skill-chip', { hasText: '未匹配' }).click()
+  await page.waitForTimeout(800)
+  check('「未匹配」清单条数与概览一致', (await rows.count()) === afterConfirm.untaggedQuestions, String(await rows.count()))
+  await page.screenshot({ path: `${SHOTS}/4-未匹配.png` })
+  const untaggedText = await textOf(rows.first())
+  await openTagSelect(rows.first())
+  await pickNode('法律常识')
+  await page.waitForTimeout(1500)
+  const afterFill = await api(`/banks/${bankId}/skills/coverage?templateId=${TPL}`)
+  check('未匹配的题可以就地指定知识点（未匹配 -1）', afterFill.untaggedQuestions === afterConfirm.untaggedQuestions - 1, `${afterConfirm.untaggedQuestions} → ${afterFill.untaggedQuestions}`)
+  console.log(`  就地补标签的题：${untaggedText.slice(0, 100)}`)
+
+  /* ---------- 批量 ---------- */
+  await page.locator('.skill-chip', { hasText: '未匹配' }).click()
+  await page.waitForTimeout(700)
+  await rows.nth(0).locator('.el-checkbox').click()
+  await rows.nth(1).locator('.el-checkbox').click()
+  await page.waitForTimeout(300)
+  await page.locator('.skill-batch .el-select').click()
+  await pickNode('人文历史与地理')
+  await page.locator('.skill-batch button', { hasText: '设为知识点' }).click()
+  await page.waitForTimeout(1800)
+  const afterBatch = await api(`/banks/${bankId}/skills/coverage?templateId=${TPL}`)
+  check('批量设定：两题一起从未匹配变成已确认', afterBatch.untaggedQuestions === afterFill.untaggedQuestions - 2 && afterBatch.confirmedQuestions === afterFill.confirmedQuestions + 2, `${afterFill.untaggedQuestions}→${afterBatch.untaggedQuestions}`)
+  await page.screenshot({ path: `${SHOTS}/5-批量.png` })
+
+  /* ---------- 详情（可选跳转）：编辑器里能看到已有标签 ---------- */
+  await page.locator('.skill-chip', { hasText: '已确认' }).click()
+  await page.waitForTimeout(800)
+  const detailRowStem = await textOf(rows.first().locator('.skill-stem'))
+  await rows.first().locator('button', { hasText: '详情' }).click()
+  await page.waitForTimeout(3000)
+  check('「详情」跳编辑器且弹窗已关闭', !(await page.locator('.el-dialog .skill-toolbar').isVisible().catch(() => false)))
+  const editorText = await textOf(page.locator('.editor-dialog'))
+  check('编辑器里能看到这题的知识点标签', /当前：/.test(editorText) && /(你标注的|AI 建议|作者标注)/.test(editorText), editorText.slice(0, 200))
+  console.log(`  详情打开的题：${detailRowStem.slice(0, 80)}（id=${openedQuestionId}）`)
+  await page.screenshot({ path: `${SHOTS}/6-编辑页标签.png` })
 
   check('无 JS 报错', pageErrors.length === 0, pageErrors.join(' | ').slice(0, 300))
 

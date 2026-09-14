@@ -261,6 +261,34 @@ public class QuestionBankService {
         return new DeleteBankResult(deletedQuestions, affectedRecords);
     }
 
+    /**
+     * 一次性整理动作：把旧的「分类」值并入「试卷 / 章节」（题库的**归属**维度）。
+     *
+     * 背景：题目上原本有「主题」和「分类」两个自由文本字段，用户实测反馈"不知道该填哪个、
+     * 也说不清两者区别"，于是界面收敛为一个归属维度（沿用 topic 列），分类从界面下线。
+     * 这个动作把老数据里"只有分类、没有归属"的题补上归属——**只在归属为空时填**，
+     * 不覆盖任何已写内容；分类列本身不删除（旧内容包与已发布作品仍能原样导入导出）。
+     */
+    @Transactional
+    public int mergeCategoryIntoTopic(Long id) {
+        findByIdOrThrow(id);
+        List<Question> questions = questionMapper.selectList(new LambdaQueryWrapper<Question>()
+                .eq(Question::getBankId, id));
+        int n = 0;
+        for (Question q : questions) {
+            String topic = q.getTopic() == null ? "" : q.getTopic().trim();
+            String category = q.getCategory() == null ? "" : q.getCategory().trim();
+            if (!topic.isEmpty() || category.isEmpty()) {
+                continue;
+            }
+            q.setTopic(category);
+            q.setUpdatedAt(java.time.LocalDateTime.now());
+            questionMapper.updateById(q);
+            n++;
+        }
+        return n;
+    }
+
     public QuestionBank findByIdOrThrow(Long id){
         QuestionBank questionBank = questionBankMapper.selectById(id);
         if(questionBank == null){

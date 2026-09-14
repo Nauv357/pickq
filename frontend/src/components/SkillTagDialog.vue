@@ -2,7 +2,7 @@
   <el-dialog
     v-model="visible"
     :title="t('title')"
-    width="min(94vw, 900px)"
+    width="min(96vw, 1000px)"
     align-center
     :close-on-click-modal="false"
     @closed="onClosed"
@@ -11,7 +11,7 @@
     <div class="skill-toolbar">
       <div class="skill-toolbar-left">
         <span class="skill-label">{{ t('template') }}</span>
-        <el-select v-model="templateId" size="small" style="width: 250px" :disabled="running">
+        <el-select v-model="templateId" size="small" style="width: 230px" :disabled="running">
           <el-option v-for="tpl in templates" :key="tpl.templateId" :label="tpl.name" :value="tpl.templateId">
             <span>{{ tpl.name }}</span>
             <span class="skill-opt-meta">{{ tpl.nodeCount }} {{ t('nodes') }}</span>
@@ -21,125 +21,162 @@
       <div class="skill-toolbar-right">
         <span v-if="running" class="skill-running text-muted">{{ t('running', { done: progressDone, total: progressTotal }) }}</span>
         <button v-else class="btn btn-primary btn-sm" :disabled="!templateId || loading" @click="startTagging">
-          {{ hasTags || hasSuggestions ? t('retag') : t('start') }}
+          {{ counts.confirmed + counts.pending > 0 ? t('retag') : t('start') }}
         </button>
       </div>
     </div>
 
     <p class="skill-hint text-muted">{{ t('hint') }}</p>
 
-    <!-- 覆盖概览：三段不重叠（已确认 / 待确认 / 未匹配），相加 = 总题数 -->
+    <!-- 覆盖概览：三个口径互不重叠（相加 = 总题数），另单列"可用于判定掌握" -->
     <div v-if="coverage" class="skill-cover">
       <div class="skill-cover-row">
-        <span class="skill-stat ok"><b>{{ coverage.confirmedQuestions }}</b> {{ t('confirmed') }}</span>
-        <span class="skill-stat mid"><b>{{ coverage.pendingQuestions }}</b> {{ t('pending') }}</span>
-        <span class="skill-stat warn"><b>{{ coverage.untaggedQuestions }}</b> {{ t('untagged') }}</span>
-        <span class="skill-stat total">{{ t('totalN', { n: coverage.totalQuestions }) }}</span>
+        <span class="skill-stat ok"><b>{{ counts.confirmed }}</b> {{ t('confirmed') }}</span>
+        <span class="skill-stat mid"><b>{{ counts.pending }}</b> {{ t('pending') }}</span>
+        <span class="skill-stat warn"><b>{{ counts.untagged }}</b> {{ t('untagged') }}</span>
+        <span class="skill-stat total">{{ t('totalN', { n: counts.total }) }}</span>
       </div>
       <div class="skill-bar">
-        <div class="skill-bar-ok" :style="{ width: pct(coverage.confirmedQuestions) + '%' }"></div>
-        <div class="skill-bar-mid" :style="{ width: pct(coverage.pendingQuestions) + '%' }"></div>
+        <div class="skill-bar-ok" :style="{ width: pct(counts.confirmed) + '%' }"></div>
+        <div class="skill-bar-mid" :style="{ width: pct(counts.pending) + '%' }"></div>
       </div>
-      <p class="skill-cover-note text-muted">{{ t('coverNote', { usable: coverage.usableQuestions }) }}</p>
+      <p class="skill-cover-note text-muted">{{ t('coverNote', { usable: counts.usable }) }}</p>
     </div>
 
-    <el-tabs v-model="tab" class="skill-tabs">
-      <!-- 待确认（AI 建议）：按节点聚合 + 该节点下的**全部单题**，可逐题处理 -->
-      <el-tab-pane :label="t('tabPending', { n: coverage?.pendingQuestions ?? 0 })" name="pending">
-        <div v-if="loading" class="skill-empty text-muted">{{ t('loading') }}</div>
-        <div v-else-if="pending.length === 0" class="skill-empty text-muted">{{ t('noPending') }}</div>
-        <div v-else class="skill-list">
-          <div v-for="p in pending" :key="p.nodeId" class="skill-item">
-            <div class="skill-item-head">
-              <button class="skill-expand" @click="toggleExpand(p.nodeId)">
-                <TikuIcon :name="expanded[p.nodeId] ? 'chevron-down' : 'chevron-right'" :size="12" />
-              </button>
-              <span class="skill-node">{{ p.name }}</span>
-              <span class="text-muted skill-count">{{ t('questions', { n: p.questionCount }) }}</span>
-              <span class="text-muted skill-conf">{{ t('confidence', { c: p.avgConfidence }) }}</span>
-            </div>
-            <div class="skill-item-actions">
-              <button class="btn btn-primary btn-sm" @click="confirmNode(p)">{{ t('confirmAll') }}</button>
-              <el-select
-                v-model="retagTarget[p.nodeId]"
-                size="small"
-                clearable
-                filterable
-                :placeholder="t('retagTo')"
-                style="width: 190px"
-              >
-                <el-option-group v-for="g in nodeGroups" :key="g.name" :label="g.name">
-                  <el-option v-for="n in g.nodes" :key="n.nodeId" :label="n.name" :value="n.nodeId" />
-                </el-option-group>
-              </el-select>
-              <button class="btn btn-secondary btn-sm" :disabled="!retagTarget[p.nodeId]" @click="retagNode(p)">
-                {{ t('move') }}
-              </button>
-              <button class="btn btn-ghost btn-sm" @click="rejectNode(p)">{{ t('rejectAll') }}</button>
-              <button class="btn btn-ghost btn-sm" @click="backfill(p)">{{ t('backfillTopic') }}</button>
-            </div>
+    <!-- 状态筛选（不是页签：同一件事的不同状态，随时点、随时叠加知识点筛选） -->
+    <div class="skill-filters">
+      <button
+        v-for="f in statusFilters"
+        :key="f.value"
+        class="skill-chip"
+        :class="{ on: status === f.value }"
+        @click="setStatus(f.value)"
+      >
+        {{ f.label }}
+      </button>
+      <el-select
+        v-model="nodeFilter"
+        class="skill-node-filter"
+        size="small"
+        clearable
+        filterable
+        :placeholder="t('filterNode')"
+        style="width: 230px"
+        @change="reload(1)"
+      >
+        <el-option-group v-for="g in nodeGroupsWithCounts" :key="g.name" :label="g.name">
+          <el-option v-for="n in g.nodes" :key="n.nodeId" :label="n.label" :value="n.nodeId" />
+        </el-option-group>
+      </el-select>
+      <span class="text-muted skill-count-hint">{{ t('listCount', { n: total }) }}</span>
+    </div>
+    <!-- 缺口提示（原来在"覆盖地图"页签里；现在并入知识点筛选，一眼能看到哪些知识点还没有题） -->
+    <p v-if="emptyNodes.length" class="skill-gap text-muted">
+      {{ t('gapHint', { n: emptyNodes.length, names: emptyNodes.slice(0, 3).map((x) => x.name).join('、') }) }}
+    </p>
 
-            <!-- 单题清单：让用户看清到底是哪几题，并能单独处理 -->
-            <div v-if="expanded[p.nodeId]" class="skill-questions">
-              <div v-for="q in p.questions" :key="q.questionId" class="skill-q">
-                <span class="skill-q-no">{{ q.questionNumber ?? '—' }}</span>
-                <span class="skill-q-text" :title="q.preview">{{ q.preview }}</span>
-                <span class="text-muted skill-q-conf">{{ q.confidence.toFixed(2) }}</span>
-                <span class="skill-q-actions">
-                  <button class="btn btn-ghost btn-sm" @click="confirmOne(p, q)">{{ t('confirmOne') }}</button>
-                  <button class="btn btn-ghost btn-sm" @click="rejectOne(p, q)">{{ t('rejectOne') }}</button>
-                  <button class="btn btn-ghost btn-sm" @click="openQuestion(q.questionId)">{{ t('openQuestion') }}</button>
-                </span>
-              </div>
-              <p v-if="p.questionCount > p.questions.length" class="text-muted skill-more">
-                {{ t('moreQuestions', { n: p.questionCount - p.questions.length }) }}
-              </p>
-            </div>
+    <!-- 题目清单：标签就地可改，不必跳转编辑器 -->
+    <div v-loading="loading" class="skill-list">
+      <div v-if="!loading && records.length === 0" class="skill-empty text-muted">
+        {{ status === 'untagged' ? t('noUntagged') : t('noRecords') }}
+      </div>
+      <div v-for="row in records" :key="row.questionId" class="skill-row" :class="{ sel: selected.includes(row.questionId) }">
+        <el-checkbox
+          :model-value="selected.includes(row.questionId)"
+          class="skill-check"
+          @change="(v) => toggleSelect(row.questionId, v)"
+        />
+        <div class="skill-row-main">
+          <div class="skill-row-head">
+            <span class="skill-no">{{ row.questionNumber ?? '—' }}</span>
+            <span class="skill-type text-muted">{{ typeLabel(row.type) }}</span>
+            <span class="skill-status" :class="row.status">{{ statusLabel(row.status) }}</span>
+            <span v-if="row.tags.length === 0" class="skill-none text-muted">{{ t('noTagYet') }}</span>
           </div>
-        </div>
-      </el-tab-pane>
-
-      <!-- 未匹配：AI 没给出可用知识点的题（用户要能逐题打开去补） -->
-      <el-tab-pane :label="t('tabUntagged', { n: coverage?.untaggedQuestions ?? 0 })" name="untagged">
-        <p class="skill-hint text-muted">{{ t('untaggedHint') }}</p>
-        <div v-if="loadingUntagged" class="skill-empty text-muted">{{ t('loading') }}</div>
-        <div v-else-if="untagged.length === 0" class="skill-empty text-muted">{{ t('noUntagged') }}</div>
-        <div v-else class="skill-questions">
-          <div v-for="q in untagged" :key="q.questionId" class="skill-q">
-            <span class="skill-q-no">{{ q.questionNumber ?? '—' }}</span>
-            <span class="skill-q-text" :title="q.preview">{{ q.preview }}</span>
-            <span class="skill-q-actions">
-              <button class="btn btn-ghost btn-sm" @click="openQuestion(q.questionId)">{{ t('openQuestion') }}</button>
+          <div class="skill-row-body">
+            <span class="skill-stem" :title="row.preview" @click="toggleExpand(row)">{{ row.preview }}</span>
+            <!-- 标签就地改：多选下拉（按阶段分组），改完立刻生效 -->
+            <el-select
+              class="skill-tag-select"
+              :model-value="row.tags.map((x) => x.nodeId)"
+              multiple
+              filterable
+              collapse-tags
+              collapse-tags-tooltip
+              size="small"
+              :placeholder="t('pickTag')"
+              @change="(v) => setRowTags(row, v)"
+            >
+              <el-option-group v-for="g in nodeGroups" :key="g.name" :label="g.name">
+                <el-option v-for="n in g.nodes" :key="n.nodeId" :label="n.name" :value="n.nodeId" />
+              </el-option-group>
+            </el-select>
+          </div>
+          <div class="skill-row-foot">
+            <!-- 标签本身就在上面的下拉里，这里只说"这条标签是谁定的、把不把握"，避免同一个标签显示两遍 -->
+            <span class="skill-src text-muted">{{ sourceSummary(row) }}</span>
+            <span class="skill-row-actions">
+              <button v-if="hasPending(row)" class="btn btn-primary btn-sm" @click="confirmRow(row)">{{ t('confirmRow') }}</button>
+              <button v-if="hasPending(row)" class="btn btn-ghost btn-sm" @click="rejectRow(row)">{{ t('rejectRow') }}</button>
+              <button class="btn btn-ghost btn-sm" @click="toggleExpand(row)">
+                {{ expanded[row.questionId] ? t('collapse') : t('expand') }}
+              </button>
+              <button class="btn btn-ghost btn-sm" @click="openQuestion(row.questionId)">{{ t('detail') }}</button>
             </span>
           </div>
-          <p v-if="(coverage?.untaggedQuestions ?? 0) > untagged.length" class="text-muted skill-more">
-            {{ t('moreQuestions', { n: (coverage?.untaggedQuestions ?? 0) - untagged.length }) }}
-          </p>
-        </div>
-      </el-tab-pane>
 
-      <!-- 覆盖地图 -->
-      <el-tab-pane :label="t('tabMap')" name="map">
-        <div v-if="loading" class="skill-empty text-muted">{{ t('loading') }}</div>
-        <div v-else class="skill-map">
-          <div v-for="stage in stages" :key="stage.name" class="skill-stage">
-            <div class="skill-stage-name">{{ stage.name }}</div>
-            <div
-              v-for="n in stage.nodes"
-              :key="n.nodeId"
-              class="skill-map-row"
-              :class="{ empty: n.questionCount === 0, thin: n.questionCount > 0 && !n.evidenceEnough }"
-            >
-              <span class="skill-map-name">{{ n.name }}</span>
-              <span class="skill-map-count text-muted">{{ t('questions', { n: n.questionCount }) }}</span>
-              <span v-if="n.questionCount === 0" class="skill-map-tag warn">{{ t('noQuestions') }}</span>
-              <span v-else-if="!n.evidenceEnough" class="skill-map-tag warn">{{ t('thin') }}</span>
-              <span v-else class="skill-map-tag ok">{{ t('enough') }}</span>
-            </div>
+          <!-- 就地展开题干：审阅时最需要"这题到底是什么题" -->
+          <div v-if="expanded[row.questionId]" class="skill-detail">
+            <div v-if="detailLoading[row.questionId]" class="text-muted skill-detail-loading">{{ t('loading') }}</div>
+            <template v-else-if="details[row.questionId]">
+              <p class="skill-detail-stem">{{ details[row.questionId].content }}</p>
+              <p v-for="opt in details[row.questionId].options || []" :key="opt.key" class="skill-detail-opt">
+                <b>{{ opt.key }}.</b> {{ opt.text }}
+              </p>
+              <p v-if="answerText(row)" class="skill-detail-line">
+                <span class="text-muted">{{ t('answer') }}</span>{{ answerText(row) }}
+              </p>
+              <p v-if="details[row.questionId].analysis" class="skill-detail-line">
+                <span class="text-muted">{{ t('analysis') }}</span>{{ details[row.questionId].analysis }}
+              </p>
+            </template>
           </div>
         </div>
-      </el-tab-pane>
-    </el-tabs>
+      </div>
+    </div>
+
+    <div class="skill-pager">
+      <el-pagination
+        v-if="total > pageSize"
+        :current-page="page"
+        :page-size="pageSize"
+        :total="total"
+        layout="prev, pager, next"
+        small
+        @current-change="reload"
+      />
+    </div>
+
+    <!-- 批量条：勾选后统一处理 -->
+    <div v-if="selected.length" class="skill-batch">
+      <span class="skill-batch-label">{{ t('selectedN', { n: selected.length }) }}</span>
+      <el-select
+        v-model="batchNode"
+        size="small"
+        clearable
+        filterable
+        :placeholder="t('batchPick')"
+        style="width: 210px"
+      >
+        <el-option-group v-for="g in nodeGroups" :key="g.name" :label="g.name">
+          <el-option v-for="n in g.nodes" :key="n.nodeId" :label="n.name" :value="n.nodeId" />
+        </el-option-group>
+      </el-select>
+      <button class="btn btn-primary btn-sm" :disabled="!batchNode" @click="applyBatch('set')">{{ t('batchSet') }}</button>
+      <button class="btn btn-secondary btn-sm" @click="applyBatch('confirm')">{{ t('batchConfirm') }}</button>
+      <button class="btn btn-ghost btn-sm" @click="applyBatch('reject')">{{ t('batchReject') }}</button>
+      <button class="btn btn-ghost btn-sm" @click="selected = []">{{ t('clearSelection') }}</button>
+    </div>
 
     <template #footer>
       <span class="skill-foot text-muted">{{ t('footNote') }}</span>
@@ -152,22 +189,14 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useI18n } from 'vue-i18n'
-import TikuIcon from './TikuIcon.vue'
-import {
-  applySkills,
-  getPendingSkills,
-  getSkillCoverage,
-  getSkillQuestions,
-  getSkillTemplate,
-  getSkillTemplates,
-  suggestSkills
-} from '../api/skills'
+import { applySkills, getSkillCoverage, getSkillQuestions, getSkillTemplate, getSkillTemplates, suggestSkills } from '../api/skills'
+import { getQuestion } from '../api/questions'
 import { startBusy, stopBusy, updateBusy } from '../utils/busy'
 
 const props = defineProps({
   bankId: { type: [Number, String], required: true }
 })
-/** 打开某道题的编辑器（由题库详情页处理），用于"未匹配的题逐题去补" */
+/** 「详情」= 打开题目编辑器（由题库详情页处理）：可选动作，不是改标签的唯一路径 */
 const emit = defineEmits(['open-question'])
 
 const { t } = useI18n({
@@ -179,41 +208,54 @@ const { t } = useI18n({
       start: '分析并标注',
       retag: '重新分析',
       running: '正在分析…（已处理 {done} / 约 {total} 题）',
-      hint: 'AI 把题目对应到技能图的知识点，用于后面的学习路线、缺口分析与掌握度判定。结果先作为建议，你确认后才生效；置信度低的建议只作参考，不会用来判断"已掌握"。',
+      hint: 'AI 把题目对应到技能图的知识点，用于学习路线、缺口分析与掌握度判定。结果先作为建议，你确认后才生效；低把握的建议只作参考。标签可以在下面直接改，不必打开题目。',
       confirmed: '已确认',
       pending: '待确认',
       untagged: '未匹配',
       totalN: '共 {n} 题',
-      coverNote: '「待确认」= AI 给了建议但你还没确认；「未匹配」= AI 没给出可用知识点（可在题目里手动指定）。其中可用于判定掌握的已有 {usable} 题；没有标签的题照常练，不影响刷题与复习。',
-      tabPending: '待确认（{n}）',
-      tabUntagged: '未匹配（{n}）',
-      tabMap: '覆盖地图',
+      coverNote: '三段互不重叠（相加 = 总题数）；「未匹配」= AI 连建议都没给出，可在下面直接指定。其中可用于判定掌握的已有 {usable} 题；没有标签的题照常练，不影响刷题与复习。',
+      filterNode: '按知识点筛选',
+      nodeCount: '（{n} 题）',
+      nodeEmpty: '（你没有题）',
+      gapHint: '有 {n} 个知识点你还没有题（{names}…）——这是"还缺什么"的信号，点筛选里的名字只看某个知识点的题。',
+      listCount: '当前 {n} 题',
+      noRecords: '这里还没有题目',
+      noUntagged: '所有题都有标签了',
+      noTagYet: '还没有标签',
+      srcHuman: '你标注的（已生效）',
+      srcAiPending: 'AI 建议 AI {c}（待确认）',
+      srcAiConfirmed: 'AI 建议 {c}（已确认）',
+      pickTag: '选择知识点（可多选）',
+      confirmRow: '确认',
+      rejectRow: '丢弃建议',
+      expand: '看题干',
+      collapse: '收起',
+      detail: '详情',
       loading: '加载中…',
-      noPending: '没有待确认的建议（点右上角「分析并标注」试试）',
-      questions: '{n} 题',
-      confidence: '平均把握 {c}',
-      confirmAll: '本节点全部确认',
-      retagTo: '改挂到…',
-      move: '改挂',
-      rejectAll: '全部丢弃',
-      backfillTopic: '设为主题',
-      confirmOne: '确认此题',
-      rejectOne: '丢弃建议',
-      openQuestion: '打开题目',
-      moreQuestions: '还有 {n} 题未列出（可分批处理或直接在题目里改）',
-      untaggedHint: '这些题 AI 没给出可用的知识点：点「打开题目」逐题手动指定，或换一张技能图再分析一次。',
-      noUntagged: '所有题都有知识点归属了',
-      noQuestions: '你没有这个知识点的题',
-      thin: '题太少，暂不能判定掌握',
-      enough: '题量足够',
+      answer: '答案：',
+      analysis: '解析：',
+      selectedN: '已选 {n} 题：',
+      batchPick: '设为知识点…',
+      batchSet: '设为知识点',
+      batchConfirm: '确认建议',
+      batchReject: '丢弃建议',
+      clearSelection: '清空选择',
       footNote: '标签只保存在本机；导出题库时随包带走（作者确认过的标签）。',
       close: '关闭',
+      statusAll: '全部 {n}',
+      statusConfirmed: '已确认 {n}',
+      statusPending: '待确认 {n}',
+      statusUntagged: '未匹配 {n}',
+      typeSingle: '单选',
+      typeMultiple: '多选',
+      typeJudge: '判断',
+      typeSubjective: '主观',
       msgDone: '分析完成：已标注 {tagged} 题',
       msgTruncated: '本次已处理到上限，可再次点击继续',
-      msgConfirmed: '已确认 {n} 题',
-      msgRetagged: '已改挂 {n} 题',
+      msgConfirmed: '已确认 {n} 题的建议',
       msgRejected: '已丢弃建议',
-      msgBackfilled: '已把「{topic}」写为 {n} 题的主题',
+      msgTagSet: '已把 {n} 题的知识点设为「{name}」',
+      msgTagCleared: '已清空这些题的知识点',
       msgFailed: '操作失败，请稍后再试'
     },
     en: {
@@ -223,41 +265,54 @@ const { t } = useI18n({
       start: 'Analyze & tag',
       retag: 'Re-analyze',
       running: 'Analyzing… ({done} / ~{total} questions)',
-      hint: 'The AI maps questions onto knowledge nodes used later for the learning path, gap analysis and mastery checks. Results are suggestions until confirmed; low-confidence ones are only hints, never used to decide "mastered".',
+      hint: 'The AI maps questions onto knowledge nodes used for the learning path, gap analysis and mastery. Results are suggestions until confirmed; low-confidence ones are hints only. You can edit tags right here — no need to open the question.',
       confirmed: 'confirmed',
       pending: 'to confirm',
       untagged: 'unmatched',
       totalN: '{n} questions in total',
-      coverNote: '"To confirm" = the AI suggested nodes you have not confirmed yet; "unmatched" = no usable node was found (assign manually in the question). Usable for mastery: {usable}. Untagged questions still work normally in practice and review.',
-      tabPending: 'To confirm ({n})',
-      tabUntagged: 'Unmatched ({n})',
-      tabMap: 'Coverage map',
+      coverNote: 'The three segments do not overlap (they sum to the total). "Unmatched" = the AI produced no suggestion at all; assign one right here. Usable for mastery: {usable}. Untagged questions still work normally in practice and review.',
+      filterNode: 'Filter by node',
+      nodeCount: ' ({n} q)',
+      nodeEmpty: ' (no questions)',
+      gapHint: '{n} knowledge nodes have no questions yet ({names}…) — use the filter to see any single node.',
+      listCount: '{n} here',
+      noRecords: 'Nothing here yet',
+      noUntagged: 'Every question has a tag now',
+      noTagYet: 'no tag yet',
+      srcHuman: 'yours (active)',
+      srcAiPending: 'AI suggestion {c} (to confirm)',
+      srcAiConfirmed: 'AI suggestion {c} (confirmed)',
+      pickTag: 'Pick knowledge nodes',
+      confirmRow: 'Confirm',
+      rejectRow: 'Discard',
+      expand: 'Show stem',
+      collapse: 'Collapse',
+      detail: 'Open',
       loading: 'Loading…',
-      noPending: 'No suggestions yet (try "Analyze & tag")',
-      questions: '{n} questions',
-      confidence: 'avg confidence {c}',
-      confirmAll: 'Confirm all in node',
-      retagTo: 'Move to…',
-      move: 'Move',
-      rejectAll: 'Discard all',
-      backfillTopic: 'Set as topic',
-      confirmOne: 'Confirm',
-      rejectOne: 'Discard',
-      openQuestion: 'Open',
-      moreQuestions: '{n} more not listed (process in batches or edit the question)',
-      untaggedHint: 'No usable node for these questions: open each one and assign manually, or try another skill map.',
-      noUntagged: 'Every question has a knowledge node now',
-      noQuestions: 'You have no questions for this node',
-      thin: 'Too few questions to judge mastery',
-      enough: 'Enough evidence',
+      answer: 'Answer: ',
+      analysis: 'Analysis: ',
+      selectedN: '{n} selected:',
+      batchPick: 'Set nodes…',
+      batchSet: 'Set nodes',
+      batchConfirm: 'Confirm',
+      batchReject: 'Discard',
+      clearSelection: 'Clear',
       footNote: 'Tags are stored locally and travel with the bank file (author-confirmed tags).',
       close: 'Close',
+      statusAll: 'All {n}',
+      statusConfirmed: 'Confirmed {n}',
+      statusPending: 'To confirm {n}',
+      statusUntagged: 'Unmatched {n}',
+      typeSingle: 'Single',
+      typeMultiple: 'Multiple',
+      typeJudge: 'Judge',
+      typeSubjective: 'Essay',
       msgDone: 'Done: tagged {tagged}',
       msgTruncated: 'Reached this round’s limit — you can continue',
-      msgConfirmed: 'Confirmed {n} questions',
-      msgRetagged: 'Moved {n} questions',
+      msgConfirmed: 'Confirmed suggestions for {n} questions',
       msgRejected: 'Suggestions discarded',
-      msgBackfilled: 'Topic “{topic}” written to {n} questions',
+      msgTagSet: 'Set knowledge nodes of {n} questions to “{name}”',
+      msgTagCleared: 'Knowledge nodes cleared',
       msgFailed: 'Action failed, please retry later'
     }
   }
@@ -265,26 +320,42 @@ const { t } = useI18n({
 
 const visible = ref(false)
 const loading = ref(false)
-const loadingUntagged = ref(false)
 const running = ref(false)
-const tab = ref('pending')
 const templates = ref([])
 const templateId = ref('')
 const coverage = ref(null)
-const pending = ref([])
-const untagged = ref([])
+const listCounts = ref(null)
+const records = ref([])
+const total = ref(0)
+const page = ref(1)
+const pageSize = ref(50)
+const status = ref('all')
+const nodeFilter = ref('')
 const allNodes = ref([])
-const retagTarget = reactive({})
+const selected = ref([])
+const batchNode = ref('')
 const expanded = reactive({})
+const details = reactive({})
+const detailLoading = reactive({})
 const progressDone = ref(0)
 const progressTotal = ref(0)
 
-const hasTags = computed(() => (coverage.value?.confirmedQuestions ?? 0) > 0)
-const hasSuggestions = computed(() => (coverage.value?.pendingQuestions ?? 0) > 0)
+/**
+ * 计数直接用清单接口返回的 counts——它和 records 是后端**同一份快照**算出来的，
+ * 所以"概览数字"和"清单条数"不可能对不上（用户实测过 26 vs 16 的口径打架）。
+ */
+const counts = computed(() => listCounts.value || { total: 0, confirmed: 0, pending: 0, untagged: 0, usable: 0 })
+
+const statusFilters = computed(() => [
+  { value: 'all', label: t('statusAll', { n: counts.value.total }) },
+  { value: 'pending', label: t('statusPending', { n: counts.value.pending }) },
+  { value: 'untagged', label: t('statusUntagged', { n: counts.value.untagged }) },
+  { value: 'confirmed', label: t('statusConfirmed', { n: counts.value.confirmed }) }
+])
 
 const pct = (n) => {
-  const total = coverage.value?.totalQuestions || 0
-  return total ? Math.round((n / total) * 100) : 0
+  const t0 = counts.value.total || 0
+  return t0 ? Math.round((n / t0) * 100) : 0
 }
 
 /** 下拉里 30+ 个节点要按阶段分组才挑得动 */
@@ -299,17 +370,49 @@ const nodeGroups = computed(() => {
   return order.map((name) => ({ name, nodes: byStage.get(name) }))
 })
 
-const stages = computed(() => {
-  if (!coverage.value) return []
-  const order = []
-  const byStage = new Map()
-  for (const n of coverage.value.nodes) {
-    const key = n.stageName || '—'
-    if (!byStage.has(key)) { byStage.set(key, []); order.push(key) }
-    byStage.get(key).push(n)
-  }
-  return order.map((name) => ({ name, nodes: byStage.get(name) }))
+/**
+ * 知识点筛选里带题量：这样"哪些知识点我一道题都没有"不用另开一个覆盖地图页签，
+ * 在筛选下拉里就能看见（阶段 0 的防漏刷提示不能丢）。
+ */
+const nodeGroupsWithCounts = computed(() => {
+  const counts = new Map((coverage.value?.nodes || []).map((n) => [n.nodeId, n.questionCount]))
+  return nodeGroups.value.map((g) => ({
+    name: g.name,
+    nodes: g.nodes.map((n) => {
+      const c = counts.get(n.nodeId)
+      const suffix = c === undefined ? '' : c === 0 ? t('nodeEmpty') : t('nodeCount', { n: c })
+      return { nodeId: n.nodeId, name: n.name, label: `${n.name}${suffix}` }
+    })
+  }))
 })
+
+/** 一道题都没有的知识点（缺口） */
+const emptyNodes = computed(() => (coverage.value?.nodes || []).filter((n) => n.questionCount === 0))
+
+const TYPE_LABEL = { SINGLE: 'typeSingle', MULTIPLE: 'typeMultiple', JUDGE: 'typeJudge', SUBJECTIVE: 'typeSubjective' }
+const typeLabel = (type) => (TYPE_LABEL[type] ? t(TYPE_LABEL[type]) : type || '')
+const statusLabel = (s) => t(s === 'confirmed' ? 'confirmed' : s === 'pending' ? 'pending' : 'untagged')
+const hasPending = (row) => row.tags.some((x) => x.source === 'ai' && !x.confirmed)
+
+/** 一行文字说清这题的标签来自哪、把不把握（标签内容本身显示在上面的下拉里） */
+function sourceSummary(row) {
+  if (!row.tags.length) return t('noTagYet')
+  const parts = []
+  const human = row.tags.filter((x) => x.source === 'user' || x.source === 'author')
+  const ai = row.tags.filter((x) => x.source === 'ai')
+  if (human.length) parts.push(t('srcHuman'))
+  const pendingAi = ai.filter((x) => !x.confirmed)
+  const confirmedAi = ai.filter((x) => x.confirmed)
+  if (pendingAi.length) {
+    const best = Math.max(...pendingAi.map((x) => x.confidence ?? 0))
+    parts.push(t('srcAiPending', { c: best.toFixed(2) }))
+  }
+  if (confirmedAi.length) {
+    const best = Math.max(...confirmedAi.map((x) => x.confidence ?? 0))
+    parts.push(t('srcAiConfirmed', { c: best.toFixed(2) }))
+  }
+  return parts.join(' · ')
+}
 
 async function open() {
   visible.value = true
@@ -320,33 +423,36 @@ async function open() {
 defineExpose({ open })
 
 async function loadTemplates() {
-  loading.value = true
   try {
     templates.value = (await getSkillTemplates()) || []
     if (!templateId.value && templates.value.length) templateId.value = templates.value[0].templateId
   } catch (e) {
     /* 拦截器已提示 */
-  } finally {
-    loading.value = false
   }
 }
 
+/** 概览 + 清单 + 技能图一起刷新（概览与清单来自后端同一份快照，数字不会打架） */
 async function refresh() {
   if (!templateId.value) return
   loading.value = true
   try {
-    const [cov, pen, tpl] = await Promise.all([
+    const [cov, pageData, tpl] = await Promise.all([
       getSkillCoverage(props.bankId, templateId.value),
-      getPendingSkills(props.bankId, templateId.value),
+      getSkillQuestions(props.bankId, {
+        templateId: templateId.value,
+        status: status.value,
+        nodeId: nodeFilter.value || undefined,
+        page: page.value,
+        size: pageSize.value
+      }),
       getSkillTemplate(templateId.value)
     ])
     coverage.value = cov
-    pending.value = pen || []
+    listCounts.value = pageData?.counts || null
+    records.value = pageData?.records || []
+    total.value = pageData?.total || 0
     allNodes.value = tpl?.nodes || []
-    for (const p of pending.value) {
-      if (expanded[p.nodeId] === undefined) expanded[p.nodeId] = true // 默认展开：用户要能直接看到是哪几题
-    }
-    if (tab.value === 'untagged') await loadUntagged()
+    pruneSelection()
   } catch (e) {
     /* 拦截器已提示 */
   } finally {
@@ -354,27 +460,148 @@ async function refresh() {
   }
 }
 
-async function loadUntagged() {
-  if (!templateId.value) return
-  loadingUntagged.value = true
-  try {
-    untagged.value = (await getSkillQuestions(props.bankId, { templateId: templateId.value, status: 'untagged', size: 100 })) || []
-  } catch (e) {
-    untagged.value = []
-  } finally {
-    loadingUntagged.value = false
+/** 只保留还在当前清单里的勾选（换筛选/翻页后不会误伤看不见的题） */
+function pruneSelection() {
+  const visibleIds = new Set(records.value.map((r) => r.questionId))
+  selected.value = selected.value.filter((id) => visibleIds.has(id))
+}
+
+function reload(nextPage = page.value) {
+  page.value = nextPage
+  refresh()
+}
+
+function setStatus(value) {
+  status.value = value
+  reload(1)
+}
+
+watch(templateId, () => {
+  if (visible.value) { page.value = 1; refresh() }
+})
+
+function toggleSelect(questionId, checked) {
+  if (checked) {
+    if (!selected.value.includes(questionId)) selected.value = [...selected.value, questionId]
+  } else {
+    selected.value = selected.value.filter((id) => id !== questionId)
   }
 }
 
-watch(tab, (v) => {
-  if (v === 'untagged' && visible.value) loadUntagged()
-})
-watch(templateId, () => {
-  if (visible.value) refresh()
-})
+async function toggleExpand(row) {
+  const id = row.questionId
+  if (expanded[id]) { expanded[id] = false; return }
+  expanded[id] = true
+  if (details[id]) return
+  detailLoading[id] = true
+  try {
+    details[id] = await getQuestion(id)
+  } catch (e) {
+    /* 拦截器已提示 */
+  } finally {
+    detailLoading[id] = false
+  }
+}
 
-function toggleExpand(nodeId) {
-  expanded[nodeId] = !expanded[nodeId]
+function answerText(row) {
+  const d = details[row.questionId]
+  if (!d) return ''
+  if (d.answerKeys && d.answerKeys.length) return d.answerKeys.join(' ')
+  return d.answerText || d.referenceAnswer || ''
+}
+
+/**
+ * 就地改标签：把这一题的标签设定为选中的节点（写成"你标注的"，覆盖 AI 建议）。
+ * 清空下拉 = 这题没有知识点（会回到"未匹配"）。
+ */
+async function setRowTags(row, nodeIds) {
+  try {
+    const res = await applySkills(props.bankId, {
+      action: 'set',
+      templateId: templateId.value,
+      questionIds: [row.questionId],
+      newNodes: nodeIds || []
+    })
+    await refresh()
+    if (nodeIds && nodeIds.length) {
+      const name = allNodes.value.find((n) => n.nodeId === nodeIds[nodeIds.length - 1])?.name || ''
+      ElMessage.success(t('msgTagSet', { n: 1, name }))
+    } else {
+      ElMessage.success(t('msgTagCleared'))
+    }
+    return res
+  } catch (e) {
+    await refresh()
+    return null
+  }
+}
+
+async function confirmRow(row) {
+  const pendingIds = row.tags.filter((x) => x.source === 'ai' && !x.confirmed).map((x) => x.nodeId)
+  let n = 0
+  for (const nodeId of pendingIds) {
+    const res = await applySkills(props.bankId, {
+      action: 'confirm',
+      templateId: templateId.value,
+      nodeId,
+      questionIds: [row.questionId]
+    })
+    n += res?.affected || 0
+  }
+  await refresh()
+  ElMessage.success(t('msgConfirmed', { n: Math.max(n, 1) }))
+}
+
+async function rejectRow(row) {
+  const pendingIds = row.tags.filter((x) => x.source === 'ai' && !x.confirmed).map((x) => x.nodeId)
+  for (const nodeId of pendingIds) {
+    await applySkills(props.bankId, {
+      action: 'reject',
+      templateId: templateId.value,
+      nodeId,
+      questionIds: [row.questionId]
+    })
+  }
+  await refresh()
+  ElMessage.success(t('msgRejected'))
+}
+
+/** 批量：设为知识点 / 确认建议 / 丢弃建议 */
+async function applyBatch(action) {
+  if (!selected.value.length) return
+  try {
+    if (action === 'set') {
+      if (!batchNode.value) return
+      const res = await applySkills(props.bankId, {
+        action: 'set',
+        templateId: templateId.value,
+        questionIds: selected.value,
+        newNodes: [batchNode.value]
+      })
+      const name = allNodes.value.find((n) => n.nodeId === batchNode.value)?.name || ''
+      ElMessage.success(t('msgTagSet', { n: res?.affected ?? selected.value.length, name }))
+    } else if (action === 'confirm') {
+      const res = await applySkills(props.bankId, {
+        action: 'confirm',
+        templateId: templateId.value,
+        questionIds: selected.value
+      })
+      ElMessage.success(t('msgConfirmed', { n: res?.affected ?? 0 }))
+    } else {
+      await applySkills(props.bankId, {
+        action: 'reject',
+        templateId: templateId.value,
+        questionIds: selected.value
+      })
+      ElMessage.success(t('msgRejected'))
+    }
+    selected.value = []
+    batchNode.value = ''
+    await refresh()
+  } catch (e) {
+    ElMessage.error(t('msgFailed'))
+    await refresh()
+  }
 }
 
 /**
@@ -386,7 +613,7 @@ const BATCH_CALLS = 5
 async function startTagging() {
   if (running.value || !templateId.value) return
   running.value = true
-  progressTotal.value = coverage.value?.untaggedQuestions ?? 0
+  progressTotal.value = Math.max(0, counts.value.total - counts.value.usable)
   progressDone.value = 0
   startBusy(t('running', { done: 0, total: progressTotal.value }))
   try {
@@ -417,27 +644,6 @@ async function startTagging() {
   }
 }
 
-async function apply(action, extra, okMsg) {
-  try {
-    const res = await applySkills(props.bankId, { action, templateId: templateId.value, ...extra })
-    await refresh()
-    if (okMsg) ElMessage.success(okMsg(res?.affected ?? 0))
-    return res
-  } catch (e) {
-    ElMessage.error(t('msgFailed'))
-    return null
-  }
-}
-
-const confirmNode = (p) => apply('confirm', { nodeId: p.nodeId }, (n) => t('msgConfirmed', { n }))
-const rejectNode = (p) => apply('reject', { nodeId: p.nodeId }, () => t('msgRejected'))
-const confirmOne = (p, q) => apply('confirm', { nodeId: p.nodeId, questionIds: [q.questionId] }, (n) => t('msgConfirmed', { n }))
-const rejectOne = (p, q) => apply('reject', { nodeId: p.nodeId, questionIds: [q.questionId] }, () => t('msgRejected'))
-const retagNode = (p) =>
-  apply('retag', { nodeId: p.nodeId, newNodes: [retagTarget[p.nodeId]] }, (n) => t('msgRetagged', { n }))
-/** 把该节点的名称写回题目主题：题库没填主题时顺手变规整（默认不覆盖已有主题） */
-const backfill = (p) => apply('backfill-topic', { nodeId: p.nodeId, topic: p.name }, (n) => t('msgBackfilled', { topic: p.name, n }))
-
 function openQuestion(questionId) {
   emit('open-question', questionId)
   visible.value = false
@@ -445,9 +651,11 @@ function openQuestion(questionId) {
 
 function onClosed() {
   coverage.value = null
-  pending.value = []
-  untagged.value = []
+  listCounts.value = null
+  records.value = []
+  selected.value = []
   Object.keys(expanded).forEach((k) => delete expanded[k])
+  Object.keys(details).forEach((k) => delete details[k])
 }
 </script>
 
@@ -533,124 +741,168 @@ function onClosed() {
   margin: 0;
   line-height: 1.7;
 }
-.skill-tabs {
-  margin-top: 8px;
+.skill-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 8px;
+  flex-wrap: wrap;
 }
-.skill-list,
-.skill-map,
-.skill-questions {
-  max-height: 44vh;
+.skill-chip {
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  border-radius: 14px;
+  padding: 3px 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.skill-chip:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+.skill-chip.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.skill-count-hint {
+  margin-left: auto;
+  font-size: 12px;
+}
+.skill-gap {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.skill-list {
+  min-height: 220px;
+  max-height: 46vh;
   overflow: auto;
-}
-.skill-item {
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 10px 12px;
-  margin-bottom: 10px;
-}
-.skill-item-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.skill-expand {
-  border: none;
-  background: none;
-  padding: 0;
-  cursor: pointer;
-  color: var(--text-secondary);
-  display: inline-flex;
-}
-.skill-node {
-  font-weight: 600;
-}
-.skill-count,
-.skill-conf {
-  font-size: 12px;
-}
-.skill-item-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 6px;
-}
-.skill-q {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 5px 8px;
-  border-radius: 8px;
-  font-size: 13px;
-}
-.skill-q:nth-child(odd) {
-  background: var(--bg-elev);
-}
-.skill-q-no {
-  min-width: 30px;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-.skill-q-text {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.skill-q-conf {
-  font-size: 12px;
-}
-.skill-q-actions {
-  display: flex;
-  gap: 2px;
-  flex-shrink: 0;
-}
-.skill-more {
-  font-size: 12px;
-  margin: 6px 0 0;
 }
 .skill-empty {
-  padding: 24px 0;
+  padding: 40px 0;
   text-align: center;
   font-size: 13px;
 }
-.skill-stage {
-  margin-bottom: 12px;
+.skill-row {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
 }
-.skill-stage-name {
+.skill-row:last-child {
+  border-bottom: none;
+}
+.skill-row.sel {
+  background: var(--accent-soft);
+}
+.skill-check {
+  margin-top: 3px;
+}
+.skill-row-main {
+  flex: 1;
+  min-width: 0;
+}
+.skill-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 12px;
   color: var(--text-muted);
-  margin-bottom: 6px;
 }
-.skill-map-row {
+.skill-no {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.skill-status.ok {
+  color: var(--success);
+}
+.skill-status.pending {
+  color: var(--warning);
+}
+.skill-status.untagged {
+  color: var(--danger);
+}
+.skill-row-body {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 6px 10px;
-  border-radius: 8px;
-  font-size: 13px;
+  margin: 4px 0;
 }
-.skill-map-row:nth-child(even) {
-  background: var(--bg-elev);
-}
-.skill-map-name {
+.skill-stem {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: pointer;
+  font-size: 13px;
 }
-.skill-map-count {
+.skill-stem:hover {
+  color: var(--accent-text);
+}
+.skill-tag-select {
+  width: 300px;
+  flex-shrink: 0;
+}
+.skill-row-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.skill-src {
   font-size: 12px;
 }
-.skill-map-tag {
+.skill-row-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+.skill-detail {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg-elev);
+  font-size: 13px;
+  line-height: 1.75;
+}
+.skill-detail-stem {
+  margin: 0 0 4px;
+  white-space: pre-wrap;
+}
+.skill-detail-opt {
+  margin: 0;
+}
+.skill-detail-line {
+  margin: 4px 0 0;
+}
+.skill-detail-loading {
   font-size: 12px;
 }
-.skill-map-tag.ok {
-  color: var(--success);
+.skill-pager {
+  display: flex;
+  justify-content: center;
+  margin-top: 8px;
 }
-.skill-map-tag.warn {
-  color: var(--warning);
+.skill-batch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elev);
+  flex-wrap: wrap;
+}
+.skill-batch-label {
+  font-size: 13px;
+  color: var(--text-secondary);
 }
 .skill-foot {
   float: left;

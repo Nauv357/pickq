@@ -104,38 +104,32 @@ public class SkillController {
         return ApiResponse.success(taggingService.suggest(bankId, templateId, includeUntagged, maxAiCalls));
     }
 
-    /** 待确认队列（按节点聚合 + 样例题干 + **该节点下的全部待确认单题**） */
-    @GetMapping("/banks/{bankId}/skills/pending")
-    public ApiResponse<List<QuestionTaggingService.PendingNode>> pending(@PathVariable Long bankId,
-                                                                        @RequestParam String templateId) {
-        return ApiResponse.success(taggingService.pending(bankId, templateId));
+    /**
+     * 审阅清单：以**题**为单位，带每题当前标签与状态，界面就地查看/修改。
+     * status = all（默认）/ confirmed / pending / untagged；nodeId 可选（只看某知识点的题）。
+     *
+     * 计数与清单由**同一份快照**算出来（`ReviewPage.counts`），所以界面上的数字与清单条数不可能对不上。
+     */
+    @GetMapping("/banks/{bankId}/skills/questions")
+    public ApiResponse<QuestionTaggingService.ReviewPage> questions(
+            @PathVariable Long bankId,
+            @RequestParam String templateId,
+            @RequestParam(defaultValue = "all") String status,
+            @RequestParam(required = false) String nodeId,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        return ApiResponse.success(taggingService.review(bankId, templateId, status, nodeId, page, size));
     }
 
     /**
-     * 按标签状态列题：status = confirmed / pending / untagged。
-     * 界面用它把"未匹配的 N 题"摊开，逐题打开去补——只给三条样例题干是不够的（用户实测反馈）。
+     * 批量 / 逐题动作：confirm（确认建议）、set（把标签设定为给定节点）、retag（按节点改挂）、
+     * reject（丢弃建议）。界面上的"就地改标签""批量设为知识点""确认""丢弃"都走这里。
      */
-    @GetMapping("/banks/{bankId}/skills/questions")
-    public ApiResponse<List<QuestionTaggingService.PendingQuestion>> questions(
-            @PathVariable Long bankId,
-            @RequestParam String templateId,
-            @RequestParam(defaultValue = "untagged") String status,
-            @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "50") int size) {
-        return ApiResponse.success(taggingService.questionsByStatus(bankId, templateId, status, page, size));
-    }
-
-    /** 批量 / 逐题：确认、改挂、丢弃；或把主题写回题目（backfill-topic） */
     @PostMapping("/banks/{bankId}/skills/apply")
     public ApiResponse<Map<String, Object>> apply(@PathVariable Long bankId, @RequestBody SkillApplyRequest request) {
         String templateId = request.templateId();
         if (templateId == null || templateId.isBlank()) {
             throw new IllegalArgumentException("缺少 templateId");
-        }
-        if ("backfill-topic".equals(request.action())) {
-            int n = taggingService.backfillTopic(bankId, templateId, request.nodeId(), request.questionIds(),
-                    request.topic(), Boolean.TRUE.equals(request.overwrite()));
-            return ApiResponse.success(Map.of("affected", n));
         }
         int affected = taggingService.apply(bankId, templateId, request.action(), request.nodeId(),
                 request.newNodes(), request.questionIds());

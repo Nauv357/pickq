@@ -59,3 +59,9 @@ export const setReviewEnabled = (id, enabled) => http.put(`/banks/${id}/review-e
 
 // 合并多个题库为新题库（复制 + 血缘；源库保留）→ data = { bankId, name, questionsCopied, materialsCopied }
 export const mergeBanks = (data) => http.post('/banks/merge', data)
+
+/**
+ * 一次性整理：把旧的「分类」值并入「试卷 / 章节」（归属维度），只在归属为空时填。
+ * 「分类」已从界面下线，老题库（旧文件导入、分类有值）用这个动作把内容搬过去。
+ */
+export const mergeCategoryIntoTopic = (id) => http.post(`/banks/${id}/merge-category-into-topic`)

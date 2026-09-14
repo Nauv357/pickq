@@ -14,8 +14,8 @@
             <el-option :label="t('favorite')" value="favorite" />
             <el-option :label="t('undone')" value="undone" />
           </el-select>
-          <el-select v-model="category" size="small" clearable filterable :placeholder="t('category')" style="width: 116px" @change="reload">
-            <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
+          <el-select v-model="topic" size="small" clearable filterable :placeholder="t('topic')" style="width: 150px" @change="reload">
+            <el-option v-for="c in topics" :key="c" :label="c" :value="c" />
           </el-select>
         </div>
         <div class="answer-switch">
@@ -103,16 +103,16 @@ import { useI18n } from 'vue-i18n'
 const { t } = useI18n({
   messages: {
     'zh-CN': {
-      backToBank: '返回题库', all: '全部', wrong: '错题', favorite: '收藏', undone: '未做', category: '分类',
+      backToBank: '返回题库', all: '全部', wrong: '错题', favorite: '收藏', undone: '未做', topic: '试卷/章节',
       answerArea: '答案区', questionsOnly: '纯题目', withAnswers: '带答案 + 解析', printBtn: '打印 / 另存为 PDF',
-      printTip: '打印对话框可选「另存为 PDF」生成 PDF 文件；纯题目版适合学生作答，带答案版适合教师核对；范围与分类筛选即时生效。',
+      printTip: '打印对话框可选「另存为 PDF」生成 PDF 文件；纯题目版适合学生作答，带答案版适合教师核对；范围与试卷/章节筛选即时生效。',
       generating: '正在生成试卷（导出数据较大时需数秒）…', material: '材料', referenceAnswer: '参考答案', answer: '答案', none: '（无）',
       origAnswer: '原文答案', aiAnswer: 'AI 补充', unitPoint: '分', rangeFallback: '范围筛选暂不可用（后端未支持该参数），已显示全部题目',
     },
     'en-US': {
-      backToBank: 'Back to bank', all: 'All', wrong: 'Mistakes', favorite: 'Favorites', undone: 'Undone', category: 'Category',
+      backToBank: 'Back to bank', all: 'All', wrong: 'Mistakes', favorite: 'Favorites', undone: 'Undone', topic: 'Paper / chapter',
       answerArea: 'Answers', questionsOnly: 'Questions only', withAnswers: 'With answers + analysis', printBtn: 'Print / Save as PDF',
-      printTip: 'The print dialog offers "Save as PDF". Questions-only suits students taking the paper; with-answers suits teachers checking. Scope and category filters apply instantly.',
+      printTip: 'The print dialog offers "Save as PDF". Questions-only suits students taking the paper; with-answers suits teachers checking. Scope and paper/chapter filters apply instantly.',
       generating: 'Generating the paper (may take a few seconds for large exports)…', material: 'Material', referenceAnswer: 'Reference answer', answer: 'Answer', none: '(none)',
       origAnswer: 'Original answer', aiAnswer: 'AI-filled', unitPoint: 'pts', rangeFallback: 'Range filter is unavailable (the server doesn’t support this parameter) — showing all questions',
     }
@@ -138,17 +138,18 @@ const materials = ref([])
 const questions = ref([])
 const showAnswer = ref(false) // false = 纯题目版（默认）；true = 带答案 + 解析版
 
-/* 打印范围（第十轮：export body 支持 scope/category/topic，材料随引用过滤） */
+/* 打印范围（export body 支持 scope/topic，材料随引用过滤）；「分类」已下线，统一按归属（试卷/章节）筛 */
 const scope = ref('all')
-const category = ref('')
-const categories = ref([])
+const topic = ref('')
+const topics = ref([])
 
 async function loadCategories() {
   try {
     const data = await getBankCategories(id)
-    categories.value = data.categories || []
+    // 老题库可能有"只有分类、没有归属"的题 → 分类值也并进选项，用户才筛得到
+    topics.value = [...new Set([...(data.topics || []), ...(data.categories || [])].filter(Boolean))]
   } catch (e) {
-    categories.value = []
+    topics.value = []
   }
 }
 
@@ -206,12 +207,12 @@ async function load() {
   errorMsg.value = ''
   // POST /api/banks/{id}/export，body 传空对象（纯只读导出，不写版本/不分支）→ 全量题目 + 材料
   // 注意：不能传 null/无 body——后端 @RequestBody(required=false) 对 null 处理有缺陷会 500，空对象 {} 正常
-  // 第十轮：body 支持 scope/category/topic 打印范围（材料随引用自动过滤）
+  // body 支持 scope/topic 打印范围（材料随引用自动过滤）
   const body = {
     scope: scope.value === 'all' ? undefined : scope.value,
-    category: category.value || undefined
+    topic: topic.value || undefined
   }
-  const hasRange = !!(body.scope || body.category)
+  const hasRange = !!(body.scope || body.topic)
   try {
     const data = await exportBank(id, body)
     fillData(data)
