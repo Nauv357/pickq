@@ -64,6 +64,11 @@ class QuestionTaggingServiceTest {
 
     private HttpServer server;
     private final List<String> prompts = Collections.synchronizedList(new ArrayList<>());
+    /**
+     * 逐题判定返回的置信度：默认 0.75（**低于**门控阈值 0.8，用于验证「低置信标签不算覆盖」）；
+     * 续跑测试会调高到 0.9，才能用「未覆盖题数」衡量进度。
+     */
+    private double perQuestionConfidence = 0.75;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -125,7 +130,8 @@ class QuestionTaggingServiceTest {
         // 请求体是 JSON，提示里的换行是转义后的 \n —— 直接正则抓全部 id=（不能按行 split）
         var m = java.util.regex.Pattern.compile("id=(\\d+)").matcher(body);
         while (m.find()) {
-            parts.add("{\"id\":" + m.group(1) + ",\"nodes\":[{\"nodeId\":\"gk.pd.logic\",\"confidence\":0.75}]}");
+            parts.add("{\"id\":" + m.group(1) + ",\"nodes\":[{\"nodeId\":\"gk.pd.logic\",\"confidence\":"
+                    + perQuestionConfidence + "}]}");
         }
         return sb.append(String.join(",", parts)).append("]}").toString();
     }
@@ -228,6 +234,35 @@ class QuestionTaggingServiceTest {
         var r = tagging.suggest(424242L, TEMPLATE, true, 5);
         assertEquals(0, r.taggedQuestions());
         assertEquals(0, r.aiCalls(), "空题库不应调用模型");
+    }
+
+    /**
+     * 分批续跑：界面按"N 次调用一批"推进（172 题 ≈ 9 次调用，3000 题 ≈ 150 次，
+     * 一次请求跑不完），因此第二次点击必须**跳过已处理的题**，否则每次从头重算、白烧 token。
+     */
+    @Test
+    void suggestResumesWithoutReprocessingTaggedQuestions() {
+        perQuestionConfidence = 0.9; // 高于门控阈值，才能用「未覆盖题数」衡量进度
+        for (int i = 0; i < 45; i++) {
+            insertQuestion(null, "无主题的第 " + i + " 道题：求某数的值。");
+        }
+        // 第一次：只允许 1 次调用（= 1 批 20 题）
+        var r1 = tagging.suggest(BANK_ID, TEMPLATE, true, 1);
+        assertEquals(1, r1.aiCalls());
+        int leftAfterFirst = r1.untaggedQuestions();
+        assertEquals(25, leftAfterFirst, "45 题打 20 题后应剩 25 题未覆盖");
+
+        prompts.clear();
+        // 第二次：再给 1 次调用额度 → 必须继续往前推进，而不是重算前 20 题
+        var r2 = tagging.suggest(BANK_ID, TEMPLATE, true, 1);
+        assertEquals(1, r2.aiCalls(), "续跑仍只花 1 次调用");
+        assertEquals(5, r2.untaggedQuestions(), "第二批再处理 20 题 → 只剩 5 题");
+        assertEquals(1, prompts.size(), "续跑只发一次请求（已标注的题不再重复问模型）");
+
+        // 第三次：还剩 5 题 → 收尾
+        var r3 = tagging.suggest(BANK_ID, TEMPLATE, true, 1);
+        assertEquals(0, r3.untaggedQuestions(), "收尾后全部覆盖");
+        assertFalse(r3.truncated(), "跑完不应再报「达到上限」");
     }
 
     /** 未配置 AI 时要给出可照做的提示，而不是空跑 */

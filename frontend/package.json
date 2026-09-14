@@ -14,7 +14,8 @@
     "smoke:bank": "node scripts/smoke-bank-actions.mjs",
     "smoke:ai": "node scripts/smoke-ai-setup.mjs",
     "smoke:mineru": "node scripts/smoke-ai-mineru.mjs",
-    "smoke:import": "node scripts/smoke-import-file.mjs"
+    "smoke:import": "node scripts/smoke-import-file.mjs",
+    "smoke:skills": "node scripts/smoke-skills.mjs"
   },
   "dependencies": {
     "@fontsource/noto-serif-sc": "^5.3.0",

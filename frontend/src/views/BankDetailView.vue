@@ -41,6 +41,10 @@
             <TikuIcon name="download" :size="14" />
             {{ t('exportBank') }}
           </button>
+          <button class="btn btn-secondary" :disabled="!bank" @click="openSkillTags">
+            <TikuIcon name="target" :size="14" />
+            {{ t('skillTags') }}
+          </button>
           <button class="btn btn-secondary" :disabled="!bank" @click="$router.push(`/banks/${id}/print`)">
             <TikuIcon name="file" :size="14" />
             {{ t('printPaper') }}
@@ -470,7 +474,10 @@
       </el-dialog>
 
       <!-- 导出弹窗 -->
-      <el-dialog v-model="exportVisible" :title="t('exportBank')" width="min(92vw, 500px)" align-center>
+      <!-- 知识点标签（技能图 + AI 建议 + 人工确认 + 覆盖地图） -->
+    <SkillTagDialog ref="skillDialog" :bank-id="id" />
+
+    <el-dialog v-model="exportVisible" :title="t('exportBank')" width="min(92vw, 500px)" align-center>
         <el-form label-position="top" @submit.prevent>
           <el-form-item :label="t('scopeLabel')">
             <div class="mode-options">
@@ -823,7 +830,7 @@ const { t } = useI18n({
     'zh-CN': {
       notFoundDesc: '题库可能已被删除，或地址有误', backToBanks: '返回题库列表', loading: '加载中…',
       authorBy: '作者：{v}', sourceFrom: '来源：{v}', createdOn: '创建于 {d}', questionsN: '共 {n} 题',
-      history: '练习历史', edit: '编辑', exportBank: '导出题库文件', printPaper: '打印试卷', delete: '删除', startPractice: '开始做题',
+      history: '练习历史', edit: '编辑', exportBank: '导出题库文件', skillTags: '知识点', printPaper: '打印试卷', delete: '删除', startPractice: '开始做题',
     bankWord: '题库', thisQuestion: '该题',
       answeredOf: '已做 / 共 {n} 题', accuracyOf: '正确率（作答 {n} 次）', progressPct: '完成度',
       noDesc: '暂无描述',
@@ -935,7 +942,7 @@ const { t } = useI18n({
     'en-US': {
       notFoundDesc: 'This bank may have been deleted, or the link is wrong', backToBanks: 'Back to banks', loading: 'Loading…',
       authorBy: 'Author: {v}', sourceFrom: 'Source: {v}', createdOn: 'Created {d}', questionsN: '{n} questions',
-      history: 'History', edit: 'Edit', exportBank: 'Export bank file', printPaper: 'Print paper', delete: 'Delete', startPractice: 'Start practice',
+      history: 'History', edit: 'Edit', exportBank: 'Export bank file', skillTags: 'Knowledge tags', printPaper: 'Print paper', delete: 'Delete', startPractice: 'Start practice',
     bankWord: 'Bank', thisQuestion: 'this question',
       answeredOf: '{n} answered / total', accuracyOf: 'Accuracy ({n} attempts)', progressPct: 'Progress',
       noDesc: 'No description',
@@ -1060,6 +1067,7 @@ import TikuIcon from '../components/TikuIcon.vue'
 import QuestionFormPanel from '../components/QuestionFormPanel.vue'
 import QuestionNavDock from '../components/QuestionNavDock.vue'
 import AiImportDialog from '../components/AiImportDialog.vue'
+import SkillTagDialog from '../components/SkillTagDialog.vue'
 import QuestionAiAnalysis from '../components/QuestionAiAnalysis.vue'
 import ActionMenu from '../components/ActionMenu.vue'
 import { useConfirm } from '../composables/useConfirm'
@@ -1928,6 +1936,12 @@ async function submitEditBank() {
 
 /* ---------- {{ t('exportBank') }} ---------- */
 const exportVisible = ref(false)
+const skillDialog = ref(null)
+
+/** 打开知识点标签弹窗（学习路径引擎阶段 0：AI 打标签 + 人工确认 + 覆盖地图） */
+function openSkillTags() {
+  skillDialog.value?.open()
+}
 const exporting = ref(false)
 const exportForm = reactive({ version: '', authorName: '', mode: 'AUTO', format: 'tiku', scope: 'all' })
 

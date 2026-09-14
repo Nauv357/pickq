@@ -151,12 +151,14 @@ public class QuestionTaggingService {
             }
         }
 
-        // 清掉上一次未确认的 AI 建议（已确认的与用户标注保留）
-        questionSkillMapper.deleteAiSuggestions(bankId, templateId);
-        groupMapMapper.deleteStaleVersions(templateId, template.graphVersion());
-
-        // 已被人工标注（用户修正 / 作者标注）的题：AI 不再插嘴——人工优先，也避免多标签污染掌握度
+        // 已有标签的题（含低置信建议）：分批续跑时跳过，避免每次从头重算白烧 token。
+        // ⚠️ 必须在任何清理之前读——否则刚打完的那一批会被当成"没打过"而重复处理。
         Set<Long> humanTagged = new LinkedHashSet<>(questionSkillMapper.selectHumanTaggedQuestionIds(bankId));
+        Set<Long> alreadyTagged = new LinkedHashSet<>(questionSkillMapper.selectTaggedQuestionIds(bankId, templateId));
+
+        // 只清理"引用了已不在技能图里的节点"的旧建议（技能图更新后的兜底），不做全局删除
+        questionSkillMapper.deleteAiSuggestionsWithUnknownNodes(bankId, templateId, template.nodeIds());
+        groupMapMapper.deleteStaleVersions(templateId, template.graphVersion());
 
         int aiCalls = 0;
         int cached = 0;
@@ -211,8 +213,11 @@ public class QuestionTaggingService {
             }
         }
 
-        // 可选：没有 topic/category 的题逐题判定（人工标注过的题不参与，省 token 也避免污染）
-        List<Question> untaggedToAsk = untagged.stream().filter(q -> !humanTagged.contains(q.getId())).toList();
+        // 可选：没有 topic/category 的题逐题判定（人工标注过、或已有标签的题跳过：
+        // 前者人工优先，后者是分批续跑——已处理过的题不再重复问模型）
+        List<Question> untaggedToAsk = untagged.stream()
+                .filter(q -> !humanTagged.contains(q.getId()) && !alreadyTagged.contains(q.getId()))
+                .toList();
         if (includeUntagged && !untaggedToAsk.isEmpty()) {
             for (int i = 0; i < untaggedToAsk.size(); i += QUESTIONS_PER_CALL) {
                 if (aiCalls >= callBudget) {
@@ -351,6 +356,20 @@ public class QuestionTaggingService {
     /** 写题目标签（同一题同一节点一行；AI 建议不覆盖用户/作者标注） */
     private boolean writeQuestionSkills(Long bankId, String templateId, Long questionId,
                                         List<NodeConfidence> nodes, String origin) {
+        // 先按题精确清理"本次不再建议"的旧 AI 行：分批判量续跑时，只有被重新处理的题会走到这里，
+        // 未处理的题保持原样（这就是续跑能累积进度的前提）。
+        LambdaQueryWrapper<QuestionSkill> prune = new LambdaQueryWrapper<QuestionSkill>()
+                .eq(QuestionSkill::getQuestionId, questionId)
+                .eq(QuestionSkill::getTemplateId, templateId)
+                .eq(QuestionSkill::getSource, SOURCE_AI)
+                .eq(QuestionSkill::getConfirmed, false);
+        if (nodes.isEmpty()) {
+            questionSkillMapper.delete(prune);
+            return false;
+        }
+        List<String> keep = nodes.stream().map(NodeConfidence::nodeId).toList();
+        questionSkillMapper.delete(prune.notIn(QuestionSkill::getNodeId, keep));
+
         boolean wrote = false;
         for (NodeConfidence n : nodes) {
             QuestionSkill existing = questionSkillMapper.selectOne(new LambdaQueryWrapper<QuestionSkill>()
