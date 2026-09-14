@@ -36,8 +36,8 @@ class SkillGraphServiceTest {
     void nodeCatalogForPromptCarriesIdNameAndKeywords() {
         var t = service.template("official.civil-service");
         String catalog = service.nodeCatalogForPrompt(t);
-        assertTrue(catalog.contains("gk.pd.figure | 图形推理"), catalog);
-        assertTrue(catalog.contains("位置规律"), "关键词要进 prompt（提高映射准确率）");
+        assertTrue(catalog.contains("gk.pd.figure.num | 图形推理·数量与属性"), catalog);
+        assertTrue(catalog.contains("笔画数"), "关键词要进 prompt（提高映射准确率）");
     }
 
     @Test

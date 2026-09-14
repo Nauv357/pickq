@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "templateId": "official.civil-service",
   "name": "公务员行测（通用）",
-  "version": "2026.09",
+  "version": "2026.09.1",
   "goalHint": "按行测五大模块系统过一遍，找出薄弱模块并逐项过关",
   "source": { "type": "official", "updatedAt": "2026-09-14", "license": "自建（不引用第三方路线内容）" },
   "stages": [
@@ -10,46 +10,62 @@
       "id": "m1",
       "name": "常识判断",
       "nodes": [
-        { "id": "gk.cs.politics", "name": "政治与法律常识", "level": 3, "weight": 0.9, "prereq": [], "keywords": ["宪法", "民法典", "时政", "党史"] },
-        { "id": "gk.cs.science", "name": "科技与生活常识", "level": 3, "weight": 0.8, "prereq": [], "keywords": ["物理常识", "化学常识", "生物常识", "生活百科", "新科技"] },
-        { "id": "gk.cs.culture", "name": "人文与地理常识", "level": 3, "weight": 0.8, "prereq": [], "keywords": ["历史", "文学", "地理", "传统文化"] }
+        { "id": "gk.cs.politics", "name": "政治与时政", "level": 3, "weight": 1.0, "prereq": [], "keywords": ["马克思主义", "党史", "时政", "四个全面", "新发展理念", "重要会议"] },
+        { "id": "gk.cs.law", "name": "法律常识", "level": 3, "weight": 1.0, "prereq": [], "keywords": ["宪法", "民法典", "刑法", "行政法", "诉讼法", "法律责任"] },
+        { "id": "gk.cs.economy", "name": "经济常识", "level": 3, "weight": 0.9, "prereq": [], "keywords": ["宏观经济", "货币政策", "财政政策", "市场经济", "经济指标"] },
+        { "id": "gk.cs.science", "name": "科技与生活常识", "level": 3, "weight": 0.9, "prereq": [], "keywords": ["物理常识", "化学常识", "生物医学", "生活百科", "新科技", "航天"] },
+        { "id": "gk.cs.culture", "name": "人文历史与地理", "level": 3, "weight": 0.9, "prereq": [], "keywords": ["中国古代史", "文学常识", "诗词", "世界地理", "中国地理", "传统文化"] },
+        { "id": "gk.cs.other", "name": "常识判断·其他", "level": 3, "weight": 0.5, "optional": true, "prereq": [], "keywords": ["管理常识", "公文", "省情", "综合常识"] }
       ]
     },
     {
       "id": "m2",
       "name": "言语理解与表达",
       "nodes": [
-        { "id": "gk.yy.logic", "name": "逻辑填空", "level": 3, "weight": 1.1, "prereq": [], "keywords": ["实词辨析", "成语", "关联词", "语境分析", "感情色彩"] },
-        { "id": "gk.yy.read", "name": "片段阅读", "level": 3, "weight": 1.1, "prereq": [], "keywords": ["主旨概括", "意图判断", "细节理解", "标题填入", "态度观点"] },
-        { "id": "gk.yy.order", "name": "语句表达", "level": 3, "weight": 0.9, "prereq": ["gk.yy.read"], "keywords": ["语句排序", "语句衔接", "下文推断", "病句"] }
+        { "id": "gk.yy.logic", "name": "逻辑填空", "level": 3, "weight": 1.2, "prereq": [], "keywords": ["实词辨析", "成语辨析", "关联词", "语境分析", "感情色彩", "固定搭配"] },
+        { "id": "gk.yy.read", "name": "片段阅读·主旨类", "level": 3, "weight": 1.2, "prereq": [], "keywords": ["主旨概括", "意图判断", "标题填入", "态度观点", "中心理解"] },
+        { "id": "gk.yy.detail", "name": "片段阅读·细节类", "level": 3, "weight": 1.0, "prereq": ["gk.yy.read"], "keywords": ["细节理解", "细节判断", "偷换概念", "无中生有"] },
+        { "id": "gk.yy.order", "name": "语句表达", "level": 3, "weight": 1.0, "prereq": [], "keywords": ["语句排序", "语句衔接", "下文推断", "病句辨析"] },
+        { "id": "gk.yy.other", "name": "言语·其他", "level": 3, "weight": 0.5, "optional": true, "prereq": [], "keywords": ["篇章阅读", "综合言语"] }
       ]
     },
     {
       "id": "m3",
       "name": "数量关系",
       "nodes": [
-        { "id": "gk.sl.math", "name": "数学运算", "level": 3, "weight": 1.1, "prereq": [], "keywords": ["方程", "比例", "工程问题", "行程问题", "利润问题", "容斥"] },
-        { "id": "gk.sl.count", "name": "排列组合与概率", "level": 3, "weight": 1.0, "prereq": ["gk.sl.math"], "keywords": ["排列组合", "概率", "抽屉原理", "最值问题"] },
-        { "id": "gk.sl.geo", "name": "几何与图表", "level": 3, "weight": 0.8, "optional": true, "prereq": ["gk.sl.math"], "keywords": ["平面几何", "立体几何", "坐标系", "图形计数"] }
+        { "id": "gk.sl.calc", "name": "计算问题", "level": 3, "weight": 1.0, "prereq": [], "keywords": ["方程", "比例", "整除", "奇偶", "平均数", "数列"] },
+        { "id": "gk.sl.work", "name": "工程与行程", "level": 3, "weight": 1.1, "prereq": ["gk.sl.calc"], "keywords": ["工程问题", "行程问题", "相遇追及", "流水行船", "合作效率"] },
+        { "id": "gk.sl.econ", "name": "经济利润问题", "level": 3, "weight": 0.9, "prereq": ["gk.sl.calc"], "keywords": ["利润", "折扣", "成本", "分段计费", "浓度问题"] },
+        { "id": "gk.sl.count", "name": "排列组合与概率", "level": 3, "weight": 1.0, "prereq": ["gk.sl.calc"], "keywords": ["排列组合", "概率", "抽屉原理", "最值问题", "容斥原理"] },
+        { "id": "gk.sl.geo", "name": "几何与图表", "level": 3, "weight": 0.8, "prereq": ["gk.sl.calc"], "keywords": ["平面几何", "立体几何", "图形计数", "坐标系", "年龄问题"] },
+        { "id": "gk.sl.other", "name": "数量·其他", "level": 3, "weight": 0.5, "optional": true, "prereq": [], "keywords": ["统筹优化", "构造", "综合运算"] }
       ]
     },
     {
       "id": "m4",
       "name": "判断推理",
       "nodes": [
-        { "id": "gk.pd.figure", "name": "图形推理", "level": 3, "weight": 1.2, "prereq": [], "keywords": ["位置规律", "样式规律", "数量规律", "属性规律", "空间重构", "立体拼合"] },
-        { "id": "gk.pd.define", "name": "定义判断", "level": 3, "weight": 1.0, "prereq": [], "keywords": ["关键词提取", "要件分析", "多定义", "择优"] },
-        { "id": "gk.pd.analogy", "name": "类比推理", "level": 3, "weight": 0.9, "prereq": [], "keywords": ["逻辑关系", "言语关系", "经验常识", "语法关系"] },
-        { "id": "gk.pd.logic", "name": "逻辑判断", "level": 3, "weight": 1.2, "prereq": ["gk.pd.define"], "keywords": ["翻译推理", "真假推理", "加强削弱", "原因解释", "朴素逻辑"] }
+        { "id": "gk.pd.figure.pos", "name": "图形推理·位置与样式", "level": 3, "weight": 1.1, "prereq": [], "keywords": ["平移", "旋转", "翻转", "对称", "叠加", "去同存异"] },
+        { "id": "gk.pd.figure.num", "name": "图形推理·数量与属性", "level": 3, "weight": 1.1, "prereq": [], "keywords": ["笔画数", "交点数", "封闭区域", "线条数", "曲直性", "开闭性", "黑白格"] },
+        { "id": "gk.pd.figure.space", "name": "图形推理·空间重构", "level": 3, "weight": 1.0, "prereq": [], "keywords": ["折纸盒", "三视图", "截面", "立体拼合", "展开图"] },
+        { "id": "gk.pd.define", "name": "定义判断", "level": 3, "weight": 1.0, "prereq": [], "keywords": ["关键词提取", "要件分析", "多定义", "择优", "被定义项"] },
+        { "id": "gk.pd.analogy", "name": "类比推理", "level": 3, "weight": 0.9, "prereq": [], "keywords": ["逻辑关系", "言语关系", "经验常识", "语法关系", "近反义"] },
+        { "id": "gk.pd.translate", "name": "逻辑判断·翻译推理", "level": 3, "weight": 1.1, "prereq": [], "keywords": ["充分必要", "假言命题", "逆否等价", "联言选言", "推理规则"] },
+        { "id": "gk.pd.truth", "name": "逻辑判断·真假与朴素", "level": 3, "weight": 1.0, "prereq": [], "keywords": ["真假话", "矛盾关系", "反对关系", "朴素逻辑", "排除法"] },
+        { "id": "gk.pd.argue", "name": "逻辑判断·加强削弱", "level": 3, "weight": 1.2, "prereq": [], "keywords": ["加强", "削弱", "前提假设", "原因解释", "论证结构", "最能支持"] },
+        { "id": "gk.pd.other", "name": "判断推理·其他", "level": 3, "weight": 0.5, "optional": true, "prereq": [], "keywords": ["综合判断", "复合题型"] }
       ]
     },
     {
       "id": "m5",
       "name": "资料分析",
       "nodes": [
-        { "id": "gk.zl.concept", "name": "核心概念与公式", "level": 3, "weight": 1.2, "prereq": [], "keywords": ["增长率", "增长量", "比重", "平均数", "倍数", "同比环比"] },
-        { "id": "gk.zl.calc", "name": "速算技巧", "level": 3, "weight": 1.1, "prereq": ["gk.zl.concept"], "keywords": ["估算法", "首数法", "特征数字", "错位加减", "有效数字"] },
-        { "id": "gk.zl.integrated", "name": "综合分析题", "level": 3, "weight": 0.9, "prereq": ["gk.zl.calc"], "keywords": ["多选项判断", "陷阱", "单位", "时间范围"] }
+        { "id": "gk.zl.growth", "name": "增长类（增长率/增长量）", "level": 3, "weight": 1.2, "prereq": [], "keywords": ["增长率", "增长量", "同比", "环比", "年均增长", "增量比较"] },
+        { "id": "gk.zl.ratio", "name": "比重与倍数", "level": 3, "weight": 1.1, "prereq": ["gk.zl.growth"], "keywords": ["比重", "倍数", "比例", "占比变化", "百分点"] },
+        { "id": "gk.zl.avg", "name": "平均数与指数", "level": 3, "weight": 0.9, "prereq": ["gk.zl.growth"], "keywords": ["平均数", "中位数", "指数", "翻番", "综合指标"] },
+        { "id": "gk.zl.calc", "name": "速算技巧", "level": 3, "weight": 1.1, "prereq": [], "keywords": ["估算法", "首数法", "特征数字", "错位加减", "有效数字", "直除法"] },
+        { "id": "gk.zl.integrated", "name": "综合分析题", "level": 3, "weight": 1.0, "prereq": ["gk.zl.calc"], "keywords": ["多选项判断", "陷阱", "单位", "时间范围", "能够推出"] },
+        { "id": "gk.zl.other", "name": "资料分析·其他", "level": 3, "weight": 0.5, "optional": true, "prereq": [], "keywords": ["表格材料", "图形材料", "综合材料"] }
       ]
     }
   ]

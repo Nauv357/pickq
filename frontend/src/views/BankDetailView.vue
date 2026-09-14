@@ -155,6 +155,7 @@
           :next-number="nextNumber"
           :nav="navState"
           :jump-request="jumpRequest"
+          :focus-skill="focusSkillField"
           @saved="onPanelSaved"
           @navigate="handleNavigate"
           @jump-to="onPanelJumpTo"
@@ -475,7 +476,7 @@
 
       <!-- 导出弹窗 -->
       <!-- 知识点标签（技能图 + AI 建议 + 人工确认 + 覆盖地图） -->
-    <SkillTagDialog ref="skillDialog" :bank-id="id" />
+    <SkillTagDialog ref="skillDialog" :bank-id="id" @open-question="openQuestionFromSkills" />
 
     <el-dialog v-model="exportVisible" :title="t('exportBank')" width="min(92vw, 500px)" align-center>
         <el-form label-position="top" @submit.prevent>
@@ -1768,6 +1769,9 @@ async function startPracticeAt(questionId) {
 
 /* ---------- 录题 / 编辑弹窗 ---------- */
 const panelOpen = ref(false)
+// 从知识点标签弹窗跳进编辑器时，把「知识点」一栏滚到视野中间并高亮（用户实测：找不到改 tag 的地方）
+const focusSkillField = ref(false)
+let skillJump = false
 const panelMode = ref('create')
 const panelKey = ref(0)
 const editingQuestion = ref(null)
@@ -1783,12 +1787,14 @@ function openCreatePanel() {
   editingQuestion.value = null
   editingQuestionId.value = null
   editingListIndex.value = -1
+  focusSkillField.value = false
   panelKey.value++
   panelOpen.value = true
 }
 
 async function openEditPanel(questionId, index = -1) {
   const seq = ++editOpenSeq
+  focusSkillField.value = skillJump
   try {
     const detail = await getQuestion(questionId)
     if (seq !== editOpenSeq) return
@@ -1941,6 +1947,19 @@ const skillDialog = ref(null)
 /** 打开知识点标签弹窗（学习路径引擎阶段 0：AI 打标签 + 人工确认 + 覆盖地图） */
 function openSkillTags() {
   skillDialog.value?.open()
+}
+
+/** 从标签弹窗跳到某道题的编辑器：题目不在当前页时先按题号定位再打开 */
+async function openQuestionFromSkills(questionId) {
+  const idx = questions.value.findIndex((q) => q.questionId === questionId)
+  // 先置位再打开：面板是在 openEditPanel 里挂载的，挂载时就要带上 focus-skill（onMounted 只读一次）
+  skillJump = true
+  try {
+    if (idx >= 0) await openEditPanel(questionId, idx)
+    else await openEditPanel(questionId)
+  } finally {
+    skillJump = false
+  }
 }
 const exporting = ref(false)
 const exportForm = reactive({ version: '', authorName: '', mode: 'AUTO', format: 'tiku', scope: 'all' })

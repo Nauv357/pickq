@@ -29,6 +29,10 @@ export const applySkills = (bankId, body) => http.post(`/banks/${bankId}/skills/
 export const getSkillCoverage = (bankId, templateId) =>
   http.get(`/banks/${bankId}/skills/coverage`, { params: { templateId } })
 
+/** 按标签状态取题（status: untagged = AI 没给出可用知识点的题，用于逐题去补） */
+export const getSkillQuestions = (bankId, { templateId, status = 'untagged', size = 100 } = {}) =>
+  http.get(`/banks/${bankId}/skills/questions`, { params: { templateId, status, size } })
+
 export const getQuestionSkills = (questionId) => http.get(`/questions/${questionId}/skills`)
 
 export const setQuestionSkills = (questionId, body) => http.put(`/questions/${questionId}/skills`, body)

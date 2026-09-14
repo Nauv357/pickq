@@ -61,8 +61,8 @@ class SkillControllerHttpTest {
         server.createContext("/", exchange -> {
             String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
             String reply = body.contains("id=")
-                    ? "{\"mappings\":[{\"id\":" + firstId(body) + ",\"nodes\":[{\"nodeId\":\"gk.pd.logic\",\"confidence\":0.9}]}]}"
-                    : "{\"mappings\":[{\"group\":\"" + firstGroup(body) + "\",\"nodes\":[{\"nodeId\":\"gk.pd.figure\",\"confidence\":0.9}]}]}";
+                    ? "{\"mappings\":[{\"id\":" + firstId(body) + ",\"nodes\":[{\"nodeId\":\"gk.pd.argue\",\"confidence\":0.9}]}]}"
+                    : "{\"mappings\":[{\"group\":\"" + firstGroup(body) + "\",\"nodes\":[{\"nodeId\":\"gk.pd.figure.num\",\"confidence\":0.9}]}]}";
             byte[] out = ("{\"choices\":[{\"message\":{\"content\":" + json(reply) + "}}]}")
                     .getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type", "application/json");
@@ -125,7 +125,7 @@ class SkillControllerHttpTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.name", is("公务员行测（通用）")))
                 .andExpect(jsonPath("$.data.nodes", hasSize(greaterThan(10))))
-                .andExpect(jsonPath("$.data.nodes[?(@.nodeId=='gk.pd.figure')].prereq", hasSize(1)));
+                .andExpect(jsonPath("$.data.nodes[?(@.nodeId=='gk.pd.figure.num')].prereq", hasSize(1)));
 
         mockMvc.perform(post("/api/skills/templates/{id}/sync", TEMPLATE))
                 .andExpect(status().isOk())
@@ -147,12 +147,12 @@ class SkillControllerHttpTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.aiCalls", is(1)))
                 .andExpect(jsonPath("$.data.taggedQuestions", is(3)))
-                .andExpect(jsonPath("$.data.untaggedQuestions", is(0)));
+                .andExpect(jsonPath("$.data.withoutUsableTag", is(0)));
 
         // 待确认队列（带样例题干）
         mockMvc.perform(get("/api/banks/{id}/skills/pending", BANK_ID).param("templateId", TEMPLATE))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data[0].nodeId", is("gk.pd.figure")))
+                .andExpect(jsonPath("$.data[0].nodeId", is("gk.pd.figure.num")))
                 .andExpect(jsonPath("$.data[0].questionCount", is(3)))
                 .andExpect(jsonPath("$.data[0].samples", hasSize(greaterThan(0))));
 
@@ -160,13 +160,13 @@ class SkillControllerHttpTest {
         mockMvc.perform(get("/api/banks/{id}/skills/coverage", BANK_ID).param("templateId", TEMPLATE))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.totalQuestions", is(3)))
-                .andExpect(jsonPath("$.data.coveredQuestions", is(3)))
-                .andExpect(jsonPath("$.data.nodes[?(@.nodeId=='gk.pd.figure')].evidenceEnough", hasSize(1)));
+                .andExpect(jsonPath("$.data.usableQuestions", is(3)))
+                .andExpect(jsonPath("$.data.nodes[?(@.nodeId=='gk.pd.figure.num')].evidenceEnough", hasSize(1)));
 
         // 批量确认
         mockMvc.perform(post("/api/banks/{id}/skills/apply", BANK_ID)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"action\":\"confirm\",\"nodeId\":\"gk.pd.figure\",\"templateId\":\"" + TEMPLATE + "\"}"))
+                        .content("{\"action\":\"confirm\",\"nodeId\":\"gk.pd.figure.num\",\"templateId\":\"" + TEMPLATE + "\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.affected", is(3)));
         mockMvc.perform(get("/api/banks/{id}/skills/coverage", BANK_ID).param("templateId", TEMPLATE))

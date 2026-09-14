@@ -113,11 +113,11 @@ class QuestionTaggingServiceTest {
         StringBuilder sb = new StringBuilder("{\"mappings\":[");
         List<String> parts = new ArrayList<>();
         if (body.contains("图形推理")) {
-            parts.add("{\"group\":\"图形推理\",\"nodes\":[{\"nodeId\":\"gk.pd.figure\",\"confidence\":0.92},"
+            parts.add("{\"group\":\"图形推理\",\"nodes\":[{\"nodeId\":\"gk.pd.figure.num\",\"confidence\":0.92},"
                     + "{\"nodeId\":\"gk.fake.node\",\"confidence\":0.99}]}");
         }
         if (body.contains("资料分析")) {
-            parts.add("{\"group\":\"资料分析\",\"nodes\":[{\"nodeId\":\"gk.zl.concept\",\"confidence\":0.88},"
+            parts.add("{\"group\":\"资料分析\",\"nodes\":[{\"nodeId\":\"gk.zl.growth\",\"confidence\":0.88},"
                     + "{\"nodeId\":\"gk.zl.calc\",\"confidence\":0.7}]}");
         }
         return sb.append(String.join(",", parts)).append("]}").toString();
@@ -130,7 +130,7 @@ class QuestionTaggingServiceTest {
         // 请求体是 JSON，提示里的换行是转义后的 \n —— 直接正则抓全部 id=（不能按行 split）
         var m = java.util.regex.Pattern.compile("id=(\\d+)").matcher(body);
         while (m.find()) {
-            parts.add("{\"id\":" + m.group(1) + ",\"nodes\":[{\"nodeId\":\"gk.pd.logic\",\"confidence\":"
+            parts.add("{\"id\":" + m.group(1) + ",\"nodes\":[{\"nodeId\":\"gk.pd.argue\",\"confidence\":"
                     + perQuestionConfidence + "}]}");
         }
         return sb.append(String.join(",", parts)).append("]}").toString();
@@ -159,12 +159,12 @@ class QuestionTaggingServiceTest {
         assertEquals(2, r1.groupCount());
         assertEquals(2, r1.mappedGroups());
         assertEquals(4, r1.taggedQuestions(), "有 topic 的 4 道题应全部标注");
-        assertEquals(2, r1.untaggedQuestions(), "没有 topic 的 2 道题此时不处理");
+        assertEquals(2, r1.withoutUsableTag(), "没有 topic 的 2 道题此时不处理");
 
         var tagsGraph = tagging.tagsOf(graph);
         var tagsGraph2 = tagging.tagsOf(graph2);
         assertEquals(1, tagsGraph.size(), "编造的节点必须被丢弃，只剩真实节点：" + tagsGraph);
-        assertEquals("gk.pd.figure", tagsGraph.get(0).nodeId());
+        assertEquals("gk.pd.figure.num", tagsGraph.get(0).nodeId());
         assertEquals(tagsGraph.stream().map(QuestionTaggingService.QuestionTag::nodeId).toList(),
                 tagsGraph2.stream().map(QuestionTaggingService.QuestionTag::nodeId).toList(),
                 "同类题（同 topic）标签必须完全一致");
@@ -180,20 +180,24 @@ class QuestionTaggingServiceTest {
 
         // ③ 待确认队列：按节点聚合 + 带样例题干
         var pending = tagging.pending(BANK_ID, TEMPLATE);
-        var figure = pending.stream().filter(p -> p.nodeId().equals("gk.pd.figure")).findFirst().orElseThrow();
+        var figure = pending.stream().filter(p -> p.nodeId().equals("gk.pd.figure.num")).findFirst().orElseThrow();
         assertEquals(2, figure.questionCount());
         assertEquals(2, figure.samples().size(), "要带样例题干，用户才能核对而不是盲点确认");
 
         // ④ 确认：确认后参与门控（confirmed=1）
-        assertEquals(2, tagging.apply(BANK_ID, TEMPLATE, "confirm", "gk.pd.figure", null, null));
+        assertEquals(2, tagging.apply(BANK_ID, TEMPLATE, "confirm", "gk.pd.figure.num", null, null));
         assertTrue(tagging.tagsOf(graph).get(0).confirmed());
 
         // ⑤ 覆盖地图：4 题有标签（确认的是图形推理那 2 题）；每个节点只有 2 题 → 证据不足（<3）不能门控
         var coverage = tagging.coverage(BANK_ID, TEMPLATE);
         assertEquals(6, coverage.totalQuestions());
-        assertEquals(4, coverage.coveredQuestions());
-        assertEquals(2, coverage.untaggedQuestions());
-        var figureCoverage = coverage.nodes().stream().filter(n -> n.nodeId().equals("gk.pd.figure")).findFirst().orElseThrow();
+        assertEquals(4, coverage.usableQuestions(), "门控可用 = 已确认 2 + 高置信 AI 2");
+        assertEquals(2, coverage.untaggedQuestions(), "无 topic 的 2 题一条标签都没有");
+        assertEquals(2, coverage.pendingQuestions(), "资料分析那 2 题只有未确认建议");
+        assertEquals(6,
+                coverage.confirmedQuestions() + coverage.pendingQuestions() + coverage.untaggedQuestions(),
+                "三段不重叠：已确认 + 待确认 + 未匹配 = 总题数（用户实测时两个数对不上就是口径不同造成的）");
+        var figureCoverage = coverage.nodes().stream().filter(n -> n.nodeId().equals("gk.pd.figure.num")).findFirst().orElseThrow();
         assertEquals(2, figureCoverage.questionCount());
         assertFalse(figureCoverage.evidenceEnough(), "题量 <3 时不能算证据充足");
         assertEquals(2, coverage.confirmedQuestions(), "已确认题数按题去重（图形推理那 2 题）");
@@ -202,31 +206,62 @@ class QuestionTaggingServiceTest {
         var r3 = tagging.suggest(BANK_ID, TEMPLATE, true, 10);
         assertEquals(1, r3.aiCalls(), "只有逐题判定需要一次调用（分组仍走缓存）");
         var tagsNoTopic = tagging.tagsOf(noTopic);
-        assertEquals("gk.pd.logic", tagsNoTopic.get(0).nodeId(), "两道无 topic 的题都要打上标签");
+        assertEquals("gk.pd.argue", tagsNoTopic.get(0).nodeId(), "两道无 topic 的题都要打上标签");
         assertEquals("ai-direct", tagsNoTopic.get(0).origin(), "逐题判定来源应为 ai-direct");
-        assertEquals("gk.pd.logic", tagging.tagsOf(noTopic2).get(0).nodeId());
+        assertEquals("gk.pd.argue", tagging.tagsOf(noTopic2).get(0).nodeId());
 
         // ⑥b 关键设计：**低置信 AI 标签只作参考，不算"已覆盖"**（门控只认已确认或高置信）
         assertEquals(0.75, tagsNoTopic.get(0).confidence(), 0.001);
         assertFalse(tagsNoTopic.get(0).confirmed());
-        assertEquals(2, r3.untaggedQuestions(), "置信度 0.75 < 0.8，仍如实算作未覆盖（不假装掌握了）");
-        assertEquals(4, tagging.coverage(BANK_ID, TEMPLATE).coveredQuestions());
+        assertEquals(2, r3.withoutUsableTag(), "置信度 0.75 < 0.8，仍如实算作未覆盖（不假装掌握了）");
+        assertEquals(4, tagging.coverage(BANK_ID, TEMPLATE).usableQuestions());
 
         // ⑦ 用户手动标注：覆盖 AI，且该题的 AI 建议被清掉
-        assertEquals(1, tagging.setUserTags(noTopic, TEMPLATE, List.of("gk.sl.math")));
+        assertEquals(1, tagging.setUserTags(noTopic, TEMPLATE, List.of("gk.sl.calc")));
         var userTags = tagging.tagsOf(noTopic);
         assertEquals(1, userTags.size());
-        assertEquals("gk.sl.math", userTags.get(0).nodeId());
+        assertEquals("gk.sl.calc", userTags.get(0).nodeId());
         assertEquals("user", userTags.get(0).source());
         assertTrue(userTags.get(0).confirmed(), "用户标注视为已确认");
 
         // ⑧ 用户标注不会被后续 AI 分析覆盖
         tagging.suggest(BANK_ID, TEMPLATE, true, 10);
-        assertEquals("gk.sl.math", tagging.tagsOf(noTopic).get(0).nodeId(), "重跑 AI 分析不能覆盖用户标注");
+        assertEquals("gk.sl.calc", tagging.tagsOf(noTopic).get(0).nodeId(), "重跑 AI 分析不能覆盖用户标注");
 
         // ⑨ 非法节点不接受
         assertThrows(IllegalArgumentException.class,
                 () -> tagging.setUserTags(noTopic, TEMPLATE, List.of("gk.not.exist")));
+
+        // ⑩ 逐题处理（用户实测：只给三条样例题干无法精确分配）
+        var pendingAfter = tagging.pending(BANK_ID, TEMPLATE);
+        var concept = pendingAfter.stream().filter(x -> x.nodeId().equals("gk.zl.growth")).findFirst().orElseThrow();
+        assertTrue(concept.questions().size() >= 1, "该节点下要能列出具体是哪几题");
+        var first = concept.questions().get(0);
+        assertTrue(first.preview() != null && !first.preview().isBlank(), "每道题要带题干预览，用户才能分辨");
+        assertTrue(first.questionNumber() != null, "要带题号，便于在列表里定位");
+
+        assertEquals(1, tagging.apply(BANK_ID, TEMPLATE, "confirm", "gk.zl.growth", null, List.of(first.questionId())),
+                "可只确认这一题");
+        assertTrue(tagging.tagsOf(first.questionId()).stream()
+                        .anyMatch(QuestionTaggingService.QuestionTag::confirmed), "被逐题确认的题应已确认");
+        assertEquals(0, tagging.apply(BANK_ID, TEMPLATE, "reject", "gk.zl.growth", null, List.of(first.questionId())),
+                "reject 只丢\"建议\"：已确认的标签不动");
+        assertTrue(tagging.tagsOf(first.questionId()).stream()
+                        .anyMatch(QuestionTaggingService.QuestionTag::confirmed), "已确认的标签要保留下来");
+
+        // ⑪ 按状态列题：界面据此把"未匹配的 N 题"摊开逐题打开去修
+        assertTrue(tagging.questionsByStatus(BANK_ID, TEMPLATE, "pending", 1, 50).size() >= 1, "待确认清单要能列题");
+        assertTrue(tagging.questionsByStatus(BANK_ID, TEMPLATE, "confirmed", 1, 50).size() >= 1, "已确认清单要能列题");
+
+        // ⑫ 主题回填：AI 的分组结果顺手写回题目主题（题库没填主题时），让题库更规整；
+        //    默认不覆盖已有主题（资料分析那两题本来就有主题，所以显式按题覆盖才生效）
+        assertEquals(1, tagging.backfillTopic(BANK_ID, TEMPLATE, null, List.of(noTopic), "图形推理", false));
+        assertEquals("图形推理", questionMapper.selectById(noTopic).getTopic(), "主题已写入");
+        assertEquals(0, tagging.backfillTopic(BANK_ID, TEMPLATE, null, List.of(noTopic), "别的主题", false),
+                "默认不覆盖已有主题");
+        assertEquals(1, tagging.backfillTopic(BANK_ID, TEMPLATE, null, List.of(noTopic), "覆盖后的主题", true),
+                "显式 overwrite 时才覆盖");
+        assertEquals("覆盖后的主题", questionMapper.selectById(noTopic).getTopic());
     }
 
     @Test
@@ -249,19 +284,19 @@ class QuestionTaggingServiceTest {
         // 第一次：只允许 1 次调用（= 1 批 20 题）
         var r1 = tagging.suggest(BANK_ID, TEMPLATE, true, 1);
         assertEquals(1, r1.aiCalls());
-        int leftAfterFirst = r1.untaggedQuestions();
+        int leftAfterFirst = r1.withoutUsableTag();
         assertEquals(25, leftAfterFirst, "45 题打 20 题后应剩 25 题未覆盖");
 
         prompts.clear();
         // 第二次：再给 1 次调用额度 → 必须继续往前推进，而不是重算前 20 题
         var r2 = tagging.suggest(BANK_ID, TEMPLATE, true, 1);
         assertEquals(1, r2.aiCalls(), "续跑仍只花 1 次调用");
-        assertEquals(5, r2.untaggedQuestions(), "第二批再处理 20 题 → 只剩 5 题");
+        assertEquals(5, r2.withoutUsableTag(), "第二批再处理 20 题 → 只剩 5 题");
         assertEquals(1, prompts.size(), "续跑只发一次请求（已标注的题不再重复问模型）");
 
         // 第三次：还剩 5 题 → 收尾
         var r3 = tagging.suggest(BANK_ID, TEMPLATE, true, 1);
-        assertEquals(0, r3.untaggedQuestions(), "收尾后全部覆盖");
+        assertEquals(0, r3.withoutUsableTag(), "收尾后全部覆盖");
         assertFalse(r3.truncated(), "跑完不应再报「达到上限」");
     }
 
@@ -280,8 +315,11 @@ class QuestionTaggingServiceTest {
         }
     }
 
+    private int seqNo = 0;
+
     private Long insertQuestion(String topic, String content) {
         Question q = new Question();
+        q.setQuestionNumber(++seqNo);
         q.setExternalId("TAG_" + System.nanoTime());
         q.setBankId(BANK_ID);
         q.setVolume(0);

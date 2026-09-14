@@ -28,6 +28,21 @@ export function startBusy(text) {
   return instance
 }
 
+/** 更新文案并重置计时（分批任务每跑完一批就刷新进度，不重建遮罩，避免闪烁） */
+export function updateBusy(text) {
+  if (!instance) return startBusy(text)
+  clearInterval(timer)
+  instance.setText(text)
+  startedAt = Date.now()
+  timer = setInterval(() => {
+    const seconds = Math.round((Date.now() - startedAt) / 1000)
+    if (seconds >= 3 && instance) {
+      instance.setText(`${text}（已用 ${seconds} 秒，请不要关闭窗口）`)
+    }
+  }, 1000)
+  return instance
+}
+
 /** 结束提示（必须放在 finally 里，任何分支都不能漏） */
 export function stopBusy() {
   if (timer) {

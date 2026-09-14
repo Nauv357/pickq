@@ -240,6 +240,31 @@
         </div>
       </div>
 
+      <!-- 知识点（学习路径引擎阶段 0）：AI 能自动标注，这里手动改则以你的选择为准；
+           人工标注过的题不会再被 AI 覆盖（标签只存本机）。
+           从「知识点标签」弹窗点「打开题目」进来时会把这一栏滚到视野中间并高亮一下——
+           用户实测反馈"确认后找不到改每题 tag 的地方"，所以打开就得看得见。 -->
+      <div v-if="isEdit" ref="skillFieldEl" class="field" :class="{ 'skill-focus': skillHighlight }">
+        <label class="field-label">知识点</label>
+        <el-select
+          v-model="skillNodeIds"
+          multiple
+          filterable
+          clearable
+          :placeholder="skillLoading ? '加载技能图…' : '选择这道题考的知识点（可多选）'"
+          style="width: 100%"
+          :loading="skillLoading"
+        >
+          <el-option-group v-for="g in skillGroups" :key="g.name" :label="g.name">
+            <el-option v-for="n in g.nodes" :key="n.nodeId" :label="n.name" :value="n.nodeId" />
+          </el-option-group>
+        </el-select>
+        <p v-if="skillCurrent.length" class="form-tip text-muted">
+          当前：<span v-for="c in skillCurrent" :key="c.nodeId" class="skill-src-item">{{ c.name }}（{{ sourceLabel(c) }}）</span>
+        </p>
+        <p v-else class="form-tip text-muted">还没有知识点标签：可在题库详情页点「知识点」自动标注，或在这里手动指定。</p>
+      </div>
+
       <!-- 答案文字 / 解析（客观题答案文字；主观题可填解析） -->
       <div v-if="form.questionType !== 'SUBJECTIVE'" class="field">
         <label class="field-label">答案文字（可选）</label>
@@ -296,6 +321,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { getQuestionSkills, getSkillTemplate, getSkillTemplates, setQuestionSkills } from '../api/skills'
 
 const { t } = useI18n({
   messages: {
@@ -348,7 +374,9 @@ const props = defineProps({
   // 编辑模式导航状态（来自列表页）：{ hasPrev, hasNext, pos, total }；null = 不显示
   nav: { type: Object, default: null },
   // 外部（右侧题号盘）请求跳题：{ seq: 递增序号, questionId }；seq 变化即触发（未保存修改会先询问）
-  jumpRequest: { type: Object, default: null }
+  jumpRequest: { type: Object, default: null },
+  // 从知识点标签弹窗跳进来：把「知识点」一栏滚到视野中间并高亮（否则它在表单靠下位置，很难找）
+  focusSkill: { type: Boolean, default: false }
 })
 
 const emit = defineEmits(['saved', 'closed', 'navigate', 'jump-to'])
@@ -471,6 +499,77 @@ function normalizedForm(src) {
 const questionNumber = computed(() => form.questionNumber)
 const baseline = ref('')
 const dirty = ref(false)
+
+/* ---------- 知识点标签（学习路径引擎阶段 0） ---------- */
+const skillNodeIds = ref([])   // 当前选择（改过就以它为准）
+const skillCurrent = ref([])   // 服务端现有标签（含来源：ai / user / author）
+const skillTemplateId = ref('')
+const skillNodes = ref([])
+const skillLoading = ref(false)
+const skillFieldEl = ref(null)   // 「知识点」那一栏（从标签弹窗跳进来时滚到视野中间）
+const skillHighlight = ref(false)
+let skillBaseline = ''         // 已保存基线（用于"未保存修改"判定）
+const skillKey = () => JSON.stringify([...skillNodeIds.value].sort())
+
+/** 技能图按阶段分组：30+ 个节点不分组没法挑 */
+const skillGroups = computed(() => {
+  const order = []
+  const byStage = new Map()
+  for (const n of skillNodes.value) {
+    const key = n.stageName || '—'
+    if (!byStage.has(key)) { byStage.set(key, []); order.push(key) }
+    byStage.get(key).push(n)
+  }
+  return order.map((name) => ({ name, nodes: byStage.get(name) }))
+})
+
+/** 标签来源：用户要能一眼看出"这条是 AI 猜的还是我定的" */
+function sourceLabel(tag) {
+  if (tag.source === 'user') return '你标注的'
+  if (tag.source === 'author') return '作者标注'
+  return tag.confirmed ? 'AI 建议（已确认）' : 'AI 建议（未确认）'
+}
+
+/** 载入技能图（沿用上次选的模板，避免每次重选） */
+async function loadSkillGraph() {
+  if (skillNodes.value.length) return
+  skillLoading.value = true
+  try {
+    const templates = await getSkillTemplates()
+    if (!templates || !templates.length) return
+    const saved = localStorage.getItem('tiku.skillTemplateId')
+    const tpl = templates.find((x) => x.templateId === saved) || templates[0]
+    skillTemplateId.value = tpl.templateId
+    const detail = await getSkillTemplate(tpl.templateId)
+    skillNodes.value = detail?.nodes || []
+  } catch (e) {
+    /* 拦截器已提示 */
+  } finally {
+    skillLoading.value = false
+  }
+}
+
+/** 载入某题现有标签 */
+async function loadQuestionSkills(questionId) {
+  if (!questionId) return
+  try {
+    skillCurrent.value = (await getQuestionSkills(questionId)) || []
+    skillNodeIds.value = skillCurrent.value.map((x) => x.nodeId)
+  } catch (e) {
+    skillCurrent.value = []
+    skillNodeIds.value = []
+  }
+  skillBaseline = skillKey()
+}
+
+/** 保存标签（仅编辑模式；改了才发请求） */
+async function saveQuestionSkills() {
+  if (!isEdit.value || !props.initial?.id || !skillTemplateId.value) return
+  if (skillKey() === skillBaseline) return
+  await setQuestionSkills(props.initial.id, { templateId: skillTemplateId.value, nodeIds: skillNodeIds.value })
+  localStorage.setItem('tiku.skillTemplateId', skillTemplateId.value)
+  skillBaseline = skillKey()
+}
 // 基线是否已就绪：详情还没返回时（异步加载中）不参与判定，避免"刚打开就被判成有修改"
 const baselineReady = ref(false)
 
@@ -478,6 +577,7 @@ const baselineReady = ref(false)
 function markBaseline() {
   baseline.value = normalizedForm(form)
   baselineReady.value = true
+  skillBaseline = skillKey()
   dirty.value = false
 }
 
@@ -487,9 +587,15 @@ watch(
   () => normalizedForm(form),
   (s) => {
     if (!baselineReady.value) return
-    dirty.value = s !== baseline.value
+    dirty.value = s !== baseline.value || skillKey() !== skillBaseline
   }
 )
+// 知识点不在 form 里，单独 watch 一次
+watch(skillNodeIds, () => {
+  if (baselineReady.value) {
+    dirty.value = normalizedForm(form) !== baseline.value || skillKey() !== skillBaseline
+  }
+})
 
 // 边界：父组件先挂载面板、题目详情后到达（异步加载）时，等详情填充完成再记基线，
 // 这样"回填"本身不会被当成用户改动。
@@ -499,6 +605,7 @@ watch(
     if (!isEdit.value || initialFilled || !d) return
     fillFormFromInitial(d)
     markBaseline()
+    loadSkillGraph().then(() => loadQuestionSkills(d.id))
   }
 )
 
@@ -792,6 +899,8 @@ async function saveCurrent(silent = false) {
   submitting.value = true
   try {
     await doSave()
+    // 知识点标签随题目一起保存（改过才发请求；人工标注覆盖 AI 与作者，只影响本机）
+    await saveQuestionSkills()
     // 保存成功即把当前值记为新的"已保存基线"（归一化后），
     // 避免"保存成功后没再改，离开却又提示未保存"
     markBaseline()
@@ -927,6 +1036,21 @@ async function submitAndFinish() {
 
 onMounted(() => {
   loadMaterials()
+  // 编辑模式：技能图与本题已有的知识点标签必须在面板打开时就取回来。
+  // 不能只靠下面的 watch(props.initial)：父组件是"先取详情、再挂载面板"，
+  // 详情在 setup 阶段就已经回填（initialFilled=true），watch 会直接 return，
+  // 结果是知识点下拉里一个选项都没有、已有标签也不显示——用户实测反馈"编辑页面都没有显示 tag"。
+  if (isEdit.value && props.initial?.id) {
+    loadSkillGraph().then(() => loadQuestionSkills(props.initial.id))
+  }
+  // 从「知识点标签」弹窗跳进来：等技能图/标签就位后再滚，避免滚到一个还空着的下拉
+  if (props.focusSkill) {
+    setTimeout(() => {
+      skillFieldEl.value?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      skillHighlight.value = true
+      setTimeout(() => { skillHighlight.value = false }, 4000)
+    }, 400)
+  }
   // 记基线的正确时机：此刻题目详情已回填完成、子控件（el-input-number / el-select 等）
   // 也已完成首次渲染归一（子组件 mounted 先于父组件 mounted）。
   // 若编辑模式下详情还没到（initialFilled=false），先不记基线，等 watch(props.initial) 填充后再记。
@@ -939,6 +1063,15 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.skill-src-item {
+  margin-right: 10px;
+}
+/* 高亮「知识点」栏：从标签弹窗跳进来时让用户一眼看到在哪改 */
+.skill-focus {
+  border-radius: 10px;
+  box-shadow: 0 0 0 2px var(--accent), 0 0 0 6px var(--accent-soft);
+  transition: box-shadow 0.3s;
+}
 .panel {
   background: var(--bg-card);
   border: 1px solid var(--border-strong);

@@ -18,8 +18,9 @@ import java.util.Map;
  *
  * 接口分工：
  * - 技能图是**只读**的受控词表（内置模板；将来支持私有/社区模板时再开写接口）；
- * - 标签是"AI 提建议 + 人拍板"：suggest 产出建议 → pending 看队列 → apply 批量确认/改挂/丢弃；
- * - 单题也可以用 {@code PUT /api/questions/{id}/skills} 直接由用户标注（覆盖 AI 与作者）。
+ * - 标签是"AI 提建议 + 人拍板"：suggest 产出建议 → pending 看队列（**带全部单题**）→
+ *   apply 批量或逐题确认/改挂/丢弃；questions 按状态把题列全（未匹配的题要能逐题打开去修）；
+ * - 单题也可以直接标注：{@code PUT /api/questions/{id}/skills}（覆盖 AI 与作者，只影响本机）。
  */
 @Slf4j
 @RestController
@@ -93,7 +94,7 @@ public class SkillController {
         return ApiResponse.success(Map.of("templateId", templateId, "nodesWritten", nodes));
     }
 
-    /** 触发知识点标注（AI 提建议，落待确认队列） */
+    /** 触发知识点标注（AI 提建议，落待确认队列；按批推进，可中断续跑） */
     @PostMapping("/banks/{bankId}/skills/suggest")
     public ApiResponse<QuestionTaggingService.SuggestResult> suggest(
             @PathVariable Long bankId,
@@ -103,19 +104,38 @@ public class SkillController {
         return ApiResponse.success(taggingService.suggest(bankId, templateId, includeUntagged, maxAiCalls));
     }
 
-    /** 待确认队列（按节点聚合 + 样例题干） */
+    /** 待确认队列（按节点聚合 + 样例题干 + **该节点下的全部待确认单题**） */
     @GetMapping("/banks/{bankId}/skills/pending")
     public ApiResponse<List<QuestionTaggingService.PendingNode>> pending(@PathVariable Long bankId,
                                                                         @RequestParam String templateId) {
         return ApiResponse.success(taggingService.pending(bankId, templateId));
     }
 
-    /** 批量确认 / 改挂 / 丢弃 */
+    /**
+     * 按标签状态列题：status = confirmed / pending / untagged。
+     * 界面用它把"未匹配的 N 题"摊开，逐题打开去补——只给三条样例题干是不够的（用户实测反馈）。
+     */
+    @GetMapping("/banks/{bankId}/skills/questions")
+    public ApiResponse<List<QuestionTaggingService.PendingQuestion>> questions(
+            @PathVariable Long bankId,
+            @RequestParam String templateId,
+            @RequestParam(defaultValue = "untagged") String status,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        return ApiResponse.success(taggingService.questionsByStatus(bankId, templateId, status, page, size));
+    }
+
+    /** 批量 / 逐题：确认、改挂、丢弃；或把主题写回题目（backfill-topic） */
     @PostMapping("/banks/{bankId}/skills/apply")
     public ApiResponse<Map<String, Object>> apply(@PathVariable Long bankId, @RequestBody SkillApplyRequest request) {
         String templateId = request.templateId();
         if (templateId == null || templateId.isBlank()) {
             throw new IllegalArgumentException("缺少 templateId");
+        }
+        if ("backfill-topic".equals(request.action())) {
+            int n = taggingService.backfillTopic(bankId, templateId, request.nodeId(), request.questionIds(),
+                    request.topic(), Boolean.TRUE.equals(request.overwrite()));
+            return ApiResponse.success(Map.of("affected", n));
         }
         int affected = taggingService.apply(bankId, templateId, request.action(), request.nodeId(),
                 request.newNodes(), request.questionIds());
