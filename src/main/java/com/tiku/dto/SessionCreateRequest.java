@@ -8,9 +8,10 @@ import java.util.List;
 /**
  * 创建刷题会话请求：POST /api/banks/{id}/sessions
  *
- * @param mode            ALL 未做优先 / SEQUENCE 顺序 / TOPIC 按分类 / REVIEW 复习队列 / WRONG 错题 / FAVORITE 收藏
+ * @param mode            ALL 未做优先 / SEQUENCE 顺序 / TOPIC 按分类 / SKILL 按知识点 / REVIEW 复习队列 / WRONG 错题 / FAVORITE 收藏
  * @param topic           主题过滤（mode=TOPIC 时可选，**多选**，数组或单值均可）
  * @param category        分类过滤（mode=TOPIC 时可选，**多选**，数组或单值均可）
+ * @param nodeIds         知识点过滤（mode=SKILL 时必填：按技能节点抽题，学习路线"开始今天的任务"用）
  * @param count           抽取数量（缺省 = 范围内全部）
  * @param startQuestionId 起点题目（仅 mode=SEQUENCE：从该题按题号顺序往后做，缺省 = 从第一题开始）
  * @param keyword         题干/选项关键词过滤（题库列表筛选联动，行内 ▶ 顺序刷题用）
@@ -25,6 +26,9 @@ public record SessionCreateRequest(
 
         @JsonFormat(with = JsonFormat.Feature.ACCEPT_SINGLE_VALUE_AS_ARRAY)
         List<String> category,
+
+        @JsonFormat(with = JsonFormat.Feature.ACCEPT_SINGLE_VALUE_AS_ARRAY)
+        List<String> nodeIds,
 
         Integer count,
 

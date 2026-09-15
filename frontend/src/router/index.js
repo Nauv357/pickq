@@ -31,6 +31,13 @@ const routes = [
         meta: { title: '练习历史' }
       },
       {
+        // 学习路线（阶段 2）：今天做什么 / 下一步 / 还缺什么 —— 全部公式算，零 token
+        path: 'banks/:id/roadmap',
+        name: 'roadmap',
+        component: () => import('../views/RoadmapView.vue'),
+        meta: { title: '学习路线' }
+      },
+      {
         path: 'ai-import/jobs',
         name: 'ai-import-jobs',
         component: () => import('../views/AiImportJobsView.vue'),

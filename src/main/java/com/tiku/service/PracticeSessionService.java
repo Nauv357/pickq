@@ -9,12 +9,14 @@ import com.tiku.mapper.MaterialMapper;
 import com.tiku.mapper.PracticeSessionMapper;
 import com.tiku.mapper.PracticeSessionQuestionMapper;
 import com.tiku.mapper.QuestionMapper;
+import com.tiku.mapper.QuestionSkillMapper;
 import com.tiku.mapper.ReviewStateMapper;
 import com.tiku.mapper.StudyRecordMapper;
 import com.tiku.model.Material;
 import com.tiku.model.PracticeSession;
 import com.tiku.model.Question;
 import com.tiku.model.QuestionBank;
+import com.tiku.model.QuestionSkill;
 import com.tiku.model.ReviewState;
 import com.tiku.model.StudyRecord;
 import org.springframework.stereotype.Service;
@@ -44,11 +46,12 @@ import java.util.stream.Collectors;
 @Service
 public class PracticeSessionService {
 
-    private static final Set<String> MODES = Set.of("ALL", "SEQUENCE", "TOPIC", "REVIEW", "WRONG", "FAVORITE");
+    private static final Set<String> MODES = Set.of("ALL", "SEQUENCE", "TOPIC", "SKILL", "REVIEW", "WRONG", "FAVORITE");
 
     private final PracticeSessionMapper sessionMapper;
     private final PracticeSessionQuestionMapper sessionQuestionMapper;
     private final QuestionMapper questionMapper;
+    private final QuestionSkillMapper questionSkillMapper;
     private final StudyRecordMapper studyRecordMapper;
     private final ReviewStateMapper reviewStateMapper;
     private final MaterialMapper materialMapper;
@@ -58,6 +61,7 @@ public class PracticeSessionService {
     public PracticeSessionService(PracticeSessionMapper sessionMapper,
                                   PracticeSessionQuestionMapper sessionQuestionMapper,
                                   QuestionMapper questionMapper,
+                                  QuestionSkillMapper questionSkillMapper,
                                   StudyRecordMapper studyRecordMapper,
                                   ReviewStateMapper reviewStateMapper,
                                   MaterialMapper materialMapper,
@@ -66,6 +70,7 @@ public class PracticeSessionService {
         this.sessionMapper = sessionMapper;
         this.sessionQuestionMapper = sessionQuestionMapper;
         this.questionMapper = questionMapper;
+        this.questionSkillMapper = questionSkillMapper;
         this.studyRecordMapper = studyRecordMapper;
         this.reviewStateMapper = reviewStateMapper;
         this.materialMapper = materialMapper;
@@ -80,7 +85,7 @@ public class PracticeSessionService {
         questionBankService.findByIdOrThrow(bankId);
         if (request == null) {
             //空请求体（前端可能不带 body）：等价于"全部随机刷全库"
-            request = new SessionCreateRequest(null, null, null, null, null, null, null, null);
+            request = new SessionCreateRequest(null, null, null, null, null, null, null, null, null);
         }
         String mode = normalizeMode(request.mode());
 
@@ -164,7 +169,7 @@ public class PracticeSessionService {
     private String normalizeMode(String mode) {
         String m = mode == null || mode.isBlank() ? "ALL" : mode.toUpperCase();
         if (!MODES.contains(m)) {
-            throw new IllegalArgumentException("不支持的会话模式：" + mode + "（ALL/SEQUENCE/TOPIC/REVIEW/WRONG/FAVORITE）");
+            throw new IllegalArgumentException("不支持的会话模式：" + mode + "（ALL/SEQUENCE/TOPIC/SKILL/REVIEW/WRONG/FAVORITE）");
         }
         return m;
     }
@@ -203,6 +208,23 @@ public class PracticeSessionService {
         switch (mode) {
             case "SEQUENCE" -> wrapper.orderByAsc(Question::getQuestionNumber).orderByAsc(Question::getId);
             case "FAVORITE" -> wrapper.eq(Question::getFavorite, true);
+            // SKILL（阶段 2）：按知识点抽题——学习路线的"开始今天的任务"用它。
+            // 题与节点的关联走 question_skill（只认当前技能图里存在的节点，与知识点页同口径）
+            case "SKILL" -> {
+                List<String> nodes = request.nodeIds();
+                if (nodes == null || nodes.isEmpty()) {
+                    throw new IllegalArgumentException("按知识点抽题需要指定 nodeIds");
+                }
+                List<Long> ids = questionSkillMapper.selectList(new LambdaQueryWrapper<QuestionSkill>()
+                                .eq(QuestionSkill::getBankId, bankId)
+                                .eq(QuestionSkill::getShadowed, false)
+                                .in(QuestionSkill::getNodeId, nodes))
+                        .stream().map(QuestionSkill::getQuestionId).distinct().toList();
+                if (ids.isEmpty()) {
+                    return List.of();
+                }
+                wrapper.in(Question::getId, ids);
+            }
             case "WRONG" -> {
                 Set<Long> wrongIds = studyRecordService.listWrongQuestionIds(bankId);
                 if (wrongIds.isEmpty()) {

@@ -355,6 +355,21 @@ public class QuestionService {
 
         questionMapper.updateById(question);
 
+        // 归属（试卷/章节）清空：MyBatis-Plus 实体里的 null 不会进 UPDATE，
+        // 所以"把这一栏删空"必须显式用 wrapper 落库（同下方主观题清客观题字段的写法）
+        boolean clearTopic = request.topic() != null && request.topic().isBlank();
+        boolean clearCategory = request.category() != null && request.category().isBlank();
+        if (clearTopic || clearCategory) {
+            LambdaUpdateWrapper<Question> clear = new LambdaUpdateWrapper<Question>().eq(Question::getId, question.getId());
+            if (clearTopic) {
+                clear.set(Question::getTopic, null);
+            }
+            if (clearCategory) {
+                clear.set(Question::getCategory, null);
+            }
+            questionMapper.update(null, clear);
+        }
+
         if (finalType == QuestionType.SUBJECTIVE) {
             //切换到（或保持）主观题：客观题字段对主观题无意义，落库清空（MyBatis-Plus 实体 null 不更新，需显式 wrapper）
             questionMapper.update(null, new LambdaUpdateWrapper<Question>()
