@@ -5,10 +5,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -38,12 +42,30 @@ import java.util.TreeMap;
 public class SkillGraphService {
 
     private static final String TEMPLATE_PATTERN = "classpath:/skill-templates/*.json";
+    /** 用户自定义知识点的存放位置：只影响本机，不进内容包 */
+    private static final String CUSTOM_FILE = "skill-custom-nodes.json";
+    /** 自定义节点统一挂在这个阶段下（界面上显示为「自定义知识点」） */
+    public static final String CUSTOM_STAGE_ID = "custom";
+    public static final String CUSTOM_STAGE_NAME = "自定义知识点";
+    /** 自定义节点 id 前缀：用于区分哪些节点是用户加的（可删） */
+    public static final String CUSTOM_ID_PREFIX = "custom.";
 
     private final ObjectMapper objectMapper;
+    private final Path customPath;
     private final Map<String, SkillTemplate> templates = new LinkedHashMap<>();
+    /** 用户自定义节点：templateId → 节点（有序，按加入时间） */
+    private final Map<String, List<NodeView>> customNodes = new LinkedHashMap<>();
 
+    /** 单测用（没有数据目录：自定义知识点只在内存里生效） */
     public SkillGraphService(ObjectMapper objectMapper) {
+        this(objectMapper, null);
+    }
+
+    /** Spring 用这个：数据目录决定自定义知识点的落盘位置。两个构造器并存，必须显式标注用哪个 */
+    @Autowired
+    public SkillGraphService(ObjectMapper objectMapper, @Value("${tiku.data-dir:}") String dataDir) {
         this.objectMapper = objectMapper;
+        this.customPath = dataDir == null || dataDir.isBlank() ? null : Path.of(dataDir, CUSTOM_FILE);
         load();
     }
 
@@ -98,12 +120,22 @@ public class SkillGraphService {
     // ==================== 加载与校验 ====================
 
     private void load() {
+        loadBuiltIns();
+        readCustomFromDisk();
+        applyCustom();
+        log.info("技能模板加载完成：{} 个（{}）；自定义节点 {} 个", templates.size(),
+                String.join(", ", templates.keySet()),
+                customNodes.values().stream().mapToInt(List::size).sum());
+    }
+
+    private void loadBuiltIns() {
         Resource[] resources;
         try {
             resources = new PathMatchingResourcePatternResolver().getResources(TEMPLATE_PATTERN);
         } catch (IOException e) {
             throw new IllegalStateException("读取内置技能模板失败：" + e.getMessage(), e);
         }
+        templates.clear();
         for (Resource r : resources) {
             try {
                 String json = new String(r.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
@@ -120,8 +152,160 @@ public class SkillGraphService {
             // 没有模板时标签功能没有任何意义，直接失败而不是空跑
             throw new IllegalStateException("没有可用的内置技能模板（skill-templates/*.json）");
         }
-        log.info("技能模板加载完成：{} 个（{}）", templates.size(),
-                String.join(", ", templates.keySet()));
+    }
+
+    // ==================== 用户自定义知识点（本机私有词表） ====================
+
+    /**
+     * 读取 {@code {dataDir}/skill-custom-nodes.json}（文件不存在时保留内存里已有的自定义节点）。
+     *
+     * 为什么要有这一层：受控词表如果只能"官方定义"，用户在 AI 判错或题库里有图里没有的知识点时
+     * 就没有任何出路（实测反馈："可以在下拉里输入文字，但保存不了 tag"）。
+     * 自定义节点只影响本机、挂在「自定义知识点」阶段下；删除节点时它的标签会变成失效标签、可一键清理。
+     */
+    private void readCustomFromDisk() {
+        if (customPath == null || !Files.exists(customPath)) {
+            return; // 没有数据目录 / 还没写过：保留当前内存状态（单测直接 new 的场合）
+        }
+        Map<String, List<NodeView>> parsed = new LinkedHashMap<>();
+        try {
+            JsonNode root = objectMapper.readTree(Files.readString(customPath, StandardCharsets.UTF_8));
+            root.fields().forEachRemaining(e -> {
+                List<NodeView> list = new ArrayList<>();
+                for (JsonNode n : e.getValue()) {
+                    String id = n.path("id").asText("").trim();
+                    String name = n.path("name").asText("").trim();
+                    if (!id.isEmpty() && !name.isEmpty()) {
+                        list.add(new NodeView(id, name, null, 3, 1.0, true, List.of(),
+                                CUSTOM_STAGE_ID, CUSTOM_STAGE_NAME, 999));
+                    }
+                }
+                if (!list.isEmpty()) {
+                    parsed.put(e.getKey(), list);
+                }
+            });
+        } catch (Exception e) {
+            log.warn("自定义知识点文件读取失败（按空处理，不影响内置模板）：{}", e.getMessage());
+            return;
+        }
+        customNodes.clear();
+        customNodes.putAll(parsed);
+    }
+
+    /** 把自定义节点并进模板：追加一个「自定义知识点」阶段 */
+    private void applyCustom() {
+        for (Map.Entry<String, List<NodeView>> e : customNodes.entrySet()) {
+            SkillTemplate base = templates.get(e.getKey());
+            if (base == null) {
+                continue; // 模板已被移除：这些节点无处可挂，忽略（标签会被当失效标签清理）
+            }
+            templates.put(e.getKey(), mergeCustom(base, e.getValue()));
+        }
+    }
+
+    private SkillTemplate mergeCustom(SkillTemplate base, List<NodeView> custom) {
+        List<NodeView> nodes = new ArrayList<>(base.nodes());
+        nodes.addAll(custom);
+        List<String> stages = new ArrayList<>(base.stageOrder());
+        if (!stages.contains(CUSTOM_STAGE_ID)) {
+            stages.add(CUSTOM_STAGE_ID);
+        }
+        Map<String, String> stageNames = new LinkedHashMap<>(base.stageNames());
+        stageNames.put(CUSTOM_STAGE_ID, CUSTOM_STAGE_NAME);
+        Map<String, List<String>> prereq = new LinkedHashMap<>(base.prereq());
+        for (NodeView n : custom) {
+            prereq.put(n.nodeId(), List.of());
+        }
+        String fingerprint = base.templateId() + "|" + custom.stream()
+                .map(n -> n.nodeId() + "=" + n.name()).reduce("", (a, b) -> a + ";" + b);
+        return new SkillTemplate(base.templateId(), base.name(), base.version(), base.goalHint(), base.sourceType(),
+                base.graphVersion() + "-c" + Integer.toHexString(fingerprint.hashCode()),
+                List.copyOf(stages), Map.copyOf(stageNames), List.copyOf(nodes), Map.copyOf(prereq));
+    }
+
+    /** 该模板下的自定义节点（界面上可删的只有这些） */
+    public List<NodeView> customNodes(String templateId) {
+        return customNodes.getOrDefault(templateId, List.of());
+    }
+
+    /**
+     * 新增一个自定义知识点（同名已存在时直接复用，保证"输入同一个名字"不会造出两个节点）。
+     * 返回新建/复用的节点视图。
+     */
+    public synchronized NodeView addCustomNode(String templateId, String rawName) {
+        SkillTemplate t = template(templateId);
+        String name = rawName == null ? "" : rawName.trim().replaceAll("\\s+", " ");
+        if (name.isEmpty()) {
+            throw new IllegalArgumentException("知识点名称不能为空");
+        }
+        if (name.length() > 40) {
+            name = name.substring(0, 40);
+        }
+        // 与已有节点同名（含内置）：直接复用，别制造"看起来一样但不是一个"的节点
+        for (NodeView n : t.nodes()) {
+            if (n.name().equalsIgnoreCase(name)) {
+                return n;
+            }
+        }
+        String nodeId = CUSTOM_ID_PREFIX + hash8(templateId + "|" + name);
+        NodeView node = new NodeView(nodeId, name, null, 3, 1.0, true, List.of(),
+                CUSTOM_STAGE_ID, CUSTOM_STAGE_NAME, 999);
+        List<NodeView> list = new ArrayList<>(customNodes.getOrDefault(templateId, List.of()));
+        list.add(node);
+        customNodes.put(templateId, List.copyOf(list));
+        persistCustomNodes();
+        load();
+        log.info("新增自定义知识点：{} → {}（{}）", templateId, nodeId, name);
+        return node;
+    }
+
+    /** 删除自定义知识点（只能删 {@code custom.*}；它的标签会变成失效标签，由题库侧清理） */
+    public synchronized void removeCustomNode(String templateId, String nodeId) {
+        if (nodeId == null || !nodeId.startsWith(CUSTOM_ID_PREFIX)) {
+            throw new IllegalArgumentException("只能删除自定义知识点：" + nodeId);
+        }
+        List<NodeView> list = new ArrayList<>(customNodes.getOrDefault(templateId, List.of()));
+        if (list.removeIf(n -> n.nodeId().equals(nodeId))) {
+            if (list.isEmpty()) {
+                customNodes.remove(templateId);
+            } else {
+                customNodes.put(templateId, List.copyOf(list));
+            }
+            persistCustomNodes();
+            load();
+            log.info("删除自定义知识点：{} → {}", templateId, nodeId);
+        }
+    }
+
+    private void persistCustomNodes() {
+        if (customPath == null) {
+            // 没有数据目录（单元测试直接 new 的场合）：只在内存里生效，不落盘
+            return;
+        }
+        try {
+            Map<String, List<Map<String, String>>> out = new LinkedHashMap<>();
+            customNodes.forEach((k, v) -> out.put(k, v.stream()
+                    .map(n -> Map.of("id", n.nodeId(), "name", n.name())).toList()));
+            Files.createDirectories(customPath.getParent());
+            Files.writeString(customPath, objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(out),
+                    StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            throw new IllegalStateException("自定义知识点保存失败：" + e.getMessage(), e);
+        }
+    }
+
+    private static String hash8(String s) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] h = md.digest(s.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < 4; i++) {
+                sb.append(String.format(Locale.ROOT, "%02x", h[i]));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return Integer.toHexString(s.hashCode());
+        }
     }
 
     SkillTemplate parse(String json, String fileName) {

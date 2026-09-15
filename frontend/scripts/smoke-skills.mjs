@@ -89,8 +89,13 @@ const ROWS = [
 
 function reviewPage(status) {
   const records = status === 'all' ? ROWS : ROWS.filter((r) => r.status === status)
-  return { total: records.length, page: 1, size: 50, counts: COUNTS, records }
+  // total 故意大于本页条数：模拟"还有更多页"，这样「选中全部 N 题」会出现（真实题库几百题很常见）。
+  // 计数（counts）仍然来自后端概览口径，与 total 不是一回事。
+  // orphan 非 0：界面上会出现"清理失效标签"的提示。
+  return { total: 12, page: 1, size: 50, counts: COUNTS, orphan: { rows: 2, questions: 1 }, records }
 }
+
+let customSeq = 0
 
 function questionDetail(id) {
   return {
@@ -109,12 +114,19 @@ function stub(pathname) {
   if (pathname === '/api/banks/1/materials') return []
   if (pathname === '/api/skills/templates') return TEMPLATES
   if (pathname.startsWith('/api/skills/templates/') && pathname.endsWith('/sync')) return { nodesWritten: 3 }
+  // 用户在下拉里直接输入新名称 → 新建自定义知识点
+  if (/^\/api\/skills\/templates\/[^/]+\/nodes$/.test(pathname)) {
+    customSeq++
+    return { nodeId: `custom.smoke${customSeq}`, name: '我的自定义知识点', stageId: 'custom', stageName: '自定义知识点' }
+  }
+  if (/^\/api\/skills\/templates\/[^/]+\/nodes\/[^/]+$/.test(pathname)) return { nodeId: 'custom.smoke1' }
   if (pathname.startsWith('/api/skills/templates/')) {
     const id = decodeURIComponent(pathname.split('/').pop())
     const tpl = TEMPLATES.find((t) => t.templateId === id) || TEMPLATES[0]
     return { ...tpl, nodes: NODES }
   }
   if (pathname === '/api/banks/1/skills/coverage') return COVERAGE
+  if (pathname === '/api/banks/1/skills/cleanup-orphans') return { affected: 2 }
   if (pathname === '/api/banks/1/skills/suggest') {
     return { templateId: 'official.civil-service', graphVersion: 'x', groupCount: 0, mappedGroups: 0, cachedGroups: 0, aiCalls: 5, taggedQuestions: 52, withoutUsableTag: 0, truncated: false, message: '分析完成' }
   }
@@ -225,6 +237,27 @@ await page.waitForTimeout(500)
 const rejectCall = lastApply((b) => b.includes('reject'))
 check('行内「丢弃建议」发出 action=reject + questionIds', !!rejectCall && rejectCall.body.includes('[11]'), rejectCall?.body || '(无请求)')
 
+/* ---------- 3b. 下拉里直接输入新名称 → 新建自定义知识点并打上（用户实测："能输入但保存不了"） ---------- */
+await waitToastsGone()
+await row0.locator('.skill-tag-select .el-select__wrapper').click()
+await page.waitForTimeout(300)
+await page.keyboard.type('我的自定义知识点')
+await page.waitForTimeout(500)
+await page.keyboard.press('Enter')
+await page.waitForTimeout(1200)
+await closeDropdown()
+const createReq = [...calls].reverse().find((c) => /^\/api\/skills\/templates\/[^/]+\/nodes$/.test(c.path) && c.method === 'POST')
+check('输入新名称会先创建自定义知识点', !!createReq && createReq.body.includes('我的自定义知识点'), createReq?.body || '(无请求)')
+const customSet = lastApply((b) => b.includes('"set"') && b.includes('custom.smoke'))
+check('创建后立刻作为标签落到这题上', !!customSet && customSet.body.includes('[11]'), customSet?.body || '(无请求)')
+
+/* ---------- 3c. 失效标签提示 + 一键清理 ---------- */
+const orphanText = await textOf(page.locator('.skill-gap.warn'))
+check('失效标签有提示', /旧标签/.test(orphanText), orphanText.slice(0, 100))
+await page.locator('.skill-gap.warn button').click()
+await page.waitForTimeout(600)
+check('一键清理发出 cleanup-orphans 请求', calls.some((c) => c.path === '/api/banks/1/skills/cleanup-orphans'), '(无请求)')
+
 /* ---------- 4. 就地展开题干（不跳转） ---------- */
 await waitToastsGone()
 await row0.locator('button', { hasText: '看题干' }).click()
@@ -244,7 +277,7 @@ await closeDropdown()
 await page.waitForTimeout(500)
 const nodeReq = [...calls].reverse().find((c) => c.path === '/api/banks/1/skills/questions')
 check('按知识点筛选带上 nodeId', nodeReq?.query.includes('nodeId=gk.pd.figure.num'), nodeReq?.query)
-check('缺口提示可见', /个知识点你还没有题/.test(await textOf(page.locator('.skill-gap'))), await textOf(page.locator('.skill-gap')))
+check('缺口提示可见', /个知识点你还没有题/.test(await textOf(page.locator('.skill-gap').first())), await textOf(page.locator('.skill-gap').first()))
 
 /* ---------- 6. 批量 ---------- */
 await waitToastsGone()
@@ -263,6 +296,24 @@ await page.locator('.skill-batch button', { hasText: '设为知识点' }).click(
 await page.waitForTimeout(600)
 const batchCall = lastApply((b) => b.includes('"set"') && b.includes('gk.zl.growth'))
 check('批量「设为知识点」一次带上多题', !!batchCall && /\[11,\s*31\]/.test(batchCall.body), batchCall?.body || '(无请求)')
+
+/* ---------- 6b. 全选（用户实测："没有一键全选"） ---------- */
+await waitToastsGone()
+// 全选本页
+await page.locator('.skill-list-head .el-checkbox').click()
+await page.waitForTimeout(300)
+let batchText2 = await textOf(page.locator('.skill-batch'))
+check('「全选本页」把本页题目全部勾上', /已选 4 题/.test(batchText2), batchText2.slice(0, 80))
+
+// 选中全部 N 题（跨页）：只把筛选条件发给后端，不回传 id
+await page.locator('.skill-list-head button', { hasText: '选中全部' }).click()
+await page.waitForTimeout(300)
+batchText2 = await textOf(page.locator('.skill-batch'))
+check('「选中全部 N 题」生效（按清单总数）', /已选 12 题/.test(batchText2), batchText2.slice(0, 80))
+await page.locator('.skill-batch button', { hasText: '确认建议' }).click()
+await page.waitForTimeout(700)
+const allScopeCall = lastApply((b) => b.includes('confirm') && b.includes('filterStatus'))
+check('全选批量只发筛选条件（filterStatus），不发上千个题目 id', !!allScopeCall && !allScopeCall.body.includes('questionIds'), allScopeCall?.body || '(无请求)')
 
 /* ---------- 7. 详情（可选跳转）与按批分析 ---------- */
 await waitToastsGone()

@@ -145,28 +145,32 @@ try {
   check('建库成功', !!bankId, JSON.stringify(created).slice(0, 120))
 
   let i = 0
-  for (const content of STEMS) {
-    i++
-    await api('/questions', 'POST', {
-      bankId,
-      volume: 1,
-      questionType: 'SINGLE',
-      questionNumber: i,
-      content,
-      topic: null,
-      category: null,
-      score: 1,
-      analysis: null,
-      options: [
-        { key: 'A', text: '选项甲' },
-        { key: 'B', text: '选项乙' },
-        { key: 'C', text: '选项丙' },
-        { key: 'D', text: '选项丁' }
-      ],
-      answerKeys: ['A'],
-      answerText: null,
-      referenceAnswer: null
-    })
+  // 24 道母题 × 5 轮 = 120 题：故意超过一页（50），这样才能真的验证分页与「选中全部 N 题」
+  // （用户自己的题库就是 125 题这个量级）
+  for (let cycle = 0; cycle < 5; cycle++) {
+    for (const stem of STEMS) {
+      i++
+      await api('/questions', 'POST', {
+        bankId,
+        volume: 1,
+        questionType: 'SINGLE',
+        questionNumber: i,
+        content: cycle === 0 ? stem : `${stem}（第 ${cycle + 1} 套）`,
+        topic: null,
+        category: null,
+        score: 1,
+        analysis: null,
+        options: [
+          { key: 'A', text: '选项甲' },
+          { key: 'B', text: '选项乙' },
+          { key: 'C', text: '选项丙' },
+          { key: 'D', text: '选项丁' }
+        ],
+        answerKeys: ['A'],
+        answerText: null,
+        referenceAnswer: null
+      })
+    }
   }
   console.log(`  已写入 ${i} 题（bankId=${bankId}）`)
 
@@ -198,9 +202,12 @@ try {
   const textOf = async (loc) => flat(await loc.innerText())
   const reviewApi = (status, extra = '') =>
     api(`/banks/${bankId}/skills/questions?templateId=${TPL}&status=${status}&size=200${extra}`)
-  /** 多选下拉选完不会自动收起，按 Esc 关掉，否则会挡住下一次点击 */
+  /**
+   * 多选下拉选完不会自动收起（Element Plus 行为），点弹窗空白处把下拉关掉。
+   * ⚠️ 不能用 Escape：el-dialog 的 Esc 会连整个弹窗一起关掉（踩过一次）。
+   */
   const closeDropdown = async () => {
-    await page.keyboard.press('Escape')
+    await page.locator('.skill-cover').click({ position: { x: 5, y: 5 } }).catch(() => {})
     await page.waitForTimeout(300)
   }
   /** 点行内标签下拉的右端空白处（中间是已选标签上的 ✕，会变成删除标签） */
@@ -250,13 +257,13 @@ try {
     `概览 ${cov.pendingQuestions}/${cov.untaggedQuestions}/${cov.confirmedQuestions} vs 清单 ${pendList.total}/${untagList.total}/${confList.total}`
   )
   check('概览数字 = 清单条数（全部）', cov.totalQuestions === allList.total, `${cov.totalQuestions} vs ${allList.total}`)
-  check('标签数符合预期（假模型 12 题命中、12 题编不出节点）', cov.pendingQuestions + cov.confirmedQuestions === 12 && cov.untaggedQuestions === 12, `tagged=${cov.pendingQuestions + cov.confirmedQuestions} untagged=${cov.untaggedQuestions}`)
+  check('标签数符合预期（假模型每轮 12 题命中、12 题编不出节点，共 5 轮）', cov.pendingQuestions + cov.confirmedQuestions === 60 && cov.untaggedQuestions === 60, `tagged=${cov.pendingQuestions + cov.confirmedQuestions} untagged=${cov.untaggedQuestions}`)
   check('低置信建议也在队列里（不参与判定掌握）', cov.usableQuestions < cov.pendingQuestions + cov.confirmedQuestions, `usable=${cov.usableQuestions}`)
   check('界面数字与后端一致（总题数、未匹配、可用于判定）', cover.includes(String(cov.totalQuestions)) && cover.includes(String(cov.untaggedQuestions)) && cover.includes(String(cov.usableQuestions)), cover)
 
   /* ---------- 清单：以题为单位，标签就地可改 ---------- */
   const rows = page.locator('.skill-row')
-  check('清单以题为单位（24 题全列出）', (await rows.count()) === 24, String(await rows.count()))
+  check('清单以题为单位、按页渲染（120 题 → 本页 50）', (await rows.count()) === 50, String(await rows.count()))
   const rowText = await textOf(rows.first())
   check('行内有题号 + 状态 + 真实题干', /^\d+/.test(rowText) && rowText.length > 12, rowText.slice(0, 120))
   console.log(`  首行：${rowText.slice(0, 140)}`)
@@ -264,7 +271,7 @@ try {
   // 状态筛选器（可点击的数字，不是页签）
   await page.locator('.skill-chip', { hasText: '待确认' }).click()
   await page.waitForTimeout(800)
-  check('点「待确认」后清单只剩待确认的题', (await rows.count()) === cov.pendingQuestions, String(await rows.count()))
+  check('点「待确认」后清单只剩待确认的题（按页）', (await rows.count()) === Math.min(50, cov.pendingQuestions), String(await rows.count()))
   await page.screenshot({ path: `${SHOTS}/2-待确认.png` })
 
   /* ---------- 就地改标签 → 真写库（用户要的核心） ---------- */
@@ -300,7 +307,7 @@ try {
   /* ---------- 未匹配：就地补标签 ---------- */
   await page.locator('.skill-chip', { hasText: '未匹配' }).click()
   await page.waitForTimeout(800)
-  check('「未匹配」清单条数与概览一致', (await rows.count()) === afterConfirm.untaggedQuestions, String(await rows.count()))
+  check('「未匹配」清单条数与概览一致（按页）', (await rows.count()) === Math.min(50, afterConfirm.untaggedQuestions), String(await rows.count()))
   await page.screenshot({ path: `${SHOTS}/4-未匹配.png` })
   const untaggedText = await textOf(rows.first())
   await openTagSelect(rows.first())
@@ -310,19 +317,58 @@ try {
   check('未匹配的题可以就地指定知识点（未匹配 -1）', afterFill.untaggedQuestions === afterConfirm.untaggedQuestions - 1, `${afterConfirm.untaggedQuestions} → ${afterFill.untaggedQuestions}`)
   console.log(`  就地补标签的题：${untaggedText.slice(0, 100)}`)
 
-  /* ---------- 批量 ---------- */
+  /* ---------- 下拉里直接输入新名称 → 新建自定义知识点并打上（用户实测："能输入但保存不了"） ---------- */
   await page.locator('.skill-chip', { hasText: '未匹配' }).click()
-  await page.waitForTimeout(700)
-  await rows.nth(0).locator('.el-checkbox').click()
-  await rows.nth(1).locator('.el-checkbox').click()
-  await page.waitForTimeout(300)
+  await page.waitForTimeout(800)
+  const targetQid = (await reviewApi('untagged')).records[0].questionId
+  await openTagSelect(rows.first())
+  await page.keyboard.type('我的自定义·速算进阶')
+  await page.waitForTimeout(600)
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(2000)
+  await closeDropdown()
+  const tplAfterCreate = await api(`/skills/templates/${TPL}`)
+  const customNode = (tplAfterCreate.nodes || []).find((n) => n.name === '我的自定义·速算进阶')
+  check('输入的新名称被创建成自定义知识点（进词表）', !!customNode && customNode.nodeId.startsWith('custom.'), JSON.stringify(customNode || {}).slice(0, 120))
+  const afterCustom = await api(`/banks/${bankId}/skills/coverage?templateId=${TPL}`)
+  check('自定义知识点立刻打在这道题上', afterCustom.confirmedQuestions === afterFill.confirmedQuestions + 1, `${afterFill.confirmedQuestions} → ${afterCustom.confirmedQuestions}`)
+  console.log(`  自定义知识点：${customNode?.nodeId} 「${customNode?.name}」`)
+
+  /* ---------- 失效标签：删掉自定义知识点后，它的标签要被识别出来并可一键清理 ---------- */
+  await api(`/skills/templates/${TPL}/nodes/${encodeURIComponent(customNode.nodeId)}`, 'DELETE')
+  await page.locator('.skill-chip', { hasText: '全部' }).click()
+  await page.waitForTimeout(1200)
+  const afterDelete = await api(`/banks/${bankId}/skills/coverage?templateId=${TPL}`)
+  check('删掉自定义知识点后，那题回到未匹配（不假装还有标签）', afterDelete.untaggedQuestions === afterCustom.untaggedQuestions + 1, `${afterCustom.untaggedQuestions} → ${afterDelete.untaggedQuestions}`)
+  const allPage = await reviewApi('all')
+  check('后端如实报告失效标签（不是静默丢弃）', allPage.orphan?.rows >= 1 && allPage.orphan?.questions >= 1, JSON.stringify(allPage.orphan))
+  const orphanText = await textOf(page.locator('.skill-gap.warn'))
+  check('界面提示失效标签并给出清理按钮', /旧标签/.test(orphanText), orphanText.slice(0, 120))
+  await page.locator('.skill-gap.warn button').click()
+  await page.waitForTimeout(1500)
+  const afterCleanup = await reviewApi('all')
+  check('一键清理后失效标签归零', afterCleanup.orphan?.rows === 0, JSON.stringify(afterCleanup.orphan))
+  // 用户实测的原始症状：题目详情里显示 gk.zl.concept 这种原始 id。清理后详情必须干净。
+  const detailTags = await api(`/questions/${targetQid}/skills?templateId=${TPL}`)
+  check('清理后题目详情不再出现失效标签（不会再有原始 id）', Array.isArray(detailTags) && detailTags.length === 0, JSON.stringify(detailTags).slice(0, 160))
+
+  /* ---------- 全选：一键选中当前筛选下的全部题 ---------- */
+  await page.locator('.skill-chip', { hasText: '未匹配' }).click()
+  await page.waitForTimeout(900)
+  const beforeSelectAll = await api(`/banks/${bankId}/skills/coverage?templateId=${TPL}`)
+  const unmatchedNow = beforeSelectAll.untaggedQuestions
+  await page.locator('.skill-list-head button', { hasText: '选中全部' }).click()
+  await page.waitForTimeout(400)
+  const batchText = await textOf(page.locator('.skill-batch'))
+  check('「选中全部 N 题」按清单总数选中', batchText.includes(`已选 ${unmatchedNow} 题`), batchText.slice(0, 80))
   await page.locator('.skill-batch .el-select').click()
   await pickNode('人文历史与地理')
   await page.locator('.skill-batch button', { hasText: '设为知识点' }).click()
-  await page.waitForTimeout(1800)
-  const afterBatch = await api(`/banks/${bankId}/skills/coverage?templateId=${TPL}`)
-  check('批量设定：两题一起从未匹配变成已确认', afterBatch.untaggedQuestions === afterFill.untaggedQuestions - 2 && afterBatch.confirmedQuestions === afterFill.confirmedQuestions + 2, `${afterFill.untaggedQuestions}→${afterBatch.untaggedQuestions}`)
-  await page.screenshot({ path: `${SHOTS}/5-批量.png` })
+  await page.waitForTimeout(2500)
+  const afterSelectAll = await api(`/banks/${bankId}/skills/coverage?templateId=${TPL}`)
+  check('全选批量：未匹配的题一次性全部处理掉', afterSelectAll.untaggedQuestions === 0, `${unmatchedNow} → ${afterSelectAll.untaggedQuestions}`)
+  check('全选批量后三段仍然对得上账', afterSelectAll.confirmedQuestions + afterSelectAll.pendingQuestions + afterSelectAll.untaggedQuestions === afterSelectAll.totalQuestions, JSON.stringify(afterSelectAll).slice(0, 160))
+  await page.screenshot({ path: `${SHOTS}/5-全选批量.png` })
 
   /* ---------- 详情（可选跳转）：编辑器里能看到已有标签 ---------- */
   await page.locator('.skill-chip', { hasText: '已确认' }).click()

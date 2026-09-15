@@ -74,8 +74,30 @@
     <p v-if="emptyNodes.length" class="skill-gap text-muted">
       {{ t('gapHint', { n: emptyNodes.length, names: emptyNodes.slice(0, 3).map((x) => x.name).join('、') }) }}
     </p>
+    <!-- 失效标签：技能图升级（或删掉自定义知识点）后，指向已不存在节点的旧标签。
+         它们不显示、也不参与统计，但会留在库里（题目详情里也不会再出现了）→ 给一个一键清理。 -->
+    <p v-if="orphan.rows > 0" class="skill-gap warn">
+      {{ t('orphanHint', { rows: orphan.rows, questions: orphan.questions }) }}
+      <button class="btn btn-ghost btn-sm" @click="cleanupOrphans">{{ t('orphanClean') }}</button>
+    </p>
 
     <!-- 题目清单：标签就地可改，不必跳转编辑器 -->
+    <div class="skill-list-head">
+      <el-checkbox
+        :model-value="allPageSelected"
+        :indeterminate="somePageSelected"
+        @change="toggleSelectPage"
+      >
+        {{ t('selectPage') }}
+      </el-checkbox>
+      <button v-if="total > records.length" class="btn btn-ghost btn-sm" @click="selectAllMatching">
+        {{ t('selectAllN', { n: total }) }}
+      </button>
+      <span v-if="selectAllFlag" class="skill-selall text-muted">
+        {{ t('selectedAllHint', { n: total }) }}
+        <button class="btn btn-ghost btn-sm" @click="clearSelection">{{ t('clearSelection') }}</button>
+      </span>
+    </div>
     <div v-loading="loading" class="skill-list">
       <div v-if="!loading && records.length === 0" class="skill-empty text-muted">
         {{ status === 'untagged' ? t('noUntagged') : t('noRecords') }}
@@ -95,12 +117,14 @@
           </div>
           <div class="skill-row-body">
             <span class="skill-stem" :title="row.preview" @click="toggleExpand(row)">{{ row.preview }}</span>
-            <!-- 标签就地改：多选下拉（按阶段分组），改完立刻生效 -->
+            <!-- 标签就地改：多选下拉（按阶段分组、可直接输入新名称新建自定义知识点），改完立刻生效 -->
             <el-select
               class="skill-tag-select"
               :model-value="row.tags.map((x) => x.nodeId)"
               multiple
               filterable
+              allow-create
+              default-first-option
               collapse-tags
               collapse-tags-tooltip
               size="small"
@@ -158,13 +182,15 @@
     </div>
 
     <!-- 批量条：勾选后统一处理 -->
-    <div v-if="selected.length" class="skill-batch">
-      <span class="skill-batch-label">{{ t('selectedN', { n: selected.length }) }}</span>
+    <div v-if="selected.length || selectAllFlag" class="skill-batch">
+      <span class="skill-batch-label">{{ t('selectedN', { n: effectiveCount }) }}</span>
       <el-select
         v-model="batchNode"
         size="small"
         clearable
         filterable
+        allow-create
+        default-first-option
         :placeholder="t('batchPick')"
         style="width: 210px"
       >
@@ -175,7 +201,7 @@
       <button class="btn btn-primary btn-sm" :disabled="!batchNode" @click="applyBatch('set')">{{ t('batchSet') }}</button>
       <button class="btn btn-secondary btn-sm" @click="applyBatch('confirm')">{{ t('batchConfirm') }}</button>
       <button class="btn btn-ghost btn-sm" @click="applyBatch('reject')">{{ t('batchReject') }}</button>
-      <button class="btn btn-ghost btn-sm" @click="selected = []">{{ t('clearSelection') }}</button>
+      <button class="btn btn-ghost btn-sm" @click="clearSelection">{{ t('clearSelection') }}</button>
     </div>
 
     <template #footer>
@@ -189,7 +215,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useI18n } from 'vue-i18n'
-import { applySkills, getSkillCoverage, getSkillQuestions, getSkillTemplate, getSkillTemplates, suggestSkills } from '../api/skills'
+import { applySkills, cleanupOrphanTags, createSkillNode, getSkillCoverage, getSkillQuestions, getSkillTemplate, getSkillTemplates, suggestSkills } from '../api/skills'
 import { getQuestion } from '../api/questions'
 import { startBusy, stopBusy, updateBusy } from '../utils/busy'
 
@@ -222,6 +248,12 @@ const { t } = useI18n({
       noRecords: '这里还没有题目',
       noUntagged: '所有题都有标签了',
       noTagYet: '还没有标签',
+      selectPage: '全选本页',
+      selectAllN: '选中全部 {n} 题',
+      selectedAllHint: '已选中当前筛选下的全部 {n} 题（含未显示的页）',
+      orphanHint: '有 {rows} 条旧标签指向的知识点已经不在当前技能图里（技能图升级或自定义知识点被删），它们不显示也不参与统计，涉及 {questions} 题。',
+      orphanClean: '清理这些旧标签',
+      msgOrphanCleaned: '已清理 {n} 条旧标签',
       srcHuman: '你标注的（已生效）',
       srcAiPending: 'AI 建议 AI {c}（待确认）',
       srcAiConfirmed: 'AI 建议 {c}（已确认）',
@@ -279,6 +311,12 @@ const { t } = useI18n({
       noRecords: 'Nothing here yet',
       noUntagged: 'Every question has a tag now',
       noTagYet: 'no tag yet',
+      selectPage: 'Select page',
+      selectAllN: 'Select all {n}',
+      selectedAllHint: 'All {n} questions under the current filter are selected (including other pages)',
+      orphanHint: '{rows} legacy tags point to nodes that no longer exist in this skill map (graph upgrade or a deleted custom node). They are invisible and unused, affecting {questions} questions.',
+      orphanClean: 'Clean them up',
+      msgOrphanCleaned: 'Cleaned {n} legacy tags',
       srcHuman: 'yours (active)',
       srcAiPending: 'AI suggestion {c} (to confirm)',
       srcAiConfirmed: 'AI suggestion {c} (confirmed)',
@@ -325,6 +363,7 @@ const templates = ref([])
 const templateId = ref('')
 const coverage = ref(null)
 const listCounts = ref(null)
+const orphan = ref({ rows: 0, questions: 0 })
 const records = ref([])
 const total = ref(0)
 const page = ref(1)
@@ -333,6 +372,8 @@ const status = ref('all')
 const nodeFilter = ref('')
 const allNodes = ref([])
 const selected = ref([])
+/** 全选当前筛选下的全部题（跨页）：后端按筛选解析，不必把上千个 id 传到前端 */
+const selectAllFlag = ref(false)
 const batchNode = ref('')
 const expanded = reactive({})
 const details = reactive({})
@@ -356,6 +397,30 @@ const statusFilters = computed(() => [
 const pct = (n) => {
   const t0 = counts.value.total || 0
   return t0 ? Math.round((n / t0) * 100) : 0
+}
+
+/* ---------- 选择（全选本页 / 全选当前筛选） ---------- */
+const pageIds = computed(() => records.value.map((r) => r.questionId))
+const allPageSelected = computed(() => pageIds.value.length > 0 && pageIds.value.every((id) => selected.value.includes(id)))
+const somePageSelected = computed(() => pageIds.value.some((id) => selected.value.includes(id)) && !allPageSelected.value)
+/** 批量条上显示的数量：全选模式下就是清单总条数 */
+const effectiveCount = computed(() => (selectAllFlag.value ? total.value : selected.value.length))
+
+function toggleSelectPage(checked) {
+  selectAllFlag.value = false
+  selected.value = checked
+    ? [...new Set([...selected.value, ...pageIds.value])]
+    : selected.value.filter((id) => !pageIds.value.includes(id))
+}
+
+function selectAllMatching() {
+  selectAllFlag.value = true
+  selected.value = [...pageIds.value]
+}
+
+function clearSelection() {
+  selectAllFlag.value = false
+  selected.value = []
 }
 
 /** 下拉里 30+ 个节点要按阶段分组才挑得动 */
@@ -451,19 +516,16 @@ async function refresh() {
     listCounts.value = pageData?.counts || null
     records.value = pageData?.records || []
     total.value = pageData?.total || 0
+    orphan.value = pageData?.orphan || { rows: 0, questions: 0 }
     allNodes.value = tpl?.nodes || []
-    pruneSelection()
+    // 翻页/换筛选后保留勾选（跨页批量是正常需求），只丢掉"已经不在库里"的
+    const alive = new Set(records.value.map((r) => r.questionId))
+    selected.value = selected.value.filter((id) => alive.has(id) || !selectAllFlag.value)
   } catch (e) {
     /* 拦截器已提示 */
   } finally {
     loading.value = false
   }
-}
-
-/** 只保留还在当前清单里的勾选（换筛选/翻页后不会误伤看不见的题） */
-function pruneSelection() {
-  const visibleIds = new Set(records.value.map((r) => r.questionId))
-  selected.value = selected.value.filter((id) => visibleIds.has(id))
 }
 
 function reload(nextPage = page.value) {
@@ -473,6 +535,8 @@ function reload(nextPage = page.value) {
 
 function setStatus(value) {
   status.value = value
+  selectAllFlag.value = false
+  selected.value = []
   reload(1)
 }
 
@@ -511,19 +575,51 @@ function answerText(row) {
 }
 
 /**
- * 就地改标签：把这一题的标签设定为选中的节点（写成"你标注的"，覆盖 AI 建议）。
- * 清空下拉 = 这题没有知识点（会回到"未匹配"）。
+ * 用户在下拉里直接输入了一个图里没有的名字 → 新建自定义知识点（本机私有词表）。
+ * 同名会复用已有节点（后端保证），所以"输两次同样的名字"不会造出两个节点。
  */
-async function setRowTags(row, nodeIds) {
+async function resolveNodeIds(values) {
+  const known = allNodes.value.map((n) => n.nodeId)
+  const picked = []
+  const typed = []
+  for (const v of values || []) {
+    if (known.includes(v)) {
+      picked.push(v)
+    } else if (String(v).trim()) {
+      typed.push(String(v).trim())
+    }
+  }
+  if (!typed.length) return picked
+  let createdAny = false
+  for (const name of typed) {
+    const node = await createSkillNode(templateId.value, name)
+    if (node?.nodeId) {
+      picked.push(node.nodeId)
+      createdAny = true
+    }
+  }
+  if (createdAny) {
+    // 重新拉图：新节点要立刻出现在下拉里（否则这一行显示的是个"不存在的值"）
+    await refresh()
+  }
+  return picked
+}
+
+/**
+ * 就地改标签：把这一题的标签设定为选中的节点（写成"你标注的"，覆盖 AI 建议）。
+ * 清空下拉 = 这题没有知识点（会回到"未匹配"）；输入新名字 = 新建自定义知识点并打上。
+ */
+async function setRowTags(row, values) {
   try {
+    const nodeIds = await resolveNodeIds(values)
     const res = await applySkills(props.bankId, {
       action: 'set',
       templateId: templateId.value,
       questionIds: [row.questionId],
-      newNodes: nodeIds || []
+      newNodes: nodeIds
     })
     await refresh()
-    if (nodeIds && nodeIds.length) {
+    if (nodeIds.length) {
       const name = allNodes.value.find((n) => n.nodeId === nodeIds[nodeIds.length - 1])?.name || ''
       ElMessage.success(t('msgTagSet', { n: 1, name }))
     } else {
@@ -566,41 +662,59 @@ async function rejectRow(row) {
   ElMessage.success(t('msgRejected'))
 }
 
-/** 批量：设为知识点 / 确认建议 / 丢弃建议 */
+/**
+ * 批量：设为知识点 / 确认建议 / 丢弃建议。
+ * 全选模式下只把**筛选条件**发给后端（由它解析成题目），避免把上千个 id 传到前端再传回去。
+ */
 async function applyBatch(action) {
-  if (!selected.value.length) return
+  if (!selected.value.length && !selectAllFlag.value) return
+  const scope = selectAllFlag.value
+    ? { filterStatus: status.value, nodeId: nodeFilter.value || undefined }
+    : { questionIds: selected.value }
   try {
     if (action === 'set') {
       if (!batchNode.value) return
+      const nodeIds = await resolveNodeIds([batchNode.value])
       const res = await applySkills(props.bankId, {
         action: 'set',
         templateId: templateId.value,
-        questionIds: selected.value,
-        newNodes: [batchNode.value]
+        newNodes: nodeIds,
+        ...scope
       })
-      const name = allNodes.value.find((n) => n.nodeId === batchNode.value)?.name || ''
-      ElMessage.success(t('msgTagSet', { n: res?.affected ?? selected.value.length, name }))
+      const name = allNodes.value.find((n) => n.nodeId === nodeIds[0])?.name || batchNode.value
+      ElMessage.success(t('msgTagSet', { n: res?.affected ?? effectiveCount.value, name }))
     } else if (action === 'confirm') {
       const res = await applySkills(props.bankId, {
         action: 'confirm',
         templateId: templateId.value,
-        questionIds: selected.value
+        ...scope
       })
       ElMessage.success(t('msgConfirmed', { n: res?.affected ?? 0 }))
     } else {
       await applySkills(props.bankId, {
         action: 'reject',
         templateId: templateId.value,
-        questionIds: selected.value
+        ...scope
       })
       ElMessage.success(t('msgRejected'))
     }
-    selected.value = []
+    clearSelection()
     batchNode.value = ''
     await refresh()
   } catch (e) {
     ElMessage.error(t('msgFailed'))
     await refresh()
+  }
+}
+
+/** 清理失效标签（节点已不在当前技能图里） */
+async function cleanupOrphans() {
+  try {
+    const res = await cleanupOrphanTags(props.bankId, templateId.value)
+    ElMessage.success(t('msgOrphanCleaned', { n: res?.affected ?? 0 }))
+    await refresh()
+  } catch (e) {
+    ElMessage.error(t('msgFailed'))
   }
 }
 
@@ -781,6 +895,19 @@ function onClosed() {
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: 10px;
+}
+.skill-list-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 2px 6px;
+  font-size: 12px;
+}
+.skill-selall {
+  margin-left: auto;
+}
+.skill-gap.warn {
+  color: var(--warning);
 }
 .skill-empty {
   padding: 40px 0;

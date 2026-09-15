@@ -543,11 +543,11 @@ async function loadSkillGraph() {
   }
 }
 
-/** 载入某题现有标签 */
+/** 载入某题现有标签（**按当前技能模板**取，与知识点页同口径：不会出现已失效节点的原始 id） */
 async function loadQuestionSkills(questionId) {
   if (!questionId) return
   try {
-    skillCurrent.value = (await getQuestionSkills(questionId)) || []
+    skillCurrent.value = (await getQuestionSkills(questionId, skillTemplateId.value)) || []
     skillNodeIds.value = skillCurrent.value.map((x) => x.nodeId)
   } catch (e) {
     skillCurrent.value = []

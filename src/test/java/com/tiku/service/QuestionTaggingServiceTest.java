@@ -161,8 +161,8 @@ class QuestionTaggingServiceTest {
         assertEquals(4, r1.taggedQuestions(), "有 topic 的 4 道题应全部标注");
         assertEquals(2, r1.withoutUsableTag(), "没有 topic 的 2 道题此时不处理");
 
-        var tagsGraph = tagging.tagsOf(graph);
-        var tagsGraph2 = tagging.tagsOf(graph2);
+        var tagsGraph = tagging.tagsOf(graph, TEMPLATE);
+        var tagsGraph2 = tagging.tagsOf(graph2, TEMPLATE);
         assertEquals(1, tagsGraph.size(), "编造的节点必须被丢弃，只剩真实节点：" + tagsGraph);
         assertEquals("gk.pd.figure.num", tagsGraph.get(0).nodeId());
         assertEquals(tagsGraph.stream().map(QuestionTaggingService.QuestionTag::nodeId).toList(),
@@ -193,7 +193,7 @@ class QuestionTaggingServiceTest {
 
         // ④ 确认：确认后参与门控（confirmed=1）
         assertEquals(2, tagging.apply(BANK_ID, TEMPLATE, "confirm", "gk.pd.figure.num", null, null));
-        assertTrue(tagging.tagsOf(graph).get(0).confirmed());
+        assertTrue(tagging.tagsOf(graph, TEMPLATE).get(0).confirmed());
 
         // ⑤ 覆盖地图：4 题有标签（确认的是图形推理那 2 题）；每个节点只有 2 题 → 证据不足（<3）不能门控
         var coverage = tagging.coverage(BANK_ID, TEMPLATE);
@@ -212,10 +212,10 @@ class QuestionTaggingServiceTest {
         // ⑥ 逐题判定（可选）：没有 topic 的 2 道题补上标签
         var r3 = tagging.suggest(BANK_ID, TEMPLATE, true, 10);
         assertEquals(1, r3.aiCalls(), "只有逐题判定需要一次调用（分组仍走缓存）");
-        var tagsNoTopic = tagging.tagsOf(noTopic);
+        var tagsNoTopic = tagging.tagsOf(noTopic, TEMPLATE);
         assertEquals("gk.pd.argue", tagsNoTopic.get(0).nodeId(), "两道无 topic 的题都要打上标签");
         assertEquals("ai-direct", tagsNoTopic.get(0).origin(), "逐题判定来源应为 ai-direct");
-        assertEquals("gk.pd.argue", tagging.tagsOf(noTopic2).get(0).nodeId());
+        assertEquals("gk.pd.argue", tagging.tagsOf(noTopic2, TEMPLATE).get(0).nodeId());
 
         // ⑥b 关键设计：**低置信 AI 标签只作参考，不算"已覆盖"**（门控只认已确认或高置信）
         assertEquals(0.75, tagsNoTopic.get(0).confidence(), 0.001);
@@ -225,7 +225,7 @@ class QuestionTaggingServiceTest {
 
         // ⑦ 用户手动标注：覆盖 AI，且该题的 AI 建议被清掉
         assertEquals(1, tagging.setUserTags(noTopic, TEMPLATE, List.of("gk.sl.calc")));
-        var userTags = tagging.tagsOf(noTopic);
+        var userTags = tagging.tagsOf(noTopic, TEMPLATE);
         assertEquals(1, userTags.size());
         assertEquals("gk.sl.calc", userTags.get(0).nodeId());
         assertEquals("user", userTags.get(0).source());
@@ -233,7 +233,7 @@ class QuestionTaggingServiceTest {
 
         // ⑧ 用户标注不会被后续 AI 分析覆盖
         tagging.suggest(BANK_ID, TEMPLATE, true, 10);
-        assertEquals("gk.sl.calc", tagging.tagsOf(noTopic).get(0).nodeId(), "重跑 AI 分析不能覆盖用户标注");
+        assertEquals("gk.sl.calc", tagging.tagsOf(noTopic, TEMPLATE).get(0).nodeId(), "重跑 AI 分析不能覆盖用户标注");
 
         // ⑨ 非法节点不接受
         assertThrows(IllegalArgumentException.class,
@@ -246,29 +246,31 @@ class QuestionTaggingServiceTest {
         assertTrue(first.preview() != null && !first.preview().isBlank(), "每道题要带题干预览，用户才能分辨");
         assertTrue(first.questionNumber() != null, "要带题号，便于在列表里定位");
 
+        // 题级动作的语义：给了题目 id 就作用于**这题的全部 AI 建议**（界面上一行只有一个「确认」按钮），
+        // 不再受 nodeId 限制；返回值是"影响到的题数"，不是标签条数
         assertEquals(1, tagging.apply(BANK_ID, TEMPLATE, "confirm", "gk.zl.growth", null, List.of(first.questionId())),
-                "可只确认这一题");
-        assertTrue(tagging.tagsOf(first.questionId()).stream()
-                        .anyMatch(QuestionTaggingService.QuestionTag::confirmed), "被逐题确认的题应已确认");
+                "确认这一题（它的全部建议一起确认）");
+        assertTrue(tagging.tagsOf(first.questionId(), TEMPLATE).stream()
+                        .allMatch(QuestionTaggingService.QuestionTag::confirmed), "被逐题确认的题应全部已确认");
         assertEquals(0, tagging.apply(BANK_ID, TEMPLATE, "reject", "gk.zl.growth", null, List.of(first.questionId())),
                 "reject 只丢\"建议\"：已确认的标签不动");
-        assertTrue(tagging.tagsOf(first.questionId()).stream()
+        assertTrue(tagging.tagsOf(first.questionId(), TEMPLATE).stream()
                         .anyMatch(QuestionTaggingService.QuestionTag::confirmed), "已确认的标签要保留下来");
 
         // ⑪ 就地改标签（action=set）：把这些题的标签设定成给定节点，写成用户标注；
         //    反复设置不能累积出重复标签（界面上的下拉会被反复使用）
         assertEquals(1, tagging.apply(BANK_ID, TEMPLATE, "set", null, List.of("gk.sl.econ"), List.of(first.questionId())));
         assertEquals(1, tagging.apply(BANK_ID, TEMPLATE, "set", null, List.of("gk.sl.econ"), List.of(first.questionId())));
-        var edited = tagging.tagsOf(first.questionId());
+        var edited = tagging.tagsOf(first.questionId(), TEMPLATE);
         assertEquals(1, edited.size(), "重复设置应替换而不是追加：" + edited);
         assertEquals("gk.sl.econ", edited.get(0).nodeId());
         assertEquals("user", edited.get(0).source());
         assertTrue(edited.get(0).confirmed());
         assertEquals(0, tagging.apply(BANK_ID, TEMPLATE, "set", null, List.of("gk.sl.econ"), null),
                 "set 不给 questionIds 时不做任何事（危险动作必须显式给题）");
-        // 清空标签 = newNodes 传空数组
-        assertEquals(0, tagging.apply(BANK_ID, TEMPLATE, "set", null, List.of(), List.of(first.questionId())));
-        assertTrue(tagging.tagsOf(first.questionId()).isEmpty(), "空数组表示把这题的标签清掉");
+        // 清空标签 = newNodes 传空数组（返回值是"影响到的题数"：清空也算处理了这题）
+        assertEquals(1, tagging.apply(BANK_ID, TEMPLATE, "set", null, List.of(), List.of(first.questionId())));
+        assertTrue(tagging.tagsOf(first.questionId(), TEMPLATE).isEmpty(), "空数组表示把这题的标签清掉");
 
         // ⑫ 按状态列题：界面据此把"未匹配的题"摊开逐题补
         assertTrue(tagging.review(BANK_ID, TEMPLATE, "pending", null, 1, 50).total() >= 1, "待确认清单要能列题");
@@ -278,6 +280,41 @@ class QuestionTaggingServiceTest {
         assertEquals(6, allPage.total(), "全部 = 总题数");
         assertEquals(allPage.counts().confirmed() + allPage.counts().pending() + allPage.counts().untagged(),
                 allPage.counts().total(), "三段不重叠且相加 = 总题数");
+
+        // ⑬ 全选 N 题：不给题目 id、只给筛选条件时，由服务端解析作用范围（返回值是题数）
+        assertEquals(2, tagging.idsMatching(BANK_ID, TEMPLATE, "pending", null).size());
+        assertEquals(2, tagging.apply(BANK_ID, TEMPLATE, "confirm", null, null, null, "pending"));
+        assertEquals(0, tagging.review(BANK_ID, TEMPLATE, "pending", null, 1, 50).total(), "批量确认后没有待确认了");
+        // 按知识点再筛一层（另一道资料分析题的标签在 ⑪ 被清空了，所以只剩 1 题）
+        assertEquals(1, tagging.idsMatching(BANK_ID, TEMPLATE, "all", "gk.zl.growth").size());
+        // ⑦ 里人工标注成 gk.sl.calc 的那题
+        assertEquals(1, tagging.idsMatching(BANK_ID, TEMPLATE, "all", "gk.sl.calc").size());
+        // 没人挂的节点 → 0 题（界面靠它提示缺口）
+        assertEquals(0, tagging.idsMatching(BANK_ID, TEMPLATE, "all", "gk.cs.law").size());
+    }
+
+    /**
+     * 失效标签：技能图升级后（节点被拆细/改名），旧节点上的标签既显示不出来也不参与统计，
+     * 但会留在库里——用户实测在题目详情里看到过 `gk.zl.concept` 这种原始 id。
+     * 这里锁住两件事：① 读路径（详情/清单）都不再返回失效标签；② 能一键清干净。
+     */
+    @Test
+    void orphanTagsAreHiddenFromReadsAndCanBeCleaned() {
+        Long qid = insertQuestion("资料分析", "2024 年增长率是多少？");
+        // 直接塞一条"技能图里已不存在"的旧标签（模拟上一版技能图留下的数据）
+        jdbc.update("INSERT INTO question_skill (question_id, bank_id, node_id, template_id, source, confidence, "
+                        + "confirmed, origin, shadowed, updated_at) VALUES (?, ?, 'gk.zl.concept', ?, 'user', 1.0, 1, 'manual', 0, NOW())",
+                qid, BANK_ID, TEMPLATE);
+
+        assertTrue(tagging.tagsOf(qid, TEMPLATE).isEmpty(), "失效标签不能再出现在题目详情里");
+        assertEquals("untagged", tagging.review(BANK_ID, TEMPLATE, "all", null, 1, 50).records().get(0).status(),
+                "失效标签不算标签：这题应当是未匹配");
+        assertEquals(1, tagging.review(BANK_ID, TEMPLATE, "all", null, 1, 50).orphan().questions(),
+                "但要如实告诉用户有几题上挂着失效标签");
+        assertEquals(1, tagging.orphans(BANK_ID, TEMPLATE).rows());
+
+        assertEquals(1, tagging.cleanupOrphanTags(BANK_ID, TEMPLATE), "一键清理把失效标签删掉");
+        assertEquals(0, tagging.orphans(BANK_ID, TEMPLATE).rows());
     }
 
     @Test

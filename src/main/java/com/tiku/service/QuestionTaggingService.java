@@ -120,7 +120,8 @@ public class QuestionTaggingService {
     }
 
     /** 审阅清单分页 + **同一份快照**算出来的计数（数字与清单不可能打架） */
-    public record ReviewPage(int total, int page, int size, Counts counts, List<ReviewQuestion> records) {
+    public record ReviewPage(int total, int page, int size, Counts counts, OrphanInfo orphan,
+                             List<ReviewQuestion> records) {
     }
 
     /** 四段（含"可用于判定掌握"）计数，全部由同一份快照派生 */
@@ -487,7 +488,11 @@ public class QuestionTaggingService {
      * 现在概览数字、清单条数、节点覆盖全部从这一个快照派生，"数字与清单对不上"在结构上不可能发生。
      */
     private record Snapshot(List<Question> questions, Map<Long, List<QuestionSkill>> tags,
-                            Map<Long, String> status) {
+                            Map<Long, String> status, OrphanInfo orphan) {
+    }
+
+    /** 失效标签统计（条数 + 涉及题数） */
+    public record OrphanInfo(int rows, int questions) {
     }
 
     private Snapshot snapshot(Long bankId, String templateId) {
@@ -501,12 +506,18 @@ public class QuestionTaggingService {
                 .eq(QuestionSkill::getBankId, bankId)
                 .eq(QuestionSkill::getTemplateId, templateId));
         Map<Long, List<QuestionSkill>> tags = new LinkedHashMap<>();
+        Set<Long> orphanQuestions = new HashSet<>();
+        int orphanRows = 0;
         for (QuestionSkill r : rows) {
             if (Boolean.TRUE.equals(r.getShadowed())) {
                 continue;
             }
-            // 技能图换过之后，指向已不存在的节点的旧标签不算数（否则覆盖数字会虚高）
+            // 技能图换过之后，指向已不存在的节点的旧标签不算数（否则覆盖数字会虚高），
+            // 但要单独记一笔：这些"失效标签"要在界面上提示并可一键清理，
+            // 否则它们会只在题目详情里冒出来（用户实测：详情有 gk.zl.concept、知识点页没有）。
             if (!template.nodeIds().contains(r.getNodeId())) {
+                orphanQuestions.add(r.getQuestionId());
+                orphanRows++;
                 continue;
             }
             tags.computeIfAbsent(r.getQuestionId(), k -> new ArrayList<>()).add(r);
@@ -515,7 +526,48 @@ public class QuestionTaggingService {
         for (Question q : questions) {
             status.put(q.getId(), statusOf(tags.getOrDefault(q.getId(), List.of())));
         }
-        return new Snapshot(questions, tags, status);
+        return new Snapshot(questions, tags, status, new OrphanInfo(orphanRows, orphanQuestions.size()));
+    }
+
+    /**
+     * 失效标签：指向"当前技能图里已不存在节点"的标签（技能图升级、或用户删掉自定义节点之后留下的）。
+     * 它们显示不出来、也不参与统计与门控，留着只会让用户困惑。
+     */
+    public OrphanInfo orphans(Long bankId, String templateId) {
+        SkillGraphService.SkillTemplate template = graphService.template(templateId);
+        List<QuestionSkill> rows = questionSkillMapper.selectList(new LambdaQueryWrapper<QuestionSkill>()
+                .eq(QuestionSkill::getBankId, bankId)
+                .eq(QuestionSkill::getTemplateId, templateId)
+                .eq(QuestionSkill::getShadowed, false));
+        Set<Long> questions = new HashSet<>();
+        int n = 0;
+        for (QuestionSkill r : rows) {
+            if (!template.nodeIds().contains(r.getNodeId())) {
+                n++;
+                questions.add(r.getQuestionId());
+            }
+        }
+        return new OrphanInfo(n, questions.size());
+    }
+
+    /** 清理失效标签（它们已经不可能被显示或使用） */
+    @Transactional
+    public int cleanupOrphanTags(Long bankId, String templateId) {
+        SkillGraphService.SkillTemplate template = graphService.template(templateId);
+        List<QuestionSkill> rows = questionSkillMapper.selectList(new LambdaQueryWrapper<QuestionSkill>()
+                .eq(QuestionSkill::getBankId, bankId)
+                .eq(QuestionSkill::getTemplateId, templateId));
+        int n = 0;
+        for (QuestionSkill r : rows) {
+            if (!template.nodeIds().contains(r.getNodeId())) {
+                questionSkillMapper.deleteById(r.getId());
+                n++;
+            }
+        }
+        if (n > 0) {
+            log.info("清理失效标签：题库 {} 模板 {} 共 {} 条（技能图更新后这些节点已不存在）", bankId, templateId, n);
+        }
+        return n;
     }
 
     /** 每题状态：有已确认标签 = confirmed；只有 AI 未确认建议 = pending；什么都没有 = untagged */
@@ -594,7 +646,27 @@ public class QuestionTaggingService {
                     snap.status().get(q.getId()),
                     tagsFrom(snap.tags().getOrDefault(q.getId(), List.of()), template)));
         }
-        return new ReviewPage(filtered.size(), safePage, safeSize, countsOf(snap), records);
+        return new ReviewPage(filtered.size(), safePage, safeSize, countsOf(snap), snap.orphan(), records);
+    }
+
+    /** 当前筛选下的全部题目 id（界面"全选 N 题"用：不把几千个 id 传到前端再传回来） */
+    public List<Long> idsMatching(Long bankId, String templateId, String status, String nodeId) {
+        Snapshot snap = snapshot(bankId, templateId);
+        String want = status == null || status.isBlank() ? STATUS_ALL : status;
+        List<Long> ids = new ArrayList<>();
+        for (Question q : snap.questions()) {
+            if (!STATUS_ALL.equals(want) && !want.equals(snap.status().get(q.getId()))) {
+                continue;
+            }
+            if (nodeId != null && !nodeId.isBlank()) {
+                List<QuestionSkill> rows = snap.tags().getOrDefault(q.getId(), List.of());
+                if (rows.stream().noneMatch(r -> nodeId.equals(r.getNodeId()))) {
+                    continue;
+                }
+            }
+            ids.add(q.getId());
+        }
+        return ids;
     }
 
     private List<QuestionTag> tagsFrom(List<QuestionSkill> rows, SkillGraphService.SkillTemplate template) {
@@ -608,16 +680,25 @@ public class QuestionTaggingService {
         return out;
     }
 
-    /** 单题当前标签（含来源，供题目详情展示与用户修改） */
-    public List<QuestionTag> tagsOf(Long questionId) {
+    /**
+     * 单题当前标签（含来源，供题目详情展示与用户修改）。
+     *
+     * ⚠️ 必须**按模板限定**：不限定就会把别的模板、以及技能图升级后已不存在的旧标签也返回，
+     * 界面上就会冒出 `gk.zl.concept` 这种原始 id（用户实测反馈的正是这个：详情里有、知识点页里没有）。
+     * 现在和审阅清单同口径——只认当前模板 + 当前图里存在的节点。
+     */
+    public List<QuestionTag> tagsOf(Long questionId, String templateId) {
+        SkillGraphService.SkillTemplate template = graphService.template(templateId);
         List<QuestionSkill> rows = questionSkillMapper.selectList(new LambdaQueryWrapper<QuestionSkill>()
                 .eq(QuestionSkill::getQuestionId, questionId)
+                .eq(QuestionSkill::getTemplateId, templateId)
                 .eq(QuestionSkill::getShadowed, false));
         List<QuestionTag> out = new ArrayList<>();
         for (QuestionSkill r : rows) {
-            SkillGraphService.SkillTemplate t = graphService.has(r.getTemplateId())
-                    ? graphService.template(r.getTemplateId()) : null;
-            out.add(new QuestionTag(r.getNodeId(), t == null ? r.getNodeId() : nameOf(t, r.getNodeId()),
+            if (!template.nodeIds().contains(r.getNodeId())) {
+                continue; // 失效标签：不显示（由题库侧的一键清理处理掉）
+            }
+            out.add(new QuestionTag(r.getNodeId(), nameOf(template, r.getNodeId()),
                     r.getSource(), r.getConfidence() == null ? 0 : r.getConfidence(),
                     Boolean.TRUE.equals(r.getConfirmed()), r.getOrigin()));
         }
@@ -690,33 +771,45 @@ public class QuestionTaggingService {
     /**
      * 批量确认 / 设定标签 / 改挂 / 拒绝：
      * - action=confirm：把给定节点（或给定题）的 AI 建议置为已确认；
-     * - action=set：把这些题的标签**设定**为给定节点（界面上"就地改标签/批量设为知识点"），
-     *   没有 questionIds 时不动作（危险动作必须显式给题）；
+     * - action=set：把这些题的标签**设定**为给定节点（界面上"就地改标签/批量设为知识点"）；
      * - action=retag：按节点批量改挂（用 AI 建议反查题目，等价于对这批题执行 set）；
      * - action=reject：删除 AI 建议（已确认的标签不动）。
+     *
+     * 作用范围（questionIds vs filterStatus）见 {@link #resolveTargets}。
      */
     @Transactional
     public int apply(Long bankId, String templateId, String action, String nodeId,
                      List<String> newNodes, List<Long> questionIds) {
+        return apply(bankId, templateId, action, nodeId, newNodes, questionIds, null);
+    }
+
+    @Transactional
+    public int apply(Long bankId, String templateId, String action, String nodeId,
+                     List<String> newNodes, List<Long> questionIds, String filterStatus) {
         SkillGraphService.SkillTemplate template = graphService.template(templateId);
+        // 「全选 N 题」走这里：把筛选条件在**后端**解析成题目 id，界面不必回传上千个 id
+        List<Long> scoped = resolveTargets(bankId, templateId, questionIds, filterStatus, nodeId);
+        // 返回值统一是"影响到的**题数**"（不是标签行数）：一题可能有多个知识点，
+        // 界面上的提示（"已确认 N 题"）必须和用户看到的行数一致。
         if ("reject".equals(action)) {
-            int n = 0;
+            Set<Long> affected = new HashSet<>();
             // 只丢"建议"：已确认的标签不动（要撤掉已确认的标签，请把标签设成别的或空）
-            for (QuestionSkill r : selectAiRows(bankId, templateId, nodeId, questionIds, true)) {
+            for (QuestionSkill r : selectAiRows(bankId, templateId, scoped == null ? nodeId : null, scoped, true)) {
                 questionSkillMapper.deleteById(r.getId());
-                n++;
+                affected.add(r.getQuestionId());
             }
-            return n;
+            return affected.size();
         }
         if ("retag".equals(action) || "set".equals(action)) {
             List<String> target = normalizeNodes(template, newNodes);
             List<Long> ids;
-            if ("set".equals(action)) {
-                ids = questionIds == null ? List.of() : questionIds.stream().filter(Objects::nonNull).distinct().toList();
+            if (scoped != null) {
+                ids = scoped;
+            } else if ("set".equals(action)) {
+                ids = List.of(); // 没给题、也没给筛选：不做任何事（危险动作必须显式指定范围）
             } else {
-                ids = questionIds == null || questionIds.isEmpty()
-                        ? selectAiRows(bankId, templateId, nodeId, null, false).stream().map(QuestionSkill::getQuestionId).distinct().toList()
-                        : questionIds;
+                ids = selectAiRows(bankId, templateId, nodeId, null, false).stream()
+                        .map(QuestionSkill::getQuestionId).distinct().toList();
             }
             int n = 0;
             for (Long qid : ids) {
@@ -724,18 +817,37 @@ public class QuestionTaggingService {
                 if (q == null || !bankId.equals(q.getBankId())) {
                     continue;
                 }
-                n += writeUserTags(q, template, templateId, target);
+                writeUserTags(q, template, templateId, target);
+                n++;
             }
             return n;
         }
         // confirm（可按题：界面上逐题点"确认"）；已确认的无需重复处理
-        List<QuestionSkill> rows = selectAiRows(bankId, templateId, nodeId, questionIds, true);
-        for (QuestionSkill r : rows) {
+        Set<Long> affected = new HashSet<>();
+        for (QuestionSkill r : selectAiRows(bankId, templateId, scoped == null ? nodeId : null, scoped, true)) {
             r.setConfirmed(true);
             r.setUpdatedAt(LocalDateTime.now());
             questionSkillMapper.updateById(r);
+            affected.add(r.getQuestionId());
         }
-        return rows.size();
+        return affected.size();
+    }
+
+    /**
+     * 解析作用范围：
+     * - 给了 questionIds → 用它们（就地改标签、勾选批量）；
+     * - 没给、但给了 filterStatus → 按"当前清单筛选"在服务端解析（界面的"全选 N 题"）；
+     * - 都没给 → null 表示"沿用按 nodeId 的旧批量语义"（不是"什么题都没有"）。
+     */
+    private List<Long> resolveTargets(Long bankId, String templateId, List<Long> questionIds,
+                                      String filterStatus, String nodeId) {
+        if (questionIds != null && !questionIds.isEmpty()) {
+            return questionIds.stream().filter(Objects::nonNull).distinct().toList();
+        }
+        if (filterStatus != null && !filterStatus.isBlank()) {
+            return idsMatching(bankId, templateId, filterStatus, nodeId);
+        }
+        return null;
     }
 
     private List<QuestionSkill> selectAiRows(Long bankId, String templateId, String nodeId, List<Long> questionIds,

@@ -36,12 +36,31 @@ export const getSkillQuestions = (bankId, { templateId, status = 'all', nodeId, 
  * - confirm / reject：确认或丢弃 AI 建议（可只给 questionIds，也可按 nodeId 整批）
  * - set：把这些题的标签**设定**为 newNodes（就地改标签 / 批量设为知识点；newNodes 为空数组 = 清空）
  * - retag：按节点批量改挂
+ * 作用范围优先 questionIds；没给题时可以给 filterStatus（all/confirmed/pending/untagged）+ nodeId，
+ * 由后端解析成题目列表——界面的"全选 N 题"走这条路，不把上千个 id 传到前端再传回来。
  */
 export const applySkills = (bankId, body) => http.post(`/banks/${bankId}/skills/apply`, body)
 
 export const getSkillCoverage = (bankId, templateId) =>
   http.get(`/banks/${bankId}/skills/coverage`, { params: { templateId } })
 
-export const getQuestionSkills = (questionId) => http.get(`/questions/${questionId}/skills`)
+/** 清理失效标签：指向"当前技能图里已不存在节点"的旧标签（技能图升级 / 删掉自定义节点之后留下的） */
+export const cleanupOrphanTags = (bankId, templateId) =>
+  http.post(`/banks/${bankId}/skills/cleanup-orphans`, null, { params: { templateId } })
+
+/**
+ * 单题标签。必须带 templateId：与知识点页同口径——否则会把别的模板、或技能图升级后
+ * 已不存在的旧节点以原始 id（如 gk.zl.concept）的形式显示在题目详情里。
+ */
+export const getQuestionSkills = (questionId, templateId) =>
+  http.get(`/questions/${questionId}/skills`, { params: { templateId } })
 
 export const setQuestionSkills = (questionId, body) => http.put(`/questions/${questionId}/skills`, body)
+
+/** 新增自定义知识点（自己的词表，只存本机）：同名会复用已有节点，不会造出两个看起来一样的 */
+export const createSkillNode = (templateId, name) =>
+  http.post(`/skills/templates/${encodeURIComponent(templateId)}/nodes`, { name })
+
+/** 删除自定义知识点（只能删 custom.*）；它上面的标签会变成失效标签，可在题库里一键清理 */
+export const deleteSkillNode = (templateId, nodeId) =>
+  http.delete(`/skills/templates/${encodeURIComponent(templateId)}/nodes/${encodeURIComponent(nodeId)}`)

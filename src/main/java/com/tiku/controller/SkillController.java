@@ -124,6 +124,9 @@ public class SkillController {
     /**
      * 批量 / 逐题动作：confirm（确认建议）、set（把标签设定为给定节点）、retag（按节点改挂）、
      * reject（丢弃建议）。界面上的"就地改标签""批量设为知识点""确认""丢弃"都走这里。
+     *
+     * 作用范围：优先 questionIds；没给题时用 filterStatus（+可选 nodeId）在**后端**解析成题目列表，
+     * 这样界面的"全选 N 题"不必把上千个 id 传到前端再传回来。
      */
     @PostMapping("/banks/{bankId}/skills/apply")
     public ApiResponse<Map<String, Object>> apply(@PathVariable Long bankId, @RequestBody SkillApplyRequest request) {
@@ -132,8 +135,18 @@ public class SkillController {
             throw new IllegalArgumentException("缺少 templateId");
         }
         int affected = taggingService.apply(bankId, templateId, request.action(), request.nodeId(),
-                request.newNodes(), request.questionIds());
+                request.newNodes(), request.questionIds(), request.filterStatus());
         return ApiResponse.success(Map.of("affected", affected));
+    }
+
+    /**
+     * 清理失效标签：技能图升级（或删掉自定义知识点）后，指向已不存在节点的标签。
+     * 它们不显示、不参与统计，留着只会让用户在题目详情里看到莫名其妙的原始 id。
+     */
+    @PostMapping("/banks/{bankId}/skills/cleanup-orphans")
+    public ApiResponse<Map<String, Object>> cleanupOrphans(@PathVariable Long bankId,
+                                                          @RequestParam String templateId) {
+        return ApiResponse.success(Map.of("affected", taggingService.cleanupOrphanTags(bankId, templateId)));
     }
 
     /** 覆盖地图：路线节点在题库里的题量（<3 题视为证据不足，不参与门控） */
@@ -143,10 +156,33 @@ public class SkillController {
         return ApiResponse.success(taggingService.coverage(bankId, templateId));
     }
 
-    /** 单题标签（题目详情/编辑用） */
+    /** 单题标签（题目详情/编辑用）。必须带 templateId：与审阅清单同口径（不会出现别的模板/失效节点的原始 id） */
     @GetMapping("/questions/{questionId}/skills")
-    public ApiResponse<List<QuestionTaggingService.QuestionTag>> questionTags(@PathVariable Long questionId) {
-        return ApiResponse.success(taggingService.tagsOf(questionId));
+    public ApiResponse<List<QuestionTaggingService.QuestionTag>> questionTags(@PathVariable Long questionId,
+                                                                             @RequestParam String templateId) {
+        return ApiResponse.success(taggingService.tagsOf(questionId, templateId));
+    }
+
+    /**
+     * 新增自定义知识点（用户自己的词表，只存本机）：受控词表如果只能官方定义，
+     * 用户在"图里没有这个知识点"时就没有出路（实测反馈：下拉里能输入但保存不了）。
+     * 同名会复用已有节点（内置同名也算），不会造出两个看起来一样的节点。
+     */
+    @PostMapping("/skills/templates/{templateId}/nodes")
+    public ApiResponse<Map<String, Object>> addCustomNode(@PathVariable String templateId,
+                                                         @RequestBody Map<String, Object> body) {
+        Object name = body.get("name");
+        SkillGraphService.NodeView node = graphService.addCustomNode(templateId, name == null ? "" : String.valueOf(name));
+        return ApiResponse.success(Map.of("nodeId", node.nodeId(), "name", node.name(),
+                "stageId", node.stageId(), "stageName", node.stageName()));
+    }
+
+    /** 删除自定义知识点（只能删 custom.*）；它上面的标签会变成失效标签，可在题库里一键清理 */
+    @DeleteMapping("/skills/templates/{templateId}/nodes/{nodeId}")
+    public ApiResponse<Map<String, Object>> removeCustomNode(@PathVariable String templateId,
+                                                            @PathVariable String nodeId) {
+        graphService.removeCustomNode(templateId, nodeId);
+        return ApiResponse.success(Map.of("nodeId", nodeId));
     }
 
     /** 用户手动标注单题（覆盖 AI 与作者；只影响本机） */

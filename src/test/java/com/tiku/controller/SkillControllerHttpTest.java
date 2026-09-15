@@ -202,7 +202,7 @@ class SkillControllerHttpTest {
                                 + "\"templateId\":\"" + TEMPLATE + "\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.affected", is(1)));
-        mockMvc.perform(get("/api/questions/{id}/skills", someQid))
+        mockMvc.perform(get("/api/questions/{id}/skills", someQid).param("templateId", TEMPLATE))
                 .andExpect(jsonPath("$.data", hasSize(1)));
 
         // set 不给 questionIds → 不做任何事（危险动作必须显式给题）
@@ -228,7 +228,7 @@ class SkillControllerHttpTest {
                         .content("{\"templateId\":\"" + TEMPLATE + "\",\"nodeIds\":[\"gk.pd.analogy\"]}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.written", is(1)));
-        mockMvc.perform(get("/api/questions/{id}/skills", qid))
+        mockMvc.perform(get("/api/questions/{id}/skills", qid).param("templateId", TEMPLATE))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data", hasSize(1)))
                 .andExpect(jsonPath("$.data[0].nodeId", is("gk.pd.analogy")))

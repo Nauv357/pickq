@@ -17,6 +17,47 @@ class SkillGraphServiceTest {
 
     private final SkillGraphService service = new SkillGraphService(new ObjectMapper());
 
+    /**
+     * 自定义知识点（本机私有词表）：受控词表如果只能官方定义，用户在"图里没有这个知识点"时就没有出路
+     * （实测反馈：下拉里能输入文字，但保存不了 tag）。这里锁住三件事：
+     * ① 新建后立刻出现在图里（同一个 name 复用，不造重复节点）；② 落在「自定义知识点」阶段下；
+     * ③ 删除后从图里消失（它上面的标签会变成失效标签，由题库侧清理）。
+     */
+    @Test
+    void customNodesCanBeAddedReusedAndRemoved() {
+        String tpl = "official.civil-service";
+        int before = service.template(tpl).nodes().size();
+
+        var node = service.addCustomNode(tpl, "  我自己的知识点  ");
+        assertEquals("我自己的知识点", node.name(), "名称要去掉首尾空白");
+        assertTrue(node.nodeId().startsWith(SkillGraphService.CUSTOM_ID_PREFIX), node.nodeId());
+        assertEquals(SkillGraphService.CUSTOM_STAGE_NAME, node.stageName());
+        assertEquals(before + 1, service.template(tpl).nodes().size(), "新节点要立刻进图");
+        assertTrue(service.template(tpl).nodeIds().contains(node.nodeId()));
+        assertTrue(service.template(tpl).stageOrder().contains(SkillGraphService.CUSTOM_STAGE_ID));
+
+        // 同名再加一次：复用同一个节点（避免"看起来一样但不是一个"的重复项）
+        var again = service.addCustomNode(tpl, "我自己的知识点");
+        assertEquals(node.nodeId(), again.nodeId());
+        assertEquals(before + 1, service.template(tpl).nodes().size());
+
+        // 与内置节点同名：也复用内置的，不新建
+        var builtInName = service.template(tpl).nodes().get(0).name();
+        var reuse = service.addCustomNode(tpl, builtInName);
+        assertEquals(builtInName, reuse.name());
+        assertTrue(!reuse.nodeId().startsWith(SkillGraphService.CUSTOM_ID_PREFIX), "复用的是内置节点");
+        assertEquals(before + 1, service.template(tpl).nodes().size());
+
+        // 空名字直接报错（可照做），不是静默成功
+        assertThrows(IllegalArgumentException.class, () -> service.addCustomNode(tpl, "   "));
+
+        service.removeCustomNode(tpl, node.nodeId());
+        assertEquals(before, service.template(tpl).nodes().size(), "删除后要立刻从图里消失");
+        // 内置节点不允许删（只有 custom.* 才是用户的）
+        assertThrows(IllegalArgumentException.class,
+                () -> service.removeCustomNode(tpl, service.template(tpl).nodes().get(0).nodeId()));
+    }
+
     @Test
     void builtInTemplatesLoadAndPassValidation() {
         var templates = service.templates();
