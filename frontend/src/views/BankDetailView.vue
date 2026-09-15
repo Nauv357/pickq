@@ -50,6 +50,10 @@
             <TikuIcon name="chart" :size="14" />
             {{ t('roadmap') }}
           </button>
+          <button class="btn btn-secondary" :disabled="!bank" @click="$router.push(`/banks/${id}/cards`)">
+            <TikuIcon name="book" :size="14" />
+            {{ t('cards') }}
+          </button>
           <button class="btn btn-secondary" :disabled="!bank" @click="$router.push(`/banks/${id}/print`)">
             <TikuIcon name="file" :size="14" />
             {{ t('printPaper') }}
@@ -830,7 +834,7 @@ const { t } = useI18n({
     'zh-CN': {
       notFoundDesc: '题库可能已被删除，或地址有误', backToBanks: '返回题库列表', loading: '加载中…',
       authorBy: '作者：{v}', sourceFrom: '来源：{v}', createdOn: '创建于 {d}', questionsN: '共 {n} 题',
-      history: '练习历史', edit: '编辑', exportBank: '导出题库文件', skillTags: '知识点', roadmap: '学习路线', printPaper: '打印试卷', delete: '删除', startPractice: '开始做题',
+      history: '练习历史', edit: '编辑', exportBank: '导出题库文件', skillTags: '知识点', roadmap: '学习路线', cards: '闪卡', printPaper: '打印试卷', delete: '删除', startPractice: '开始做题',
     bankWord: '题库', thisQuestion: '该题',
       answeredOf: '已做 / 共 {n} 题', accuracyOf: '正确率（作答 {n} 次）', progressPct: '完成度',
       noDesc: '暂无描述',
@@ -945,7 +949,7 @@ const { t } = useI18n({
     'en-US': {
       notFoundDesc: 'This bank may have been deleted, or the link is wrong', backToBanks: 'Back to banks', loading: 'Loading…',
       authorBy: 'Author: {v}', sourceFrom: 'Source: {v}', createdOn: 'Created {d}', questionsN: '{n} questions',
-      history: 'History', edit: 'Edit', exportBank: 'Export bank file', skillTags: 'Knowledge tags', roadmap: 'Learning path', printPaper: 'Print paper', delete: 'Delete', startPractice: 'Start practice',
+      history: 'History', edit: 'Edit', exportBank: 'Export bank file', skillTags: 'Knowledge tags', roadmap: 'Learning path', cards: 'Flashcards', printPaper: 'Print paper', delete: 'Delete', startPractice: 'Start practice',
     bankWord: 'Bank', thisQuestion: 'this question',
       answeredOf: '{n} answered / total', accuracyOf: 'Accuracy ({n} attempts)', progressPct: 'Progress',
       noDesc: 'No description',

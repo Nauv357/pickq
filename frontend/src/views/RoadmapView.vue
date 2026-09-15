@@ -213,6 +213,7 @@ const { t } = useI18n({
       statusCleared: '已过关',
       statusLearning: '在练',
       statusUnverified: '证据不足（题库缺题）',
+      statusRegressed: '抽测掉下来了（要重新练）',
       blocked: '前置未过关：',
       errStart: '无法开始练习：这个知识点目前没有可练的题'
     },
@@ -251,6 +252,7 @@ const { t } = useI18n({
       statusCleared: 'Cleared',
       statusLearning: 'Learning',
       statusUnverified: 'Not enough evidence (few questions)',
+      statusRegressed: 'Regressed after a spot check (practise again)',
       blocked: 'Blocked by: ',
       errStart: 'Cannot start: no practiceable questions for this node yet'
     }
@@ -334,10 +336,16 @@ const practiceNode = (n) => startNode(n.nodeId, today.value?.targetQuestions || 
 
 function startTask(task) {
   if (task.kind === 'REVIEW') {
-    // 到期复习走复习队列（保持与"复习计划"一致的口径），题量按今天的剩余量
+    // 到期复习走复习队列（保持与"复习计划"一致的口径）
     router.push({ path: `/banks/${id}/practice`, query: { mode: 'REVIEW' } })
     return
   }
+  if (task.kind === 'CARD') {
+    // 闪卡复习有自己的界面（先想再翻、记得/忘了）
+    router.push({ path: `/banks/${id}/cards` })
+    return
+  }
+  // PRACTICE / SPOT_CHECK 都是"按知识点开一场练习"（抽测 1–2 题、主攻按每日题量）
   startNode(task.nodeId, task.total || 20)
 }
 
@@ -559,6 +567,11 @@ onMounted(async () => {
 .rm-chip.unverified {
   border-style: dashed;
   color: var(--warning);
+}
+.rm-chip.regressed {
+  border-color: var(--danger);
+  color: var(--danger);
+  border-style: dashed;
 }
 .rm-chip.blocked {
   opacity: 0.55;

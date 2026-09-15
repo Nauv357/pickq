@@ -64,6 +64,13 @@ public class RoadmapService {
     private static final double MIN_INDEPENDENT_RATIO = 0.70;
     /** 间隔复测间隔（天）：≥7 天后再做对一次，才算"记住了" */
     private static final int SPACED_DAYS = 7;
+    /**
+     * 抽测间隔阶梯（设计 §5.4）：过关后首次 7 天抽测，之后 21 / 60 天。
+     * 间隔随"过关后已经抽测过几次"往后走——越稳的节点打扰越少。
+     */
+    private static final int[] SPOT_CHECK_DAYS = {7, 21, 60};
+    /** 抽测一次抽几题（设计：1–2 题） */
+    private static final int SPOT_CHECK_QUESTIONS = 2;
 
     private final QuestionMapper questionMapper;
     private final QuestionSkillMapper questionSkillMapper;
@@ -75,6 +82,8 @@ public class RoadmapService {
     private final LearnerProfileMapper profileMapper;
     private final DailyTaskMapper dailyTaskMapper;
     private final SkillGraphService graphService;
+    private final CardService cardService;
+    private final AdaptiveService adaptiveService;
     private final ObjectMapper objectMapper;
 
     public RoadmapService(QuestionMapper questionMapper, QuestionSkillMapper questionSkillMapper,
@@ -82,7 +91,8 @@ public class RoadmapService {
                           TutorMessageMapper tutorMessageMapper, ReviewStateMapper reviewStateMapper,
                           QuestionBankMapper questionBankMapper,
                           LearnerProfileMapper profileMapper, DailyTaskMapper dailyTaskMapper,
-                          SkillGraphService graphService, ObjectMapper objectMapper) {
+                          SkillGraphService graphService, CardService cardService,
+                          AdaptiveService adaptiveService, ObjectMapper objectMapper) {
         this.questionMapper = questionMapper;
         this.questionSkillMapper = questionSkillMapper;
         this.studyRecordMapper = studyRecordMapper;
@@ -93,6 +103,8 @@ public class RoadmapService {
         this.profileMapper = profileMapper;
         this.dailyTaskMapper = dailyTaskMapper;
         this.graphService = graphService;
+        this.cardService = cardService;
+        this.adaptiveService = adaptiveService;
         this.objectMapper = objectMapper;
     }
 
@@ -329,19 +341,77 @@ public class RoadmapService {
         double mastery = weightTotal == 0 ? 0 : weightedSum / weightTotal;
         double independentRatio = independentAttempts == 0 ? 0 : independentAttempts * 1.0 / Math.max(1, total);
 
+        // 假掌握检测（设计 §5.4）：过关之后出现的**失败证据**要把节点打回 REGRESSED。
+        // 两类证据都算：① 这道题又做错了；② 该题的闪卡自评「忘了」（卡片只作负向证据）。
+        LocalDateTime clearedAt = lastClearedAt(attempts, hints);
+        boolean failedAfterClear = false;
+        if (clearedAt != null) {
+            for (StudyRecord r : attempts) {
+                if (r.getAnsweredAt() != null && r.getAnsweredAt().isAfter(clearedAt)
+                        && Boolean.FALSE.equals(r.getCorrect())) {
+                    failedAfterClear = true;
+                    break;
+                }
+            }
+            if (!failedAfterClear && cardService != null) {
+                Map<Long, Object[]> cardResults = cardService.lastCardResultsOfQuestions(
+                        attempts.stream().map(StudyRecord::getQuestionId).distinct().toList());
+                for (Object[] row : cardResults.values()) {
+                    LocalDateTime when = (LocalDateTime) row[0];
+                    boolean remembered = Boolean.TRUE.equals(row[1]);
+                    if (when != null && when.isAfter(clearedAt) && !remembered) {
+                        failedAfterClear = true;
+                        break;
+                    }
+                }
+            }
+        }
+
         // 节点可练习题数：整节点（不是窗口内），门控要求 ≥3（设计 §5.3）
         String status;
         if (questionCount < MIN_QUESTIONS_FOR_GATE) {
             status = "UNVERIFIED"; // 题库里题太少，无法确认掌握（必须显式提示，不假装过关）
         } else if (mastery >= CLEAR_THRESHOLD && independentCorrect >= MIN_INDEPENDENT_CORRECT
                 && spacedOk && independentRatio >= MIN_INDEPENDENT_RATIO) {
-            status = "CLEARED";
+            status = failedAfterClear ? "REGRESSED" : "CLEARED";
+        } else if (failedAfterClear && independentCorrect >= MIN_INDEPENDENT_CORRECT && spacedOk) {
+            // 曾经满足过关的**结构条件**（有间隔复测、独立正确足够），但之后出现了失败证据：
+            // 这就是"假掌握被测出来"——即使当前 mastery 已被这次失败拉低，也要如实标成抽测降级，
+            // 而不是含糊地退回"在练"（用户需要知道"这个点之前过了、现在掉下来了"）。
+            status = "REGRESSED";
         } else {
             status = "LEARNING";
         }
+        // 抽测掉下来的节点：掌握度打折展示（×0.6），并重新进入外缘（设计 §5.4）
+        double shownMastery = "REGRESSED".equals(status) ? mastery * 0.6 : mastery;
         return new NodeState(node.nodeId(), node.name(), node.stageId(), node.stageName(), node.stageOrder(),
-                questionCount, total, correct, round3(mastery), independentCorrect, round3(independentRatio),
+                questionCount, total, correct, round3(shownMastery), independentCorrect, round3(independentRatio),
                 hintCount, spacedOk, status, false, List.of());
+    }
+
+    /**
+     * 这个节点"最近一次满足过关条件"的时间（用于判断之后的失败证据）。
+     * 近似口径：最近一次「独立做对且距今 ≥7 天」的作答时间——它就是 spacedOk 的来源。
+     */
+    private LocalDateTime lastClearedAt(List<StudyRecord> attempts, Map<Long, List<Object[]>> hints) {
+        LocalDateTime latest = null;
+        for (StudyRecord r : attempts) {
+            if (!Boolean.TRUE.equals(r.getCorrect()) || r.getAnsweredAt() == null) {
+                continue;
+            }
+            long days = Duration.between(r.getAnsweredAt(), LocalDateTime.now()).toDays();
+            if (days < SPACED_DAYS) {
+                continue;
+            }
+            AttemptCtx ctx = ctxBefore(hints.get(r.getQuestionId()), r.getAnsweredAt());
+            if (ctx.hintLevel() > 0 || ctx.askedTutor()) {
+                continue;
+            }
+            if (latest == null || r.getAnsweredAt().isAfter(latest)) {
+                latest = r.getAnsweredAt();
+            }
+        }
+        return latest;
     }
 
     /** 某题在给定时刻**之前**用过的最高提示级别与是否追问过 */
@@ -416,7 +486,8 @@ public class RoadmapService {
             stages.add(new StageState(stageId, template.stageNames().getOrDefault(stageId, stageId),
                     nodes.isEmpty() ? 0 : nodes.get(0).stageOrder(), nodes.size(), cleared, nodes));
         }
-        // 外缘：前置全过关 + 自己没过关 + 不是可选节点；按（阶段顺序, 权重降序, 题量降序）取前 3。
+        // 外缘：前置全过关 + 自己没过关（REGRESSED 也算"没过关"，要重新练）+ 不是可选节点；
+        // 按（阶段顺序, 权重降序, 题量降序）取前 3。
         // 额外加一条**实用约束**：优先选"这个节点你确实有题可练"的——否则路线会指着一个空节点，
         // 「今天做什么」直接是空的（题库只有部分知识点有题是常态）。都没有题时仍然给出方向，
         // 让界面能提示"下一步是 X，但你还没有这个知识点的题 → 去补题"。
@@ -487,45 +558,112 @@ public class RoadmapService {
         }
 
         List<TaskView> tasks = new ArrayList<>();
-        // ① 主攻：外缘第一个节点
+        // ① 主攻：外缘第一个节点（题按 85% 规则排序：优先"预测成功率 80–90%"的题）
         Roadmap map = roadmap(bankId, templateId);
         if (!map.nextBatch().isEmpty()) {
             NodeState focus = map.nextBatch().get(0);
-            List<Long> picked = pickQuestions(bankId, focus.nodeId(), target);
+            List<Long> picked = pickQuestions(bankId, focus.nodeId(), target, focus.mastery(), template);
             if (!picked.isEmpty()) {
-                DailyTask row = ensureTask(date, DailyTask.KIND_PRACTICE, focus.nodeId(), templateId,
+                DailyTask row = ensureTask(bankId, date, DailyTask.KIND_PRACTICE, focus.nodeId(), templateId,
                         picked, "主攻「" + focus.name() + "」");
                 List<Long> frozen = readIds(row);
                 tasks.add(new TaskView(DailyTask.KIND_PRACTICE, focus.nodeId(), focus.name(), frozen,
                         countDoneToday(bankId, frozen), frozen.size(), "主攻「" + focus.name() + "」"));
             }
         }
-        // ② 到期复习
+        // ② 抽测（阶段 3，设计 §5.4）：已过关但到了抽测间隔的节点，抽 1–2 题复测。
+        // 这是"假掌握检测"：蒙对的、标签错的，会在这一步被打回 REGRESSED。
+        // 抽测优先于到期复习（先确认"还记得吗"，再谈常规复习）。
+        for (NodeState s : spotCheckDue(bankId, templateId)) {
+            List<Long> picked = pickQuestions(bankId, s.nodeId(), SPOT_CHECK_QUESTIONS, s.mastery(), template);
+            if (picked.isEmpty()) {
+                continue;
+            }
+            String title = "抽测「" + s.name() + "」（确认还记得）";
+            DailyTask row = ensureTask(bankId, date, DailyTask.KIND_SPOT_CHECK, s.nodeId(), templateId, picked, title);
+            List<Long> frozen = readIds(row);
+            tasks.add(new TaskView(DailyTask.KIND_SPOT_CHECK, s.nodeId(), s.name(), frozen,
+                    countDoneToday(bankId, frozen), frozen.size(), title));
+            break; // 一天最多安排一个抽测，别把复习变成考试
+        }
+        // ③ 到期复习
         boolean reviewEnabled = isReviewEnabled(bankId);
         if (reviewEnabled) {
             List<Long> due = dueQuestionIds(bankId, target);
             if (!due.isEmpty()) {
-                DailyTask row = ensureTask(date, DailyTask.KIND_REVIEW, "", templateId, due, "到期复习");
+                DailyTask row = ensureTask(bankId, date, DailyTask.KIND_REVIEW, "", templateId, due, "到期复习");
                 List<Long> frozen = readIds(row);
                 tasks.add(new TaskView(DailyTask.KIND_REVIEW, null, null, frozen,
                         countDoneToday(bankId, frozen), frozen.size(), "到期复习"));
             }
         }
+        // ④ 到期闪卡（阶段 3）：只统计已确认的卡（AI 生成未确认的不进队列）
+        int dueCards = cardService.stats(bankId).due();
+        if (dueCards > 0) {
+            tasks.add(new TaskView(DailyTask.KIND_CARD, null, null, List.of(), 0, dueCards,
+                    "复习闪卡 " + dueCards + " 张"));
+        }
         int planned = tasks.stream().mapToInt(TaskView::total).sum();
         int done = tasks.stream().mapToInt(TaskView::done).sum();
         String note = tasks.isEmpty()
                 ? "今天没有安排（可能技能图上的节点都过关了，或题库还没有可练的题）。"
-                : "任务由公式生成：外缘节点的题优先、没做过优先；完成度按今天的实际作答算。";
+                : "任务由公式生成：外缘节点的题优先、按 85% 规则挑难度、没做过优先；完成度按今天的实际作答算。";
         return new TodayView(date, target, planned, done, reviewEnabled, tasks, note);
     }
 
-    /** 取该节点下的题：先没做过的（按题号），不够再用做过的补（按最久没做） */
-    private List<Long> pickQuestions(Long bankId, String nodeId, int limit) {
-        List<QuestionSkill> rows = questionSkillMapper.selectList(new LambdaQueryWrapper<QuestionSkill>()
-                .eq(QuestionSkill::getBankId, bankId)
-                .eq(QuestionSkill::getNodeId, nodeId)
-                .eq(QuestionSkill::getShadowed, false));
-        List<Long> ids = rows.stream().map(QuestionSkill::getQuestionId).distinct().toList();
+    /**
+     * 该抽测哪些节点（设计 §5.4）：已 CLEARED、距最近一次作答超过间隔阶梯（7 天 → 21 天 → 60 天）。
+     * 间隔按"过关后已经抽测过几次"往后走（用该节点的总作答次数近似），越稳的节点打扰越少。
+     */
+    public List<NodeState> spotCheckDue(Long bankId, String templateId) {
+        Roadmap map = roadmap(bankId, templateId);
+        List<NodeState> out = new ArrayList<>();
+        for (StageState stage : map.stages()) {
+            for (NodeState s : stage.nodes()) {
+                if (!"CLEARED".equals(s.status())) {
+                    continue;
+                }
+                LocalDateTime last = lastAttemptAt(bankId, s.nodeId());
+                long days = last == null ? 999
+                        : Duration.between(last, LocalDateTime.now()).toDays();
+                int step = Math.min(Math.max(0, s.attempts() - MIN_INDEPENDENT_CORRECT), SPOT_CHECK_DAYS.length - 1);
+                if (days >= SPOT_CHECK_DAYS[step]) {
+                    out.add(s);
+                }
+            }
+        }
+        return out;
+    }
+
+    private LocalDateTime lastAttemptAt(Long bankId, String nodeId) {
+        List<Long> qids = questionIdsOfNode(bankId, nodeId);
+        if (qids.isEmpty()) {
+            return null;
+        }
+        StudyRecord last = studyRecordMapper.selectOne(new LambdaQueryWrapper<StudyRecord>()
+                .eq(StudyRecord::getBankId, bankId)
+                .in(StudyRecord::getQuestionId, qids)
+                .orderByDesc(StudyRecord::getAnsweredAt)
+                .last("LIMIT 1"));
+        return last == null ? null : last.getAnsweredAt();
+    }
+
+    private List<Long> questionIdsOfNode(Long bankId, String nodeId) {
+        return questionSkillMapper.selectList(new LambdaQueryWrapper<QuestionSkill>()
+                        .eq(QuestionSkill::getBankId, bankId)
+                        .eq(QuestionSkill::getNodeId, nodeId)
+                        .eq(QuestionSkill::getShadowed, false))
+                .stream().map(QuestionSkill::getQuestionId).distinct().toList();
+    }
+
+    /**
+     * 取该节点下的题：先没做过的，再用做过的补——
+     * 并且按 **85% 规则**（设计 §5.5）排序：优先"预测成功率落在我能力附近"的题，
+     * 而不是简单按题号。低掌握度时纯集中练（不分块混别的节点）；掌握之后混入相邻节点（交错）。
+     */
+    private List<Long> pickQuestions(Long bankId, String nodeId, int limit, double mastery,
+                                     SkillGraphService.SkillTemplate template) {
+        List<Long> ids = questionIdsOfNode(bankId, nodeId);
         if (ids.isEmpty()) {
             return List.of();
         }
@@ -538,19 +676,52 @@ public class RoadmapService {
                 .in(StudyRecord::getQuestionId, ids))) {
             answered.add(r.getQuestionId());
         }
-        List<Long> fresh = new ArrayList<>();
-        List<Long> seen = new ArrayList<>();
+        List<Question> fresh = new ArrayList<>();
+        List<Question> seen = new ArrayList<>();
         for (Question q : questions) {
-            (answered.contains(q.getId()) ? seen : fresh).add(q.getId());
+            (answered.contains(q.getId()) ? seen : fresh).add(q.getId() == null ? q : q);
         }
-        List<Long> out = new ArrayList<>(fresh);
-        for (Long id : seen) {
-            if (out.size() >= limit) {
-                break;
+        // 85% 规则：没做过的题先按难度排序；不够再用做过的补（同样按 85% 规则）
+        List<Question> ordered = new ArrayList<>(adaptiveService.orderByTargetSuccess(
+                fresh.isEmpty() ? seen : fresh, mastery));
+        if (ordered.size() < limit) {
+            for (Question q : adaptiveService.orderByTargetSuccess(seen, mastery)) {
+                if (ordered.size() >= limit) {
+                    break;
+                }
+                ordered.add(q);
             }
-            out.add(id);
         }
-        return out.size() > limit ? out.subList(0, limit) : out;
+        List<Long> out = new ArrayList<>(ordered.stream().limit(limit).map(Question::getId).toList());
+
+        // 交错混练（§5.5）：掌握之后混入相邻节点（前置/后继）的题，别再一直刷同一个点。
+        double ratio = AdaptiveService.interleaveRatio(mastery);
+        if (ratio > 0 && template != null) {
+            List<String> neighbours = new ArrayList<>();
+            neighbours.addAll(template.prereq().getOrDefault(nodeId, List.of()));
+            template.prereq().forEach((k, v) -> {
+                if (v.contains(nodeId)) {
+                    neighbours.add(k);
+                }
+            });
+            int mixCount = (int) Math.round(out.size() * ratio);
+            int added = 0;
+            for (String nb : neighbours) {
+                if (added >= mixCount) {
+                    break;
+                }
+                for (Long qid : questionIdsOfNode(bankId, nb)) {
+                    if (added >= mixCount) {
+                        break;
+                    }
+                    if (!out.contains(qid)) {
+                        out.add(qid);
+                        added++;
+                    }
+                }
+            }
+        }
+        return out;
     }
 
     private boolean isReviewEnabled(Long bankId) {
@@ -566,9 +737,10 @@ public class RoadmapService {
                 .stream().map(ReviewState::getQuestionId).distinct().limit(limit).toList();
     }
 
-    private DailyTask ensureTask(LocalDate date, String kind, String nodeId, String templateId,
+    private DailyTask ensureTask(Long bankId, LocalDate date, String kind, String nodeId, String templateId,
                                  List<Long> ids, String title) {
         DailyTask existing = dailyTaskMapper.selectOne(new LambdaQueryWrapper<DailyTask>()
+                .eq(DailyTask::getBankId, bankId)
                 .eq(DailyTask::getTaskDate, date)
                 .eq(DailyTask::getKind, kind)
                 .eq(DailyTask::getNodeId, nodeId)
@@ -577,6 +749,7 @@ public class RoadmapService {
             return existing;
         }
         DailyTask row = new DailyTask();
+        row.setBankId(bankId);
         row.setTaskDate(date);
         row.setKind(kind);
         row.setNodeId(nodeId == null ? "" : nodeId);

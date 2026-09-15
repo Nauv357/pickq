@@ -38,6 +38,13 @@ const routes = [
         meta: { title: '学习路线' }
       },
       {
+        // 闪卡（阶段 3）：题目测"再认"、卡片测"回忆"
+        path: 'banks/:id/cards',
+        name: 'cards',
+        component: () => import('../views/CardsView.vue'),
+        meta: { title: '闪卡' }
+      },
+      {
         path: 'ai-import/jobs',
         name: 'ai-import-jobs',
         component: () => import('../views/AiImportJobsView.vue'),

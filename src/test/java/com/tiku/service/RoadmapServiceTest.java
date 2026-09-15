@@ -252,29 +252,128 @@ class RoadmapServiceTest {
         roadmap.saveProfile(TEMPLATE, "两个月内行测上 70", 3, 60, null);
 
         RoadmapService.TodayView first = roadmap.today(BANK_ID, TEMPLATE);
-        assertEquals(1, first.tasks().size(), "只有外缘那个节点的任务：" + JSON(first));
-        RoadmapService.TaskView task = first.tasks().get(0);
+        // 今天可能同时有"主攻"和"抽测"两类任务（增长类 8 天前过的关 → 到期抽测）
+        RoadmapService.TaskView task = first.tasks().stream()
+                .filter(t -> "PRACTICE".equals(t.kind())).findFirst().orElseThrow();
         assertEquals("gk.zl.ratio", task.nodeId());
         assertEquals(3, task.total(), "每日题量按 profile 的 3 题");
         assertEquals(0, task.done());
+        assertTrue(first.tasks().stream().allMatch(t -> t.total() > 0), "每条任务都要有题：" + first.tasks());
 
         // 同一天再问一次：题单必须一模一样（不能因为答了一题就换一套）
         RoadmapService.TodayView again = roadmap.today(BANK_ID, TEMPLATE);
-        assertEquals(task.questionIds(), again.tasks().get(0).questionIds(), "当天题单要冻结");
+        assertEquals(task.questionIds(), practiceTask(again).questionIds(), "当天题单要冻结");
 
         // 答掉两题 → 完成度 2/3（按当天的实际作答算，不存额外状态）
         attempt(task.questionIds().get(0), true, 0);
         attempt(task.questionIds().get(1), false, 0);
         RoadmapService.TodayView afterAnswer = roadmap.today(BANK_ID, TEMPLATE);
-        assertEquals(2, afterAnswer.tasks().get(0).done());
-        assertEquals(2, afterAnswer.doneQuestions());
-        assertEquals(3, afterAnswer.plannedQuestions());
+        assertEquals(2, practiceTask(afterAnswer).done());
+        // 总完成度会 ≥2：同一道题可能同时属于"主攻"和"抽测"两条任务
+        assertTrue(afterAnswer.doneQuestions() >= 2, "总完成度：" + JSON(afterAnswer));
+        assertEquals(3, practiceTask(afterAnswer).total());
 
         // 昨天生成的清单不算今天：会重新生成一行
         jdbc.update("UPDATE daily_task SET task_date = ?", LocalDate.now().minusDays(1));
         RoadmapService.TodayView tomorrow = roadmap.today(BANK_ID, TEMPLATE);
-        assertEquals(0, tomorrow.tasks().get(0).done(), "昨天的完成度不能算到今天头上");
-        assertTrue(tomorrow.tasks().get(0).total() > 0, "新的一天仍要有题可做");
+        assertEquals(0, practiceTask(tomorrow).done(), "昨天的完成度不能算到今天头上");
+        assertTrue(practiceTask(tomorrow).total() > 0, "新的一天仍要有题可做");
+    }
+
+    /** 取今天的主攻任务（今天可能还有抽测/闪卡任务，不假设只有一条） */
+    private static RoadmapService.TaskView practiceTask(RoadmapService.TodayView view) {
+        return view.tasks().stream().filter(t -> "PRACTICE".equals(t.kind())).findFirst().orElseThrow();
+    }
+
+    /**
+     * 假掌握检测（阶段 3，设计 §5.4）：已过关的节点一旦出现"过关之后的失败证据"就要降级。
+     * 两类证据：① 抽测做错；② 闪卡自评「忘了」。这条是"蒙对的、标签错的会被打回"的保证。
+     */
+    @Test
+    void clearedNodeDemotesOnFailedSpotCheckOrForgottenCard() {
+        clearNode("gk.zl.growth");
+        assertEquals("CLEARED", node("gk.zl.growth").status());
+
+        // ① 抽测做错（刚刚）→ REGRESSED，掌握度打折展示（×0.6），并重新进入外缘
+        Long extra = question("增长类抽测题");
+        tag(extra, "gk.zl.growth");
+        attempt(extra, false, 0);
+        RoadmapService.NodeState regressed = node("gk.zl.growth");
+        assertEquals("REGRESSED", regressed.status(), "过关之后又做错 → 抽测降级：" + JSON(regressed));
+        assertTrue(regressed.mastery() <= 0.85, "降级后掌握度要打折：" + regressed.mastery());
+        assertTrue(roadmap.roadmap(BANK_ID, TEMPLATE).nextBatch().stream()
+                        .anyMatch(n -> n.nodeId().equals("gk.zl.growth")),
+                "降级的节点要重新回到外缘（重新练）");
+
+        // 重做对一次也不能立刻回到 CLEARED（避免"错了马上改一下就算过关"）
+        attempt(extra, true, 0);
+        assertEquals("REGRESSED", node("gk.zl.growth").status(), "刚做对还不算恢复（要重新满足门控）");
+    }
+
+    /** 抽测安排：过关后 7 天没碰过 → 今天安排一题抽测（设计 §5.4 的 7/21/60 间隔阶梯） */
+    @Test
+    void spotCheckIsScheduledAfterTheIntervalLadder() {
+        // 刚过关（证据是 8 天前的，但"最近一次作答"也是 8 天前 → 距今天数 8 ≥ 7 → 需要抽测）
+        clearNode("gk.zl.growth");
+        List<RoadmapService.NodeState> due = roadmap.spotCheckDue(BANK_ID, TEMPLATE);
+        assertTrue(due.stream().anyMatch(n -> n.nodeId().equals("gk.zl.growth")),
+                "过关 8 天没碰过 → 应安排抽测：" + due.stream().map(RoadmapService.NodeState::nodeId).toList());
+
+        RoadmapService.TodayView today = roadmap.today(BANK_ID, TEMPLATE);
+        assertTrue(today.tasks().stream().anyMatch(t -> "SPOT_CHECK".equals(t.kind())),
+                "今日任务里应出现抽测：" + today.tasks());
+
+        // 最近刚碰过 → 不再安排
+        Long extra = question("增长类今天做过的题");
+        tag(extra, "gk.zl.growth");
+        attempt(extra, true, 0);
+        assertTrue(roadmap.spotCheckDue(BANK_ID, TEMPLATE).stream()
+                        .noneMatch(n -> n.nodeId().equals("gk.zl.growth")),
+                "刚练过就不该再抽测");
+    }
+
+    @Test
+    void dailyTasksAreScopedToTheBank() {
+        // 两个题库同一天各练各的：题单不能串（实测 bug：daily_task 漏了 bank_id，
+        // 换题库看路线时看到的还是上一个题库的题，完成度永远 0）
+        clearNode("gk.zl.growth");
+        for (int i = 0; i < 3; i++) {
+            Long q = question("比重题 " + i);
+            tag(q, "gk.zl.ratio");
+        }
+        RoadmapService.TodayView bankOne = roadmap.today(BANK_ID, TEMPLATE);
+        assertTrue(practiceTask(bankOne).total() > 0);
+
+        Long otherBank = 990299L;
+        jdbc.update("DELETE FROM question WHERE bank_id = ?", otherBank);
+        jdbc.update("DELETE FROM question_bank WHERE id = ?", otherBank);
+        QuestionBank other = new QuestionBank();
+        other.setId(otherBank);
+        other.setName("第二个题库");
+        other.setCreatedAt(LocalDateTime.now());
+        other.setUpdatedAt(LocalDateTime.now());
+        bankMapper.insert(other);
+        try {
+            Long otherQuestion = question("另一个题库的题");
+            Question q = questionMapper.selectById(otherQuestion);
+            q.setBankId(otherBank);
+            questionMapper.updateById(q);
+            jdbc.update("INSERT INTO question_skill (question_id, bank_id, node_id, template_id, source, confidence, "
+                            + "confirmed, origin, shadowed, updated_at) VALUES (?, ?, 'gk.zl.growth', ?, 'user', 1.0, 1, 'manual', 0, NOW())",
+                    otherQuestion, otherBank, TEMPLATE);
+
+            RoadmapService.TodayView bankTwo = roadmap.today(otherBank, TEMPLATE);
+            assertEquals(1, bankTwo.tasks().size(), "第二个题库只有它自己的任务：" + JSON(bankTwo));
+            assertTrue(bankTwo.tasks().get(0).questionIds().contains(otherQuestion),
+                    "题单必须是本库的题：" + JSON(bankTwo));
+            assertFalse(bankTwo.tasks().get(0).questionIds().contains(practiceTask(bankOne).questionIds().get(0)),
+                    "不能把上一个题库的题单拿过来用");
+        } finally {
+            jdbc.update("DELETE FROM question_skill WHERE bank_id = ?", otherBank);
+            jdbc.update("DELETE FROM question WHERE bank_id = ?", otherBank);
+            jdbc.update("DELETE FROM daily_task WHERE bank_id = ?", otherBank);
+            jdbc.update("DELETE FROM question_bank WHERE id = ?", otherBank);
+        }
     }
 
     @Test

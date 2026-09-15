@@ -18,10 +18,16 @@ public class DailyTask {
 
     public static final String KIND_PRACTICE = "PRACTICE";
     public static final String KIND_REVIEW = "REVIEW";
+    /** 抽测（阶段 3）：已过关节点按间隔复测 1–2 题，用来打掉"假掌握" */
+    public static final String KIND_SPOT_CHECK = "SPOT_CHECK";
+    /** 闪卡复习（阶段 3）：只统计已确认的卡；不占"新题"额度 */
+    public static final String KIND_CARD = "CARD";
 
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    /** 题单按**题库**冻结：同一个用户有多个题库时不能共用一份今天的题单 */
+    private Long bankId;
     private LocalDate taskDate;
     private String kind;
     private String nodeId;
@@ -35,6 +41,14 @@ public class DailyTask {
 
     public void setId(Long id) {
         this.id = id;
+    }
+
+    public Long getBankId() {
+        return bankId;
+    }
+
+    public void setBankId(Long bankId) {
+        this.bankId = bankId;
     }
 
     public LocalDate getTaskDate() {

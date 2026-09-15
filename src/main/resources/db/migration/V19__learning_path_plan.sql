@@ -19,8 +19,11 @@ CREATE TABLE learner_profile (
 );
 
 -- 当天任务（确定性生成：外缘主攻节点 n 题 + 到期复习题）
+-- ⚠️ 必须带 bank_id：题单是按题库冻结的，漏了它就会出现"两个题库共用同一份今天的题单"
+--    （实测：换了题库看路线，题单还是上一个题库的题，完成度永远是 0/3）
 CREATE TABLE daily_task (
     id          BIGINT       NOT NULL AUTO_INCREMENT,
+    bank_id     BIGINT       NOT NULL,
     task_date   DATE         NOT NULL,
     kind        VARCHAR(24)  NOT NULL,           -- PRACTICE（新题主攻）/ REVIEW（到期复习）
     node_id     VARCHAR(96)  NOT NULL DEFAULT '',-- 主攻节点（REVIEW 时为空）
@@ -28,7 +31,7 @@ CREATE TABLE daily_task (
     plan_json   TEXT         NOT NULL,           -- 冻结的题 id 列表与说明
     created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    CONSTRAINT uk_daily_task UNIQUE (task_date, kind, node_id)
+    CONSTRAINT uk_daily_task UNIQUE (bank_id, task_date, kind, node_id)
 );
 
 -- 会话按知识点抽题（阶段 2 的"一键开始今天的任务"用它；存节点 id 逗号分隔）

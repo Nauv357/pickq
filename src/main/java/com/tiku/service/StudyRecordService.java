@@ -21,6 +21,7 @@ import com.tiku.model.ReviewState;
 import com.tiku.model.StudyRecord;
 import com.tiku.model.StudyRecordFile;
 import com.tiku.model.StudyRecordFileItem;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,6 +43,7 @@ import java.util.stream.Collectors;
  * - 进度 = 已答题数 / 总题数 + 正确率
  * 记录文件导入导出按 study-record-spec.md 格式，用于本地备份与换设备迁移。
  */
+@Slf4j
 @Service
 public class StudyRecordService {
 
@@ -53,6 +55,7 @@ public class StudyRecordService {
     private final PracticeSessionQuestionMapper sessionQuestionMapper;
     private final QuestionService questionService;
     private final QuestionBankService questionBankService;
+    private final AdaptiveService adaptiveService;
     private final ObjectMapper objectMapper;
 
     public StudyRecordService(StudyRecordMapper studyRecordMapper,
@@ -63,6 +66,7 @@ public class StudyRecordService {
                               PracticeSessionQuestionMapper sessionQuestionMapper,
                               QuestionService questionService,
                               QuestionBankService questionBankService,
+                              AdaptiveService adaptiveService,
                               ObjectMapper objectMapper) {
         this.studyRecordMapper = studyRecordMapper;
         this.questionMapper = questionMapper;
@@ -72,6 +76,7 @@ public class StudyRecordService {
         this.sessionQuestionMapper = sessionQuestionMapper;
         this.questionService = questionService;
         this.questionBankService = questionBankService;
+        this.adaptiveService = adaptiveService;
         this.objectMapper = objectMapper;
     }
 
@@ -250,6 +255,13 @@ public class StudyRecordService {
             reviewStateMapper.insert(state);
         } else {
             reviewStateMapper.updateById(state);
+        }
+        // 自适应难度（阶段 3，设计 §5.5）：每次作答更新该题难度，供"85% 规则"挑题用。
+        // 失败不影响作答结果落库（难度只是选点依据，不是判定结论）。
+        try {
+            adaptiveService.recordAnswer(question, correct);
+        } catch (Exception e) {
+            log.warn("更新题目难度失败（不影响作答记录）：{}", e.getMessage());
         }
     }
 
