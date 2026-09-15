@@ -99,8 +99,8 @@ await page.route(
     const req = route.request()
     const p = new URL(req.url()).pathname
     const method = req.method()
-    if (method !== 'GET') calls.push({ method, path: p, body: req.postData() })
-    else calls.push({ method, path: p, body: null })
+    if (method !== 'GET') calls.push({ method, path: p, search: new URL(req.url()).search, body: req.postData() })
+    else calls.push({ method, path: p, search: new URL(req.url()).search, body: null })
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -273,22 +273,42 @@ await page.goto(`${BASE}/banks/1`, { waitUntil: 'domcontentloaded' })
 await page.waitForSelector('.header-actions', { timeout: 15000 })
 const headerBtns = await page.locator('.header-actions button').allInnerTexts()
 const headerText = headerBtns.map((s) => s.replace(/\s+/g, ' ').trim()).join(' | ')
-check('头部只剩 2 个按钮（开始练习 + 更多）', headerBtns.length === 2, headerText)
+check('头部只有 3 个点击目标（更多 + 开始练习 + 题量箭头）', headerBtns.length === 3, headerText)
 check('主按钮是「开始练习」', /开始练习/.test(headerText), headerText)
 check('「学习路线」「闪卡」已从头部下线', !/学习路线|闪卡/.test(headerText), headerText)
 
 await page.locator('.header-actions button', { hasText: '更多' }).click()
 await page.waitForSelector('.action-menu', { timeout: 5000 })
 const bankMenuText = (await page.locator('.action-menu .action-menu-item').allInnerTexts()).join(' | ')
-for (const label of ['自定义练习', '练习历史', '知识点', '打印试卷', '导出题库文件', '编辑题库', '删除题库']) {
+for (const label of ['练习历史', '知识点', '打印试卷', '导出题库文件', '编辑题库', '删除题库']) {
   check(`「更多」含「${label}」`, bankMenuText.includes(label), bankMenuText)
 }
 await page.keyboard.press('Escape')
 await page.waitForTimeout(200)
 
+console.log('\n[12b] 主按钮的箭头：题量与自定义范围（不用到「更多」里翻）')
+await page.locator('.header-actions .split-caret').click()
+await page.waitForSelector('.action-menu', { timeout: 5000 })
+const planMenuText = (await page.locator('.action-menu .action-menu-item').allInnerTexts()).join(' | ')
+check('变体菜单给题量档位（10/20/50/100）', /练 10 题/.test(planMenuText) && /练 20 题/.test(planMenuText) && /练 50 题/.test(planMenuText) && /练 100 题/.test(planMenuText), planMenuText)
+check('变体菜单里有「自定义练习…」', /自定义练习/.test(planMenuText), planMenuText)
+await page.keyboard.press('Escape')
+await page.waitForTimeout(200)
+
+console.log('\n[12c] 从变体菜单选题量 → 按该题量配题')
+calls.length = 0
+await page.locator('.header-actions .split-caret').click()
+await page.waitForSelector('.action-menu', { timeout: 5000 })
+await page.locator('.action-menu .action-menu-item', { hasText: '练 50 题' }).click()
+await page.waitForURL(/\/practice\?/, { timeout: 15000 })
+const countGet = calls.find((c) => /\/api\/banks\/1\/practice-plan/.test(c.path))
+check('按选中的题量取配题结果（count=50）', !!countGet && /count=50/.test(countGet.search || ''), JSON.stringify(calls.map((c) => c.path + (c.search || ''))))
+await page.goto(`${BASE}/banks/1`, { waitUntil: 'domcontentloaded' })
+await page.waitForSelector('.header-actions', { timeout: 15000 })
+
 console.log('\n[13] 开始练习 = 一键配题（practice-plan → PLAN 会话 → 说明横幅）')
 calls.length = 0
-await page.locator('.header-actions button', { hasText: '开始练习' }).click()
+await page.locator('.header-actions .split-main', { hasText: '开始练习' }).click()
 await page.waitForURL(/\/practice\?/, { timeout: 15000 })
 const planGet = calls.find((c) => /\/api\/banks\/1\/practice-plan$/.test(c.path))
 check('先取配题结果 GET /banks/1/practice-plan', !!planGet, JSON.stringify(calls.map((c) => c.path)))

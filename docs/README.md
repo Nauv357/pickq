@@ -20,6 +20,7 @@
 | 发布新版本 | [`release-notes-guide.md`](release-notes-guide.md) |
 | 做 Android 端 | [`design-mobile.md`](design-mobile.md) |
 | 排查导入解析问题 | [`import-issues.md`](import-issues.md) |
+| 想加/砍功能前先看已记录的想法 | [`product-backlog.md`](product-backlog.md) |
 | 部署官网与相关服务 | [`../deploy/README-部署.md`](../deploy/README-部署.md)（含服务器信息，注意保密） |
 | 上报安全问题 | [`../SECURITY.md`](../SECURITY.md) |
 | 看历史版本变化 | [`../CHANGELOG.md`](../CHANGELOG.md) |
@@ -45,6 +46,7 @@
 - **`backend-audit-and-refactoring-plan.md`** — 后端审计与重构路线图：已修复项（图片路径隔离、备份解压限额、AI 配置原子写入、默认只监听本机、失效测试夹具）、已完成的服务拆分、以及下一步（`VisionLayoutContext`、流式导入、失败分类打磨）。
 - **`design-mobile.md`** — Android 端设计稿：技术选型、功能映射、信息架构、数据映射、里程碑、风险、开工材料清单。
 - **`import-issues.md`** — 文档导入解析的已知问题与优先级记录。
+- **`product-backlog.md`** — 产品待办与已记录的想法（解析统一 / 知识点自编辑 / 笔记模块 / 把流式对话铺开 / 缺口补题 / 广场质量信号）：每条写清用户价值、风险与最小可用形态。**待办不是承诺，排期由人定。**
 - **`release-notes-guide.md`** — 发版规范、发布检查清单、更新公告写作规则。
 - **`screenshots/`** — 界面截图（中文 `*.png` / 英文 `en-*.png`），供 README 使用。
 

@@ -31,15 +31,32 @@
         <div class="header-actions">
           <!-- 主路径只有一个：开始练习（一键配题：错题 → 到期复习 → 薄弱知识点 → 新题，
                配完在练习页顶部用一句可核对的事实解释说明这批题是怎么来的）。
+               右边的小箭头是**同一个主操作的变体**：题量 + 自定义范围——
+               默认一键 20 题，想改题量或自己定范围也不用到「更多」里翻（用户实测反馈过这一点）。
                其余低频入口收进「更多」（R2），主按钮按 R1 落在页头最右。 -->
           <button class="btn btn-secondary" :disabled="!bank" @click="openMoreMenu($event)">
             <TikuIcon name="more" :size="14" />
             {{ t('more') }}
           </button>
-          <button class="btn btn-primary" :disabled="!bank || planStarting" @click="startSmartSession">
-            <TikuIcon name="play" :size="14" />
-            {{ planStarting ? t('planStarting') : t('startPractice') }}
-          </button>
+          <div class="btn-split">
+            <button
+              class="btn btn-primary split-main"
+              :disabled="!bank || planStarting"
+              :title="t('startPracticeTip', { n: defaultPlanCount })"
+              @click="startSmartSession(defaultPlanCount)"
+            >
+              <TikuIcon name="play" :size="14" />
+              {{ planStarting ? t('planStarting') : t('startPractice') }}
+            </button>
+            <button
+              class="btn btn-primary split-caret"
+              :disabled="!bank || planStarting"
+              :title="t('practiceOptionsTip')"
+              @click="openPlanMenu($event)"
+            >
+              <TikuIcon name="chevron-down" :size="14" />
+            </button>
+          </div>
         </div>
       </header>
 
@@ -115,6 +132,8 @@
       <ActionMenu ref="qMenu" :items="questionMenuItems" @select="onQuestionMenuSelect" />
       <!-- 题库低频操作（练习之外的一切都收在这里，头部只留「开始练习」） -->
       <ActionMenu ref="bankMenu" :items="bankMenuItems" @select="onBankMenuSelect" />
+      <!-- 主按钮的变体：题量 / 自定义范围 -->
+      <ActionMenu ref="planMenu" :items="planMenuItems" @select="onPlanMenuSelect" />
 
       <!-- 编辑大弹窗：单独聚焦（列表被遮罩挡住，不存在"点另一行静默丢弃未保存修改"的问题；
            题号盘浮于弹窗之上、弹窗右侧预留出题号盘的位置（editor-gutter），
@@ -812,6 +831,11 @@ const { t } = useI18n({
       authorBy: '作者：{v}', sourceFrom: '来源：{v}', createdOn: '创建于 {d}', questionsN: '共 {n} 题',
       history: '练习历史', edit: '编辑题库', exportBank: '导出题库文件', skillTags: '知识点', printPaper: '打印试卷', delete: '删除题库', startPractice: '开始练习',
       more: '更多', planStarting: '配题中…', customPractice: '自定义练习…',
+      startPracticeTip: '一键开练：按「错题 → 今天到期 → 你题量最少的知识点 → 没做过的题」配 {n} 题',
+      practiceOptionsTip: '改题量，或自己定范围和题量',
+      planCountOption: '练 {n} 题',
+      planDefaultHint: '默认',
+      customPracticeHint: '自己定范围和题量',
       msgPlanEmpty: '这个题库还没有可练的题',
     bankWord: '题库', thisQuestion: '该题',
       answeredOf: '已做 / 共 {n} 题', accuracyOf: '正确率（作答 {n} 次）', progressPct: '完成度',
@@ -929,6 +953,11 @@ const { t } = useI18n({
       authorBy: 'Author: {v}', sourceFrom: 'Source: {v}', createdOn: 'Created {d}', questionsN: '{n} questions',
       history: 'History', edit: 'Edit bank', exportBank: 'Export bank file', skillTags: 'Knowledge tags', printPaper: 'Print paper', delete: 'Delete bank', startPractice: 'Start practice',
       more: 'More', planStarting: 'Picking…', customPractice: 'Custom practice…',
+      startPracticeTip: 'One-click session: mistakes → due today → your thinnest topic → unseen questions ({n} questions)',
+      practiceOptionsTip: 'Change the question count, or set the scope yourself',
+      planCountOption: '{n} questions',
+      planDefaultHint: 'default',
+      customPracticeHint: 'Pick scope and count yourself',
       msgPlanEmpty: 'This bank has no questions to practice yet',
     bankWord: 'Bank', thisQuestion: 'this question',
       answeredOf: '{n} answered / total', accuracyOf: 'Accuracy ({n} attempts)', progressPct: 'Progress',
@@ -1521,8 +1550,6 @@ async function startWrongSession() {
 /* ---------- 更多菜单（练习之外的低频操作） ---------- */
 const bankMenu = ref(null)
 const bankMenuItems = computed(() => [
-  { key: 'customPractice', label: t('customPractice'), icon: 'settings' },
-  { divider: true },
   { key: 'history', label: t('history'), icon: 'clock' },
   { key: 'skillTags', label: t('skillTags'), icon: 'target' },
   { key: 'printPaper', label: t('printPaper'), icon: 'file' },
@@ -1538,9 +1565,6 @@ function openMoreMenu(e) {
 
 function onBankMenuSelect(key) {
   switch (key) {
-    case 'customPractice':
-      openSession()
-      return
     case 'history':
       router.push(`/banks/${id}/sessions`)
       return
@@ -1565,12 +1589,44 @@ function onBankMenuSelect(key) {
 
 /* ---------- 开始练习（一键配题：配好直接开练，说明写在练习页顶部） ---------- */
 const planStarting = ref(false)
+/** 一键开练的默认题量（主按钮直接用它；想改题量点旁边的小箭头） */
+const defaultPlanCount = 20
 
-async function startSmartSession() {
+/* 主按钮的"变体"菜单：题量（点一个立刻按该题量开练）+ 自定义范围 */
+const planMenu = ref(null)
+const planMenuItems = computed(() => [
+  ...PLAN_COUNT_CHOICES.map((n) => ({
+    key: `count:${n}`,
+    label: t('planCountOption', { n }),
+    icon: 'list',
+    hint: n === defaultPlanCount ? t('planDefaultHint') : ''
+  })),
+  { divider: true },
+  { key: 'custom', label: t('customPractice'), icon: 'settings', hint: t('customPracticeHint') }
+])
+/** 题量档位：默认 20，给几个常用档位，特殊题量走「自定义练习…」 */
+const PLAN_COUNT_CHOICES = [10, 20, 50, 100]
+
+function openPlanMenu(e) {
+  planMenu.value?.openFromEl(e?.currentTarget)
+}
+
+function onPlanMenuSelect(key) {
+  if (key === 'custom') {
+    openSession()
+    return
+  }
+  const n = Number(String(key).split(':')[1])
+  if (Number.isFinite(n) && n > 0) {
+    startSmartSession(n)
+  }
+}
+
+async function startSmartSession(count = defaultPlanCount) {
   if (planStarting.value || sessionCreating.value) return
   planStarting.value = true
   try {
-    const plan = await getPracticePlan(id, { count: 20 })
+    const plan = await getPracticePlan(id, { count })
     if (!plan?.items?.length) {
       ElMessage.warning(t('msgPlanEmpty'))
       return
@@ -2460,11 +2516,31 @@ loadTopicOptions() // 分类筛选选项（与 TOPIC 会话共用，幂等）
 }
 .header-actions {
   display: flex;
+  align-items: center;
   gap: 10px;
   flex-shrink: 0;
   flex-wrap: wrap;
   /* 窄视口下随父容器收窄，内部按钮换行而不横向溢出 */
   max-width: 100%;
+}
+
+/* 主操作 = 拆开按钮：主体一键开练，右边小箭头是同一个动作的"变体"（题量/自定义范围）。
+   两块视觉上拼成一个按钮，但分别是独立的点击目标（R1：主按钮仍在最右）。 */
+.btn-split {
+  display: inline-flex;
+  align-items: stretch;
+}
+.btn-split .split-main {
+  border-radius: var(--radius-control) 0 0 var(--radius-control);
+  padding-right: 12px;
+}
+.btn-split .split-caret {
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  padding: 0 8px;
+  border-left: 1px solid rgba(255, 255, 255, 0.28);
+}
+.btn-split .split-caret:hover:not(:disabled) {
+  background: var(--cta-hover);
 }
 
 /* 学习进度卡片 */

@@ -16,6 +16,7 @@
     "smoke:mineru": "node scripts/smoke-ai-mineru.mjs",
     "smoke:import": "node scripts/smoke-import-file.mjs",
     "smoke:skills": "node scripts/smoke-skills.mjs",
+    "smoke:keys": "node scripts/smoke-practice-keys.mjs",
     "e2e:skills": "node scripts/e2e-skills-live.mjs",
     "e2e:tutor": "node scripts/e2e-tutor-live.mjs"
   },

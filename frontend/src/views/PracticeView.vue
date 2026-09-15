@@ -1084,11 +1084,25 @@ function isEditableTarget(e) {
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || !!t.isContentEditable
 }
 
+/**
+ * 是否有**真正打开着**的弹层（确认框 / 抽屉 / 大弹窗）。
+ *
+ * 坑（用户实测报过"方向键、字母选题、数字跳题全部失效"）：
+ * el-drawer / el-dialog 关闭后元素**仍留在 DOM 里**，只是 `display:none`，
+ * 所以判断"存在 .el-overlay"会把做题页的快捷键**永久**挡掉——这里必须看计算样式。
+ */
+function hasOpenLayer() {
+  return [...document.querySelectorAll('.el-overlay')].some((el) => {
+    const style = getComputedStyle(el)
+    return style.display !== 'none' && style.visibility !== 'hidden'
+  })
+}
+
 function onKeydown(e) {
   if (e.ctrlKey || e.metaKey || e.altKey) return
   //输入框/文本域内打字、或任何弹层（确认框等）打开时不抢键盘
   if (isEditableTarget(e)) return
-  if (document.querySelector('.el-overlay')) return
+  if (hasOpenLayer()) return
   if (!practiceReady()) return
   const q = current.value
   if (!q) return
