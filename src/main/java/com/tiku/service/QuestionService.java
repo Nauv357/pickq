@@ -5,7 +5,9 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.tiku.config.AiSettings;
 import com.tiku.dto.*;
 import com.tiku.mapper.MaterialMapper;
+import com.tiku.mapper.NoteMapper;
 import com.tiku.mapper.QuestionMapper;
+import com.tiku.model.Note;
 import com.tiku.model.OptionItem;
 import com.tiku.model.Question;
 import com.tiku.model.enums.QuestionType;
@@ -25,16 +27,19 @@ public class QuestionService {
     private final AiConfigService aiConfigService;
     private final AiClientService aiClientService;
     private final ImageStorageService imageStorageService;
+    private final NoteMapper noteMapper;
 
     public QuestionService(QuestionMapper questionMapper, QuestionBankService questionBankService,
                            MaterialMapper materialMapper, AiConfigService aiConfigService,
-                           AiClientService aiClientService, ImageStorageService imageStorageService) {
+                           AiClientService aiClientService, ImageStorageService imageStorageService,
+                           NoteMapper noteMapper) {
         this.questionMapper = questionMapper;
         this.questionBankService = questionBankService;
         this.materialMapper = materialMapper;
         this.aiConfigService = aiConfigService;
         this.aiClientService = aiClientService;
         this.imageStorageService = imageStorageService;
+        this.noteMapper = noteMapper;
     }
 
     /** 题目 content/选项/材料内的图片引用 [图片:name] */
@@ -51,28 +56,8 @@ public class QuestionService {
     }
 
     /**
-     * 单题 AI 辅助解析（按需生成，不落库）：按题目 id 组装（含材料与题图）后调用分析核心。
-     */
-    public String generateAiAnalysis(Long id) {
-        acquireAiAnalysisSlot();
-        try {
-            Question question = findByIdOrThrow(id);
-            String materialContent = null;
-            if (question.getMaterialId() != null) {
-                com.tiku.model.Material material = materialMapper.selectById(question.getMaterialId());
-                materialContent = material == null ? null : material.getContent();
-            }
-            String typeLabel = question.getQuestionType() == null ? null : question.getQuestionType().getLabel();
-            return analyzeQuestion(question.getBankId(), typeLabel, question.getQuestionNumber(),
-                    question.getContent(), question.getOptions(), question.getAnswerKeys(),
-                    question.getAnswerText(), question.getReferenceAnswer(), materialContent);
-        } finally {
-            aiAnalysisLock.unlock();
-        }
-    }
-
-    /**
      * 草稿 AI 解析（编辑/录入面板用：基于表单当前内容，题目可能尚未保存无 id）。
+     * 单题「讲解」不走这里——它由 `TutorService.explain` 统一提供（带我的作答/错因上下文、流式、可追问）。
      */
     public String analyzeDraft(Long bankId, String questionTypeLabel, String content,
                                List<OptionItem> options, List<String> answerKeys,
@@ -380,8 +365,14 @@ public class QuestionService {
         }
     }
 
+    /**
+     * 删除题目。笔记挂在题上，题没了就没有挂靠对象，所以一起清掉
+     * （题库级随手记 question_id 为空，不受影响）。
+     */
+    @org.springframework.transaction.annotation.Transactional
     public void deleteQuestion(Long id){
         Question question = findByIdOrThrow(id);
+        noteMapper.delete(new LambdaQueryWrapper<Note>().eq(Note::getQuestionId, id));
         questionMapper.deleteById(id);
     }
 

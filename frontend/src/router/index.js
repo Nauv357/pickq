@@ -31,6 +31,13 @@ const routes = [
         meta: { title: '练习历史' }
       },
       {
+        // 我的笔记（做题时记的想法 + AI 讲解存进来的）：只存本机，不随题库导出
+        path: 'banks/:id/notes',
+        name: 'bank-notes',
+        component: () => import('../views/NotesView.vue'),
+        meta: { title: '我的笔记' }
+      },
+      {
         path: 'ai-import/jobs',
         name: 'ai-import-jobs',
         component: () => import('../views/AiImportJobsView.vue'),

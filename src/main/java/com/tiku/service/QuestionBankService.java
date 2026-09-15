@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.tiku.dto.*;
 import com.tiku.mapper.AiImportJobMapper;
 import com.tiku.mapper.MaterialMapper;
+import com.tiku.mapper.NoteMapper;
 import com.tiku.mapper.PracticeSessionMapper;
 import com.tiku.mapper.PracticeSessionQuestionMapper;
 import com.tiku.mapper.QuestionBankMapper;
@@ -14,6 +15,7 @@ import com.tiku.mapper.QuestionMapper;
 import com.tiku.mapper.ReviewStateMapper;
 import com.tiku.mapper.StudyRecordMapper;
 import com.tiku.model.Material;
+import com.tiku.model.Note;
 import com.tiku.model.PracticeSession;
 import com.tiku.model.Question;
 import com.tiku.model.QuestionBank;
@@ -42,6 +44,7 @@ public class QuestionBankService {
     private final PracticeSessionQuestionMapper sessionQuestionMapper;
     private final MaterialMapper materialMapper;
     private final AiImportJobMapper aiImportJobMapper;
+    private final NoteMapper noteMapper;
 
     public QuestionBankService(QuestionBankMapper questionBankMapper,
                                QuestionMapper questionMapper,
@@ -50,7 +53,8 @@ public class QuestionBankService {
                                PracticeSessionMapper sessionMapper,
                                PracticeSessionQuestionMapper sessionQuestionMapper,
                                MaterialMapper materialMapper,
-                               AiImportJobMapper aiImportJobMapper) {
+                               AiImportJobMapper aiImportJobMapper,
+                               NoteMapper noteMapper) {
         this.questionBankMapper = questionBankMapper;
         this.questionMapper = questionMapper;
         this.studyRecordMapper = studyRecordMapper;
@@ -59,6 +63,7 @@ public class QuestionBankService {
         this.sessionQuestionMapper = sessionQuestionMapper;
         this.materialMapper = materialMapper;
         this.aiImportJobMapper = aiImportJobMapper;
+        this.noteMapper = noteMapper;
     }
 
     public Long createQuestionBank(QuestionBankCreateRequest request) {
@@ -241,7 +246,7 @@ public class QuestionBankService {
         questionBankMapper.updateById(questionBank);
     }
 
-    //删除题库：题库与题目都物理删除，并级联物理删除刷题记录/复习状态/会话/材料（一个事务，原子完成）
+    //删除题库：题库与题目都物理删除，并级联物理删除刷题记录/复习状态/会话/材料/笔记（一个事务，原子完成）
     //题目必须物理删除（与 V1 表注释一致）：留软删除行会产生指向已删题库的孤儿行，
     //且唯一键 uk_question_bank_external_id_deleted 仍被占用——该 bank_id 复用时同 questionKey 再入库会直接报错。
     //刷题记录一并删除（产品原则第 9 条：删除前提示影响记录数）。
@@ -254,6 +259,8 @@ public class QuestionBankService {
         long affectedRecords = studyRecordMapper.delete(new LambdaQueryWrapper<StudyRecord>().eq(StudyRecord::getBankId, id));
         //共享材料随题库级联清理（物理删除）
         materialMapper.delete(new LambdaQueryWrapper<Material>().eq(Material::getBankId, id));
+        //笔记（我的想法）也属于这个题库：一起清掉，不留指向已删题库的孤儿行
+        noteMapper.delete(new LambdaQueryWrapper<Note>().eq(Note::getBankId, id));
         long deletedQuestions = questionMapper.deletePhysicallyByBankId(id);
         //AI 导入任务的 bank_id 是软引用：解引用而不是删任务（历史记录仍要能查看）
         aiImportJobMapper.clearBankId(id);

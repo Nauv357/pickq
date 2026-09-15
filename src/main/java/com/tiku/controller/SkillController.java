@@ -164,17 +164,77 @@ public class SkillController {
     }
 
     /**
+     * 知识点的本机改动状态（「管理知识点」界面用）：
+     * 自定义节点列表、被停用的官方节点（带名字，便于恢复）、是否做过改动（决定「恢复官方模板」是否可点）。
+     */
+    @GetMapping("/skills/templates/{templateId}/customizations")
+    public ApiResponse<Map<String, Object>> customizations(@PathVariable String templateId) {
+        SkillGraphService.SkillTemplate t = graphService.template(templateId);
+        List<Map<String, Object>> custom = graphService.customNodes(templateId).stream()
+                .map(SkillController::nodeView)
+                .toList();
+        Map<String, String> officialNames = new LinkedHashMap<>();
+        for (SkillGraphService.NodeView n : graphService.officialNodes(templateId)) {
+            officialNames.put(n.nodeId(), n.name());
+        }
+        List<Map<String, Object>> disabled = graphService.disabledNodes(templateId).stream()
+                .map(id -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("nodeId", id);
+                    m.put("name", officialNames.getOrDefault(id, id));
+                    return m;
+                }).toList();
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("templateId", templateId);
+        out.put("graphVersion", t.graphVersion());
+        out.put("customized", graphService.customized(templateId));
+        out.put("customNodes", custom);
+        out.put("disabledNodes", disabled);
+        out.put("stages", t.stageOrder().stream().map(id -> Map.of(
+                "stageId", id,
+                "stageName", t.stageNames().getOrDefault(id, id))).toList());
+        return ApiResponse.success(out);
+    }
+
+    private static Map<String, Object> nodeView(SkillGraphService.NodeView node) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("nodeId", node.nodeId());
+        m.put("name", node.name());
+        m.put("stageId", node.stageId());
+        m.put("stageName", node.stageName());
+        return m;
+    }
+    /**
      * 新增自定义知识点（用户自己的词表，只存本机）：受控词表如果只能官方定义，
      * 用户在"图里没有这个知识点"时就没有出路（实测反馈：下拉里能输入但保存不了）。
      * 同名会复用已有节点（内置同名也算），不会造出两个看起来一样的节点。
+     * body: {@code {name, stageId?}}——stageId 省略时挂到「自定义知识点」阶段。
      */
     @PostMapping("/skills/templates/{templateId}/nodes")
     public ApiResponse<Map<String, Object>> addCustomNode(@PathVariable String templateId,
                                                          @RequestBody Map<String, Object> body) {
         Object name = body.get("name");
-        SkillGraphService.NodeView node = graphService.addCustomNode(templateId, name == null ? "" : String.valueOf(name));
-        return ApiResponse.success(Map.of("nodeId", node.nodeId(), "name", node.name(),
-                "stageId", node.stageId(), "stageName", node.stageName()));
+        Object stageId = body.get("stageId");
+        SkillGraphService.NodeView node = graphService.addCustomNode(templateId,
+                name == null ? "" : String.valueOf(name),
+                stageId == null ? null : String.valueOf(stageId));
+        return ApiResponse.success(nodeView(node));
+    }
+
+    /**
+     * 改名 / 换阶段（只针对自定义节点）。
+     * **改名不动 nodeId**，所以已经打在这道题上的标签不会失效——这是"用户自己维护词表"的关键体验。
+     */
+    @PutMapping("/skills/templates/{templateId}/nodes/{nodeId}")
+    public ApiResponse<Map<String, Object>> updateCustomNode(@PathVariable String templateId,
+                                                            @PathVariable String nodeId,
+                                                            @RequestBody Map<String, Object> body) {
+        Object name = body.get("name");
+        Object stageId = body.get("stageId");
+        SkillGraphService.NodeView node = graphService.updateCustomNode(templateId, nodeId,
+                name == null ? "" : String.valueOf(name),
+                stageId == null ? null : String.valueOf(stageId));
+        return ApiResponse.success(nodeView(node));
     }
 
     /** 删除自定义知识点（只能删 custom.*）；它上面的标签会变成失效标签，可在题库里一键清理 */
@@ -183,6 +243,27 @@ public class SkillController {
                                                             @PathVariable String nodeId) {
         graphService.removeCustomNode(templateId, nodeId);
         return ApiResponse.success(Map.of("nodeId", nodeId));
+    }
+
+    /**
+     * 停用 / 恢复一个官方节点（只影响本机：不再出现在词表、下拉与 AI 提示里）。
+     * 不改官方模板本身，所以远端模板更新不会与本地冲突。
+     * body: {@code {disabled: true|false}}
+     */
+    @PutMapping("/skills/templates/{templateId}/nodes/{nodeId}/disabled")
+    public ApiResponse<Map<String, Object>> setNodeDisabled(@PathVariable String templateId,
+                                                           @PathVariable String nodeId,
+                                                           @RequestBody Map<String, Object> body) {
+        boolean disabled = !Boolean.FALSE.equals(body.get("disabled"));
+        graphService.setNodeDisabled(templateId, nodeId, disabled);
+        return ApiResponse.success(Map.of("nodeId", nodeId, "disabled", disabled));
+    }
+
+    /** 恢复官方模板：清掉本模板的全部自定义节点与停用记录（题目标签会变成失效标签，可一键清理） */
+    @DeleteMapping("/skills/templates/{templateId}/customizations")
+    public ApiResponse<Map<String, Object>> resetCustomizations(@PathVariable String templateId) {
+        graphService.resetCustomizations(templateId);
+        return ApiResponse.success(Map.of("templateId", templateId));
     }
 
     /** 用户手动标注单题（覆盖 AI 与作者；只影响本机） */

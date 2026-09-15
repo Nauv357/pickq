@@ -17,11 +17,8 @@ export const submitAnswer = (id, selectedKeys) => http.post(`/questions/${id}/an
 // 收藏/取消收藏
 export const setFavorite = (id, favorite) => http.put(`/questions/${id}/favorite`, { favorite })
 
-// 单题 AI 辅助解析（按需生成，不落库）→ 解析文本。
-// 思考模式单题生成常需 20-90 秒，必须覆盖全局 15s 超时
-export const aiAnalysisQuestion = (id) => http.post(`/questions/${id}/ai-analysis`, null, { timeout: 180000 })
-
-// 草稿 AI 解析（编辑/录入面板：基于表单当前内容，题目可未保存）
+// 草稿 AI 解析（编辑/录入面板：基于表单当前内容，题目可未保存）→ 解析文本。
+// 思考模式常需 20-90 秒，必须覆盖全局 15s 超时。**单题讲解不走这里**：统一用 /tutor/explain（流式、带作答上下文）。
 export const aiAnalysisDraft = (data) => http.post('/questions/ai-analysis-draft', data, { timeout: 180000 })
 
 // 保存解析为题目正式解析

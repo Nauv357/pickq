@@ -58,6 +58,67 @@ class SkillGraphServiceTest {
                 () -> service.removeCustomNode(tpl, service.template(tpl).nodes().get(0).nodeId()));
     }
 
+    /**
+     * 用户自己维护词表（2026-09-16 用户反馈："既不能让用户自己编写，又不太准确，应该开放编辑权"）：
+     * ① 改名**不动 nodeId**（已打的标签不能因此失效）；② 可以挂到官方阶段下；
+     * ③ 官方节点可以停用/恢复（不改官方模板本身）；④ 一键恢复官方模板。
+     */
+    @Test
+    void customNodesCanBeRenamedMovedAndOfficialNodesDisabled() {
+        String tpl = "official.civil-service";
+        var node = service.addCustomNode(tpl, "我的速算技巧");
+        String firstStage = service.template(tpl).stageOrder().get(0);
+
+        // ② 指定官方阶段
+        var moved = service.updateCustomNode(tpl, node.nodeId(), "我的速算技巧", firstStage);
+        assertEquals(firstStage, moved.stageId());
+        assertEquals(service.template(tpl).stageNames().get(firstStage), moved.stageName());
+        var inGraph = service.template(tpl).nodes().stream()
+                .filter(n -> n.nodeId().equals(node.nodeId())).findFirst().orElseThrow();
+        assertEquals(firstStage, inGraph.stageId(), "换阶段要立刻生效");
+
+        // ① 改名：nodeId 不变（标签是存 nodeId 的，改名不能让标签失效）
+        var renamed = service.updateCustomNode(tpl, node.nodeId(), "速算与估算", firstStage);
+        assertEquals(node.nodeId(), renamed.nodeId(), "改名不能换 id");
+        assertEquals("速算与估算", renamed.name());
+
+        // 名称不能空；阶段必须真实存在
+        assertThrows(IllegalArgumentException.class,
+                () -> service.updateCustomNode(tpl, node.nodeId(), "  ", firstStage));
+        assertThrows(IllegalArgumentException.class,
+                () -> service.updateCustomNode(tpl, node.nodeId(), "随便", "no.such.stage"));
+
+        // ③ 停用官方节点：从图里消失（连前置引用一起摘掉），可恢复
+        var official = service.template(tpl).nodes().stream()
+                .filter(n -> !n.nodeId().startsWith(SkillGraphService.CUSTOM_ID_PREFIX))
+                .filter(n -> service.template(tpl).prereq().values().stream().anyMatch(p -> p.contains(n.nodeId())))
+                .findFirst().orElseThrow();
+        int nodesBefore = service.template(tpl).nodes().size();
+        service.setNodeDisabled(tpl, official.nodeId(), true);
+        assertTrue(!service.template(tpl).nodeIds().contains(official.nodeId()), "停用后不该再出现在词表里");
+        assertEquals(nodesBefore - 1, service.template(tpl).nodes().size());
+        service.template(tpl).prereq().forEach((n, pres) ->
+                assertTrue(!pres.contains(official.nodeId()), "停用节点的前置引用要一起摘掉（不能留悬空前置）"));
+        assertEquals(java.util.List.of(official.nodeId()), service.disabledNodes(tpl));
+        assertTrue(service.customized(tpl));
+
+        service.setNodeDisabled(tpl, official.nodeId(), false);
+        assertTrue(service.template(tpl).nodeIds().contains(official.nodeId()), "恢复后要回到词表里");
+        assertEquals(nodesBefore, service.template(tpl).nodes().size());
+
+        // 自定义节点不能用"停用"（该直接删）
+        assertThrows(IllegalArgumentException.class,
+                () -> service.setNodeDisabled(tpl, node.nodeId(), true));
+
+        // ④ 恢复官方模板：自定义节点与停用记录一起清掉
+        service.setNodeDisabled(tpl, official.nodeId(), true);
+        service.resetCustomizations(tpl);
+        assertTrue(service.customNodes(tpl).isEmpty(), "自定义节点应被清空");
+        assertTrue(service.disabledNodes(tpl).isEmpty(), "停用记录应被清空");
+        assertTrue(!service.customized(tpl));
+        assertTrue(service.template(tpl).nodeIds().contains(official.nodeId()));
+    }
+
     @Test
     void builtInTemplatesLoadAndPassValidation() {
         var templates = service.templates();

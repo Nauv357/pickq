@@ -282,8 +282,8 @@ class TutorServiceTest {
     }
 
     /**
-     * 错题讲解（主线）：三段结构指令进 prompt、讲的是"你这次的错"、且**不占提示级别**。
-     * 讲解与提示楼梯是两件事：楼梯是做题中分级取用，讲解是错了之后一次看明白。
+     * 讲解（主线）：三段结构指令进 prompt、讲的是"你这次的错"、且**不占提示级别**。
+     * 讲解与提示楼梯是两件事：楼梯是做题中分级取用，讲解是做完之后一次看明白。
      */
     @Test
     void explainGivesThreeSectionsWithoutConsumingHintLevel() {
@@ -294,7 +294,7 @@ class TutorServiceTest {
                 TutorSession.REASON_NO_KNOWLEDGE, null);
 
         StringBuilder streamed = new StringBuilder();
-        TutorMessage msg = tutor.explain(session.getId(), TEMPLATE, streamed::append);
+        TutorMessage msg = tutor.explain(session.getId(), TEMPLATE, null, streamed::append);
 
         assertTrue(streamed.length() > 0, "讲解要流式给出来");
         assertEquals(null, msg.getHintLevel(), "讲解不占提示级别");
@@ -306,6 +306,7 @@ class TutorServiceTest {
             assertTrue(prompt.contains(section), "讲解 prompt 缺少「" + section + "」");
         }
         assertTrue(prompt.contains("不要照抄"), "要讲透而不是照抄官方解析");
+        assertFalse(prompt.contains("我没有作答记录"), "有作答时不该走中性口吻");
 
         // 讲解落库后就是这场对话的历史：接着追问要能看到它（否则追问等于重新问一遍）
         tutor.ask(session.getId(), "基期到底是哪一个？", TEMPLATE, d -> {
@@ -315,12 +316,61 @@ class TutorServiceTest {
         assertTrue(askPrompt.contains("老师：先看这个方向"), "追问上下文要包含刚才的讲解：" + askPrompt.substring(0, Math.min(300, askPrompt.length())));
     }
 
-    /** 讲解必须有具体题目：整场复盘会话上点"讲给我听"要说清楚，不能空跑 */
+    /**
+     * 统一解析的两种口吻：**没作答的题**（题库列表里点「讲解」）讲"这道题怎么做"，
+     * 不能写成"你错在哪"——靠"这道题有没有作答记录"自动判定，调用方也可以显式指定。
+     */
+    @Test
+    void explainSwitchesToNeutralVoiceWhenThereIsNoAttempt() {
+        Long qid = insertQuestion(12, "某商品先涨价 10% 再降价 10%，最终价格如何变化？", "先乘 1.1 再乘 0.9");
+
+        // ① 没作答 → 自动走中性口吻
+        TutorSession neutral = tutor.openSession(BANK_ID, qid, null, TutorSession.KIND_PER_QUESTION, null, null);
+        tutor.explain(neutral.getId(), TEMPLATE, null, d -> {
+        });
+        String prompt = prompts.get(prompts.size() - 1);
+        for (String section : new String[]{"【这道题怎么做】", "【这类题怎么做】", "【易错点】", "我没有作答记录"}) {
+            assertTrue(prompt.contains(section), "中性讲解缺少「" + section + "」");
+        }
+        assertFalse(prompt.contains("【错在哪】"), "没作答就不该讲「错在哪」");
+        assertFalse(prompt.contains("【我的作答】"), "没作答就没有作答段落");
+
+        // ② 有作答但显式要求中性 → 听调用方的（"这题怎么讲"的场景）
+        insertRecord(qid, false, "B", 30L);
+        TutorSession forced = tutor.openSession(BANK_ID, qid, SESSION_ID, TutorSession.KIND_PER_QUESTION, null, null);
+        tutor.explain(forced.getId(), TEMPLATE, TutorService.MODE_NEUTRAL, d -> {
+        });
+        String forcedPrompt = prompts.get(prompts.size() - 1);
+        assertTrue(forcedPrompt.contains("【这道题怎么做】"), forcedPrompt.substring(0, Math.min(200, forcedPrompt.length())));
+        assertFalse(forcedPrompt.contains("【错在哪】"), "显式指定中性口吻时不要讲错在哪");
+
+        // ③ 有作答且不指定 → 自动回到"错在哪"
+        TutorSession wrong = tutor.openSession(BANK_ID, qid, SESSION_ID, TutorSession.KIND_PER_QUESTION, null, null);
+        tutor.explain(wrong.getId(), TEMPLATE, null, d -> {
+        });
+        assertTrue(prompts.get(prompts.size() - 1).contains("【错在哪】"), "有作答时应讲「你错在哪」");
+    }
+
+    /** 答对过的题不该再讲"你错在哪"：最近一次作答是对的 → 中性口吻 */
+    @Test
+    void explainUsesNeutralVoiceWhenTheLastAttemptWasCorrect() {
+        Long qid = insertQuestion(13, "下列说法正确的是：", "官方解析略");
+        insertRecord(qid, true, "A", 20L);
+
+        TutorSession session = tutor.openSession(BANK_ID, qid, SESSION_ID, TutorSession.KIND_PER_QUESTION, null, null);
+        tutor.explain(session.getId(), TEMPLATE, null, d -> {
+        });
+        String prompt = prompts.get(prompts.size() - 1);
+        assertTrue(prompt.contains("【这道题怎么做】"), prompt.substring(0, Math.min(200, prompt.length())));
+        assertFalse(prompt.contains("【错在哪】"), "答对了就不该讲「你错在哪」");
+    }
+
+    /** 讲解必须有具体题目：整场复盘会话上点「讲解」要说清楚，不能空跑 */
     @Test
     void explainRequiresAQuestion() {
         TutorSession session = tutor.openSession(BANK_ID, null, SESSION_ID, TutorSession.KIND_POST_REVIEW, null, null);
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
-                () -> tutor.explain(session.getId(), TEMPLATE, d -> {
+                () -> tutor.explain(session.getId(), TEMPLATE, null, d -> {
                 }));
         assertTrue(e.getMessage().contains("指定题目"), e.getMessage());
         assertEquals(0, messageMapper.selectCount(null));

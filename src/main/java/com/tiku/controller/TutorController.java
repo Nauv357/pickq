@@ -58,13 +58,14 @@ public class TutorController {
         return stream(request, (sessionId, delta) -> tutorService.ask(sessionId, request.text(), request.templateId(), delta));
     }
 
-    /** 错题讲解（主线）：一次给出三段——错在哪 / 这类题怎么做 / 下次防错 */
+    /** 单题讲解（做题后唯一的解析入口）：一次给出三段——有作答讲「错在哪」，没作答讲「这道题怎么做」 */
     @PostMapping(value = "/explain", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter explain(@RequestBody TutorAskRequest request) {
         if (request.questionId() == null) {
-            throw new IllegalArgumentException("错题讲解需要指定题目");
+            throw new IllegalArgumentException("讲解需要指定题目");
         }
-        return stream(request, (sessionId, delta) -> tutorService.explain(sessionId, request.templateId(), delta));
+        return stream(request, (sessionId, delta) ->
+                tutorService.explain(sessionId, request.templateId(), request.mode(), delta));
     }
 
     /** 整场复盘诊断（这是"答错即问一句"的批量版本：一次看完这场的问题） */

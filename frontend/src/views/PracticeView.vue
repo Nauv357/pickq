@@ -165,23 +165,19 @@
                 v-if="!q.analysis && !q.answerText && !(q.answerKeys && q.answerKeys.length) && !q.referenceAnswer"
                 class="text-muted"
               >{{ t('noAnalysis') }}</p>
-              <!-- 错题讲解（主线）：讲"你这次错在哪 / 这类题怎么做 / 下次防错"，可追问、可存为解析。
-                   做对的题不给"错在哪"（没有可讲的错），但可以生成正式解析补进题库 -->
-              <WrongAnswerCoach
-                v-if="isWrongQuestion(q)"
+              <!-- 讲解（做题后唯一的解析入口）：有作答讲「错在哪/这类题怎么做/下次防错」，
+                   没作答讲「这道题怎么做/这类题怎么做/易错点」；讲完可追问、可「存为解析」。
+                   上次讲过的内容会在这里自动回看（不重复花额度） -->
+              <QuestionExplain
                 :bank-id="Number(id)"
                 :question-id="q.questionId"
                 :practice-session-id="report?.sessionId || sessionId"
                 :template-id="skillTemplateId"
+                :mode="isWrongQuestion(q) ? 'WRONG' : 'NEUTRAL'"
                 @saved="onReportAnalysisSaved(q)"
               />
-              <!-- 单题 AI 辅助解析（未作答/做对：让 AI 生成一份可入库的正式解析） -->
-              <QuestionAiAnalysis
-                v-else
-                :question-id="q.questionId"
-                :bank-id="Number(id)"
-                @saved="onReportAnalysisSaved(q)"
-              />
+              <!-- 我的笔记（与解析分开：解析是题库的，笔记只在本机） -->
+              <QuestionNotes :bank-id="Number(id)" :question-id="q.questionId" />
             </div>
           </div>
         </div>
@@ -508,8 +504,8 @@ import { getSkillTemplates } from '../api/skills'
 import { formatScore } from '../utils/format'
 import { richTextToHtml } from '../utils/richText'
 import TikuIcon from '../components/TikuIcon.vue'
-import QuestionAiAnalysis from '../components/QuestionAiAnalysis.vue'
-import WrongAnswerCoach from '../components/WrongAnswerCoach.vue'
+import QuestionExplain from '../components/QuestionExplain.vue'
+import QuestionNotes from '../components/QuestionNotes.vue'
 import TutorPanel from '../components/TutorPanel.vue'
 
 const route = useRoute()
@@ -608,7 +604,7 @@ async function runDiagnose() {
   return result
 }
 
-/** 答错即问 → 已升级为「错题讲解」（WrongAnswerCoach 组件自带错因三选与追问） */
+/** 单题讲解统一走 QuestionExplain 组件（含错因三选与追问），此处不再保留"答错即问"的旧实现 */
 
 const isWrongQuestion = (q) => q.correct === false || q.selfGrade === 'WRONG' || q.selfGrade === 'PARTIAL'
 

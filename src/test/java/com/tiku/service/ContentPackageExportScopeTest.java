@@ -6,6 +6,7 @@ import com.tiku.dto.PageResult;
 import com.tiku.dto.QuestionBankResponse;
 import com.tiku.mapper.AiImportJobMapper;
 import com.tiku.mapper.MaterialMapper;
+import com.tiku.mapper.NoteMapper;
 import com.tiku.mapper.PracticeSessionMapper;
 import com.tiku.mapper.PracticeSessionQuestionMapper;
 import com.tiku.mapper.QuestionBankMapper;
@@ -166,7 +167,8 @@ class ContentPackageExportScopeTest {
 
         QuestionBankService service = new QuestionBankService(bankMapper, questionMapper, studyRecordMapper,
                 mock(ReviewStateMapper.class), mock(PracticeSessionMapper.class),
-                mock(PracticeSessionQuestionMapper.class), mock(MaterialMapper.class), mock(AiImportJobMapper.class));
+                mock(PracticeSessionQuestionMapper.class), mock(MaterialMapper.class), mock(AiImportJobMapper.class),
+                mock(NoteMapper.class));
 
         PageResult<QuestionBankResponse> result = service.listQuestionBanks(1, 50, null, null);
 

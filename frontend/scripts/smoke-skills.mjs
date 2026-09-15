@@ -96,6 +96,17 @@ function reviewPage(status) {
 }
 
 let customSeq = 0
+/** 词表管理用：本机改动（自定义节点 / 停用官方节点）——假后端也要能"改完再读"才测得出界面刷新 */
+const customizations = {
+  customized: true,
+  customNodes: [{ nodeId: 'custom.smoke1', name: '我的速算技巧', stageId: 'custom', stageName: '自定义知识点' }],
+  disabledNodes: [{ nodeId: 'gk.pd.figure.space', name: '图形推理·空间重构' }],
+  stages: [
+    { stageId: 'gk.pd', stageName: '判断推理' },
+    { stageId: 'gk.zl', stageName: '资料分析' },
+    { stageId: 'custom', stageName: '自定义知识点' }
+  ]
+}
 
 function questionDetail(id) {
   return {
@@ -114,12 +125,20 @@ function stub(pathname) {
   if (pathname === '/api/banks/1/materials') return []
   if (pathname === '/api/skills/templates') return TEMPLATES
   if (pathname.startsWith('/api/skills/templates/') && pathname.endsWith('/sync')) return { nodesWritten: 3 }
+  // 词表管理：本机改动（自定义节点增删改 / 官方节点停用 / 恢复官方模板）
+  if (/^\/api\/skills\/templates\/[^/]+\/customizations$/.test(pathname)) return customizations
+  if (/^\/api\/skills\/templates\/[^/]+\/nodes\/[^/]+\/disabled$/.test(pathname)) {
+    return { nodeId: pathname.split('/').slice(-2)[0], disabled: true }
+  }
   // 用户在下拉里直接输入新名称 → 新建自定义知识点
   if (/^\/api\/skills\/templates\/[^/]+\/nodes$/.test(pathname)) {
     customSeq++
     return { nodeId: `custom.smoke${customSeq}`, name: '我的自定义知识点', stageId: 'custom', stageName: '自定义知识点' }
   }
-  if (/^\/api\/skills\/templates\/[^/]+\/nodes\/[^/]+$/.test(pathname)) return { nodeId: 'custom.smoke1' }
+  if (/^\/api\/skills\/templates\/[^/]+\/nodes\/[^/]+$/.test(pathname)) {
+    const nodeId = decodeURIComponent(pathname.split('/').pop())
+    return { nodeId, name: '改过名的知识点', stageId: 'gk.zl', stageName: '资料分析' }
+  }
   if (pathname.startsWith('/api/skills/templates/')) {
     const id = decodeURIComponent(pathname.split('/').pop())
     const tpl = TEMPLATES.find((t) => t.templateId === id) || TEMPLATES[0]
@@ -333,11 +352,60 @@ await page.waitForTimeout(400)
 await page.locator('.action-menu button', { hasText: '知识点' }).first().click()
 await page.waitForSelector('.skill-toolbar', { timeout: 8000 })
 await waitToastsGone()
-await page.locator('.skill-toolbar-right button').first().click()
+await page.locator('.skill-toolbar-right .btn-primary').click()
 await page.waitForSelector('.el-message--success', { timeout: 20000 })
 const suggestCall = calls.find((c) => c.path === '/api/banks/1/skills/suggest')
 check('「分析并标注」按批发请求（maxAiCalls 有值）', !!suggestCall && /maxAiCalls=\d+/.test(suggestCall.query), suggestCall?.query || '(无请求)')
 check('分析请求带 includeUntagged=true', !!suggestCall && suggestCall.query.includes('includeUntagged=true'), suggestCall?.query)
+
+/* ---------- 8. 管理知识点：用户自己编辑词表（用户反馈："应该开放给用户自己编辑的权利"） ---------- */
+console.log('\n[8] 管理知识点（自定义节点增删改 / 官方节点停用 / 恢复官方模板）')
+await waitToastsGone()
+await page.locator('.skill-toolbar-right button', { hasText: '管理知识点' }).click()
+await page.waitForSelector('.skm-body', { timeout: 8000 })
+await page.waitForTimeout(600)
+const skmText = await textOf(page.locator('.skm-body'))
+const customRow = page.locator('.skm-sec').first().locator('.skm-row').first()
+const customNameValue = await customRow.locator('.skm-input').inputValue()
+check('管理弹窗列出本机改动（自定义名称在输入框里 + 已停用官方节点）',
+  customNameValue === '我的速算技巧' && /已停用/.test(skmText) && /图形推理·空间重构/.test(skmText),
+  `name=${customNameValue} | ${skmText.slice(0, 200)}`)
+check('自定义节点显示"本库 N 题"（影响面）', /本库 \d+ 题/.test(skmText), skmText.slice(0, 200))
+
+// 改名：输入框改完回车 → PUT 到该节点（改名不动 id，标签不受影响）
+await customRow.locator('.skm-input').fill('速算与估算')
+await customRow.locator('.skm-input').press('Enter')
+await page.waitForTimeout(700)
+const renameCall = calls.find((c) => c.method === 'PUT' && /\/api\/skills\/templates\/[^/]+\/nodes\/custom\.smoke1$/.test(c.path))
+check('改名发 PUT /skills/templates/{id}/nodes/{nodeId}', !!renameCall && /速算与估算/.test(renameCall.body || ''), renameCall?.body || '(无请求)')
+check('改名请求带上了阶段（换阶段同一个接口）', !!renameCall && /stageId/.test(renameCall.body || ''), renameCall?.body || '')
+
+// 新增：名称 + 阶段
+const addRow = page.locator('.skm-row.skm-add')
+await addRow.locator('.skm-input').fill('我的判断推理口诀')
+await addRow.locator('button', { hasText: '添加' }).click()
+await page.waitForTimeout(700)
+const addCall = calls.find((c) => c.method === 'POST' && /\/api\/skills\/templates\/[^/]+\/nodes$/.test(c.path) && /我的判断推理口诀/.test(c.body || ''))
+check('新增自定义知识点发 POST nodes（带名称）', !!addCall, addCall?.body || '(无请求)')
+check('新增可以指定所属阶段', !!addCall && /stageId/.test(addCall.body || ''), addCall?.body || '')
+
+// 停用官方节点
+const officialRow = page.locator('.skm-official').first()
+const officialName = (await textOf(officialRow.locator('.skm-name'))).trim()
+await officialRow.locator('button', { hasText: '停用' }).click()
+await page.waitForTimeout(700)
+const disableCall = calls.find((c) => c.method === 'PUT' && /\/disabled$/.test(c.path))
+check(`停用官方节点发 PUT .../disabled（${officialName}）`, !!disableCall && /"disabled":true/.test(disableCall.body || ''), disableCall?.body || '(无请求)')
+
+// 恢复官方模板（二次确认）
+await page.locator('.skm-foot button', { hasText: '恢复官方模板' }).click()
+await page.waitForSelector('.el-message-box', { timeout: 5000 })
+await page.locator('.el-message-box__btns button', { hasText: '恢复官方模板' }).click()
+await page.waitForTimeout(800)
+const resetCall = calls.find((c) => c.method === 'DELETE' && /\/customizations$/.test(c.path))
+check('「恢复官方模板」发 DELETE .../customizations', !!resetCall, JSON.stringify(calls.slice(-3).map((c) => c.method + ' ' + c.path)))
+await page.locator('.skm-foot button', { hasText: '完成' }).click()
+await page.waitForTimeout(400)
 
 check('无 JS 报错', pageErrors.length === 0, pageErrors.join(' | ').slice(0, 200))
 

@@ -43,6 +43,11 @@
 | `V14__export_records.sql` | 建导出记录表 | `export_records` |
 | `V15__widen_contract_columns.sql` | 放宽列宽以对齐内容包契约（见下方说明），老数据不受影响 | `question_bank`、`question`、`study_record`、`export_records` |
 | `V16__ai_import_error_code.sql` | 加 `error_code`（稳定失败分类） | `ai_import_job` |
+| `V17__learning_path_skill_tags.sql` | 建 `question_skill`（题目 ↔ 知识点标签） | `question_skill` |
+| `V18__learning_path_tutor.sql` | 建 `tutor_session` / `tutor_message`（AI 讲解与追问落库） | `tutor_session`、`tutor_message` |
+| `V19__learning_path_plan.sql` | 建 `daily_task`（每日任务，已从界面下线）；`practice_session` 加 `scope_node` | `daily_task`、`practice_session` |
+| `V20__learning_path_mastery_loop.sql` | 建 `card`（闪卡，已从界面下线）、`question_difficulty`（85% 规则用） | `card`、`question_difficulty` |
+| `V21__note.sql` | 建 `note`（我的笔记；只存本机，不进内容包） | `note` |
 
 > `V15` 的动机：发布侧按契约允许 `description` 2000 / `packageKey` 100 / `version` 40 / `questionKey` 100，
 > 而本地列原本只有 500 / 64 / 20 / 64 —— 会出现「合法内容包能发布成功、下载后导入本地却因列超长落库失败」。
@@ -236,6 +241,26 @@
 | `created_at` | TIMESTAMP | NOT NULL，DEFAULT `CURRENT_TIMESTAMP` | 导出时间 | 列表按它倒序 |
 
 索引：`KEY idx_export_records_created (created_at)`、`KEY idx_export_records_bank (bank_id, published)`。
+
+### 1.2.10 `note` — 我的笔记（只存本机，不进内容包）
+
+来源：`V21__note.sql`；实体 `model/Note.java`；服务 `NoteService` / `NoteController`；
+界面 `NotesView.vue`（题库内列表）+ `QuestionNotes.vue`（每题就地记）。
+
+**与 `question.analysis` 的边界**：`analysis` 属于题库（随 `.zip`/`.tiku` 导出、可发布到广场），
+`note` 属于用户（**不导出、不发布**；备份恢复按整个数据目录走，所以备份里会有）。
+
+| 字段 | 类型 | 约束 | 含义 | 关联/来源 |
+| --- | --- | --- | --- | --- |
+| `id` | BIGINT | PK，AUTO_INCREMENT | 笔记主键 | — |
+| `bank_id` | BIGINT | NOT NULL（**不建外键**） | 所属题库 | 题库删除时 `QuestionBankService.deleteQuestionBank` 级联清理 |
+| `question_id` | BIGINT | 可空 | 关联题目；**空 = 题库级随手记** | 题删时 `QuestionService.deleteQuestion` 级联清理 |
+| `content` | TEXT | NOT NULL | 正文（纯文本，上限 2000 字，超长截断） | `NoteService.normalize` |
+| `source` | VARCHAR(16) | NOT NULL DEFAULT `user` | `user` 自己写的 / `ai` 从讲解一键存进来的 | `Note.SOURCE_USER/SOURCE_AI` |
+| `created_at` | TIMESTAMP | NOT NULL，DEFAULT `CURRENT_TIMESTAMP` | 创建时间 | — |
+| `updated_at` | TIMESTAMP | NOT NULL，DEFAULT `CURRENT_TIMESTAMP` | 更新时间（应用层写入，不依赖 `ON UPDATE`） | 列表按它倒序 |
+
+索引：`KEY idx_note_bank_time (bank_id, updated_at)`、`KEY idx_note_question (question_id)`。
 
 ## 1.3 表之间的关系与关系示意
 

@@ -76,6 +76,13 @@ const aiServer = http.createServer((req, res) => {
         '【这类题怎么做】', '看到「增长率」先认出现期与基期，', '再套 现期 ÷ 基期 − 1。\n',
         '【下次防错】', '先圈出题干里的年份，再动笔。'
       ]
+    } else if (raw.includes('【这道题怎么做】')) {
+      // 没作答的题（中性口吻）：标题不同，结构相同
+      pieces = [
+        '【这道题怎么做】', '先认出条件里的两个量，', '再套公式算出答案。\n',
+        '【这类题怎么做】', '见到「两个量比大小」就先算比值。\n',
+        '【易错点】', '别把两个量的顺序弄反。'
+      ]
     } else {
       pieces = ['你的错因是没掌握公式，', '建议先背熟「增长率 = 现期/基期 - 1」', '再做 5 道同类题巩固。']
     }
@@ -244,32 +251,32 @@ try {
   const firstWrong = page.locator('.report-item').first()
   await firstWrong.locator('.report-row').click()
   await page.waitForTimeout(600)
-  const coachTrigger = firstWrong.locator('.coach-trigger')
+  const coachTrigger = firstWrong.locator('.qx-trigger')
   const coachText = await textOf(coachTrigger)
   check('错题里有「讲给我听」+ 可选错因三选（不选也能讲）',
     /讲给我听/.test(coachText) && /看错/.test(coachText) && /没见过/.test(coachText), coachText.slice(0, 140))
-  await coachTrigger.locator('.coach-chip', { hasText: '这个知识点不会' }).click()
+  await coachTrigger.locator('.qx-chip', { hasText: '这个知识点不会' }).click()
   await coachTrigger.locator('button', { hasText: '讲给我听' }).click()
 
   // 流式：第一段一出现就有内容，随后继续变长（证明不是一次性返回）
   await page.waitForFunction(() => {
-    const el = document.querySelector('.coach-sec-text')
+    const el = document.querySelector('.qx-sec-text')
     return el && el.innerText.trim().length > 0
   }, null, { timeout: 25000 })
-  const coachFirst = (await textOf(firstWrong.locator('.coach-body'))).length
+  const coachFirst = (await textOf(firstWrong.locator('.qx-body'))).length
   await page.waitForTimeout(400)
-  const coachLater = (await textOf(firstWrong.locator('.coach-body'))).length
+  const coachLater = (await textOf(firstWrong.locator('.qx-body'))).length
   await page.waitForFunction(() => {
-    const el = document.querySelector('.coach-body')
+    const el = document.querySelector('.qx-body')
     return el && el.innerText.includes('先圈出题干里的年份')
   }, null, { timeout: 25000 })
   check('讲解是流式出现的（先短后长）', coachLater > coachFirst, `${coachFirst} → ${coachLater}`)
 
-  const secTitles = await firstWrong.locator('.coach-sec-title').allInnerTexts()
+  const secTitles = await firstWrong.locator('.qx-sec-title').allInnerTexts()
   check('三段结构各自成块渲染（错在哪 / 这类题怎么做 / 下次防错）',
     secTitles.length === 3 && /错在哪/.test(secTitles[0]) && /这类题怎么做/.test(secTitles[1]) && /下次防错/.test(secTitles[2]),
     JSON.stringify(secTitles))
-  const coachBody = await textOf(firstWrong.locator('.coach-body'))
+  const coachBody = await textOf(firstWrong.locator('.qx-body'))
   check('讲解内容针对我的作答（不是通用解析）', /你选了乙/.test(coachBody) && /基期/.test(coachBody), coachBody.slice(0, 160))
 
   const explainPrompt = prompts.filter((p) => p.includes('【错在哪】')).pop() || ''
@@ -279,14 +286,14 @@ try {
   check('讲解 prompt 明确要求讲透而不是照抄解析', explainPrompt.includes('不要照抄'), explainPrompt.slice(-200))
 
   // 就地追问：不用另开面板
-  await firstWrong.locator('.coach-input').fill('那基期怎么快速认出来？')
-  await firstWrong.locator('.coach-foot button', { hasText: '追问' }).click()
+  await firstWrong.locator('.qx-input').fill('那基期怎么快速认出来？')
+  await firstWrong.locator('.qx-foot button', { hasText: '追问' }).click()
   await page.waitForFunction(() => {
-    const el = document.querySelector('.coach-body')
+    const el = document.querySelector('.qx-body')
     return el && el.innerText.includes('再做 5 道同类题')
   }, null, { timeout: 25000 })
-  check('讲解下面能直接追问（一问一答都在原位）', (await firstWrong.locator('.coach-follow').count()) >= 2,
-    String(await firstWrong.locator('.coach-follow').count()))
+  check('讲解下面能直接追问（一问一答都在原位）', (await firstWrong.locator('.qx-follow').count()) >= 2,
+    String(await firstWrong.locator('.qx-follow').count()))
 
   // 落库复查：错因进会话，讲解进消息且不占提示级别
   const whySession = (await api(`/tutor/sessions?questionId=${wrongQids[0]}`))[0]
@@ -298,11 +305,86 @@ try {
     JSON.stringify((whyMessages.messages || []).map((m) => m.hintLevel)))
 
   // 存为解析：讲解变成题库的一部分（越用越厚）
-  await firstWrong.locator('.coach-foot button', { hasText: '存为解析' }).click()
+  await firstWrong.locator('.qx-foot button', { hasText: '存为解析' }).click()
   await page.waitForTimeout(1500)
   const savedQuestion = await api(`/questions/${wrongQids[0]}`)
   check('「存为解析」把讲解写回题目解析', /【错在哪】/.test(savedQuestion.analysis || ''), String(savedQuestion.analysis).slice(0, 120))
+
+  // 存进笔记：解析是题库的（会随包分享），笔记是我的（只在本机）——两个去处都验证
+  await firstWrong.locator('.qx-foot button', { hasText: '存进笔记' }).click()
+  await page.waitForTimeout(1200)
+  const notesOfQuestion = await api(`/questions/${wrongQids[0]}/notes`)
+  check('「存进笔记」把讲解存进我的笔记（source=ai）',
+    notesOfQuestion.length === 1 && notesOfQuestion[0].source === 'ai' && /【错在哪】/.test(notesOfQuestion[0].content),
+    JSON.stringify(notesOfQuestion).slice(0, 200))
+  const bankNotes = await api(`/banks/${bankId}/notes?page=1&size=20`)
+  check('笔记按题库可列出（带题号，便于回到那道题）',
+    bankNotes.total >= 1 && bankNotes.records[0].questionNumber != null,
+    JSON.stringify(bankNotes).slice(0, 200))
   await page.screenshot({ path: `${SHOTS}/3-错题讲解.png` })
+
+  /* ---------------- ③b 统一解析：三处入口同一个组件 + 上次讲过的自动回看 ---------------- */
+  const promptsBeforeReopen = prompts.length
+  await page.goto(`${UI}/banks/${bankId}`, { waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('.q-row', { timeout: 15000 })
+  await page.waitForTimeout(800)
+  // 题库列表里对同一道题点「讲解」：不再自动重复讲，而是把上次讲过的内容显示出来
+  // 注意：面板是行的**兄弟节点**（v-for 里 row + panel），所以用相邻兄弟选择器定位
+  const targetPanel = page.locator(`.q-row[data-qid="${wrongQids[0]}"] + .q-ai-panel`)
+  await page.locator(`.q-row[data-qid="${wrongQids[0]}"]`).click({ button: 'right' })
+  await page.waitForSelector('.action-menu', { timeout: 5000 })
+  await page.locator('.action-menu .action-menu-item', { hasText: '讲解这道题' }).click()
+  await targetPanel.locator('.qx-body').waitFor({ state: 'attached', timeout: 15000 })
+  await page.waitForTimeout(1200)
+  const bankExplain = await textOf(targetPanel.locator('.qx-body'))
+  check('题库列表行内用的是同一个讲解组件（三段结构在）',
+    /错在哪|这道题怎么做/.test(bankExplain) && /这类题怎么做/.test(bankExplain), bankExplain.slice(0, 160))
+  check('打开就显示上次讲过的内容（不用重新花额度）',
+    prompts.length === promptsBeforeReopen && /上次讲于/.test(await textOf(targetPanel.locator('.qx-history'))),
+    `newPrompts=${prompts.length - promptsBeforeReopen} history=${await textOf(targetPanel.locator('.qx-history'))}`)
+  await page.screenshot({ path: `${SHOTS}/3b-回看讲解.png` })
+
+  // 练习历史里也是同一个组件（打过的题显示上次讲过的内容，没讲过的给入口）
+  await page.goto(`${UI}/banks/${bankId}/sessions?view=${sessionId}`, { waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('.review-card', { timeout: 15000 })
+  await page.waitForTimeout(2000)
+  const histCards = page.locator('.review-card')
+  const firstCardTrigger = await histCards.first().locator('.qx-trigger').count()
+  const firstCardBody = await histCards.first().locator('.qx-body').count()
+  check('练习历史每题都有讲解入口（不再是另一套 AI 解析）', firstCardTrigger + firstCardBody > 0,
+    `trigger=${firstCardTrigger} body=${firstCardBody}`)
+  const histTitles = await page.locator('.qx-sec-title').allInnerTexts()
+  check('练习历史里显示的是讲过的三段（回看，不重复花额度）',
+    histTitles.length >= 3 && histTitles.includes('这类题怎么做'),
+    JSON.stringify(histTitles))
+
+  // 没作答的题：讲"这道题怎么做"，不能讲"你错在哪"（新题，确保从未作答）
+  const freshQid = await api('/questions', 'POST', {
+    bankId, volume: 1, questionType: 'SINGLE', questionNumber: 99,
+    content: '某商品先涨价 10% 再降价 10%，最终价格与原价相比如何变化？',
+    topic: null, category: null, score: 1, analysis: null,
+    options: [{ key: 'A', text: '不变' }, { key: 'B', text: '变低' }, { key: 'C', text: '变高' }, { key: 'D', text: '无法确定' }],
+    answerKeys: ['B'], answerText: null, referenceAnswer: null
+  })
+  await page.goto(`${UI}/banks/${bankId}`, { waitUntil: 'domcontentloaded' })
+  await page.waitForSelector(`.q-row[data-qid="${freshQid}"]`, { timeout: 15000 })
+  await page.waitForTimeout(600)
+  const freshPanel = page.locator(`.q-row[data-qid="${freshQid}"] + .q-ai-panel`)
+  await page.locator(`.q-row[data-qid="${freshQid}"]`).click({ button: 'right' })
+  await page.waitForSelector('.action-menu', { timeout: 5000 })
+  await page.locator('.action-menu .action-menu-item', { hasText: '讲解这道题' }).click()
+  await page.waitForFunction((qid) => {
+    const row = document.querySelector(`.q-row[data-qid="${qid}"]`)
+    const panel = row && row.nextElementSibling
+    // 等第三段也长出来（假模型分段推，只看第二段会读到半截）
+    return panel && panel.innerText.includes('别把两个量的顺序弄反')
+  }, freshQid, { timeout: 30000 })
+  const neutralTitles = await freshPanel.locator('.qx-sec-title').allInnerTexts()
+  check('没作答的题讲「这道题怎么做 / 这类题怎么做 / 易错点」',
+    neutralTitles.length === 3 && /这道题怎么做/.test(neutralTitles[0]) && /易错点/.test(neutralTitles[2]),
+    JSON.stringify(neutralTitles))
+  const neutralPrompt = prompts.filter((p) => p.includes('【这道题怎么做】')).pop() || ''
+  check('中性口吻的 prompt 明确"我没有作答记录"', neutralPrompt.includes('我没有作答记录'), neutralPrompt.slice(-200))
 
   /* ---------------- ④ 提示楼梯：做题中要提示，逐级递进 ---------------- */
   const live = await api(`/banks/${bankId}/sessions`, 'POST', { mode: 'ALL', count: 3 })

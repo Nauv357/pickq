@@ -19,6 +19,10 @@
         </el-select>
       </div>
       <div class="skill-toolbar-right">
+        <button class="btn btn-secondary btn-sm" :disabled="!templateId || loading" @click="managerOpen = true">
+          <TikuIcon name="settings" :size="13" />
+          {{ t('manageNodes') }}
+        </button>
         <span v-if="running" class="skill-running text-muted">{{ t('running', { done: progressDone, total: progressTotal }) }}</span>
         <button v-else class="btn btn-primary btn-sm" :disabled="!templateId || loading" @click="startTagging">
           {{ counts.confirmed + counts.pending > 0 ? t('retag') : t('start') }}
@@ -208,6 +212,15 @@
       <span class="skill-foot text-muted">{{ t('footNote') }}</span>
       <button class="btn btn-secondary" @click="visible = false">{{ t('close') }}</button>
     </template>
+
+    <!-- 词表管理：自定义知识点增删改 + 官方节点停用/恢复 + 恢复官方模板（只影响本机） -->
+    <SkillNodeManager
+      v-model="managerOpen"
+      :template-id="templateId"
+      :template-name="currentTemplateName"
+      :bank-id="Number(bankId)"
+      @changed="onNodesChanged"
+    />
   </el-dialog>
 </template>
 
@@ -218,6 +231,8 @@ import { useI18n } from 'vue-i18n'
 import { applySkills, cleanupOrphanTags, createSkillNode, getSkillCoverage, getSkillQuestions, getSkillTemplate, getSkillTemplates, suggestSkills } from '../api/skills'
 import { getQuestion } from '../api/questions'
 import { startBusy, stopBusy, updateBusy } from '../utils/busy'
+import TikuIcon from './TikuIcon.vue'
+import SkillNodeManager from './SkillNodeManager.vue'
 
 const props = defineProps({
   bankId: { type: [Number, String], required: true }
@@ -233,8 +248,9 @@ const { t } = useI18n({
       nodes: '个知识点',
       start: '分析并标注',
       retag: '重新分析',
+      manageNodes: '管理知识点',
       running: '正在分析…（已处理 {done} / 约 {total} 题）',
-      hint: 'AI 把题目对应到技能图的知识点，用于学习路线、缺口分析与掌握度判定。结果先作为建议，你确认后才生效；低把握的建议只作参考。标签可以在下面直接改，不必打开题目。',
+      hint: 'AI 把题目对应到技能图的知识点，用于筛选、讲解与"下一步练什么"。结果先作为建议，你确认后才生效；低把握的建议只作参考。标签可以在下面直接改，不必打开题目；词表本身也能改（右上「管理知识点」）。',
       confirmed: '已确认',
       pending: '待确认',
       untagged: '未匹配',
@@ -296,8 +312,9 @@ const { t } = useI18n({
       nodes: 'nodes',
       start: 'Analyze & tag',
       retag: 'Re-analyze',
+      manageNodes: 'Manage topics',
       running: 'Analyzing… ({done} / ~{total} questions)',
-      hint: 'The AI maps questions onto knowledge nodes used for the learning path, gap analysis and mastery. Results are suggestions until confirmed; low-confidence ones are hints only. You can edit tags right here — no need to open the question.',
+      hint: 'The AI maps questions onto knowledge nodes, used for filtering, explanations and picking what to practise next. Results are suggestions until confirmed; low-confidence ones are hints only. You can edit tags right here — no need to open the question.',
       confirmed: 'confirmed',
       pending: 'to confirm',
       untagged: 'unmatched',
@@ -380,6 +397,12 @@ const details = reactive({})
 const detailLoading = reactive({})
 const progressDone = ref(0)
 const progressTotal = ref(0)
+/** 词表管理弹窗（自定义知识点增删改 / 官方节点停用 / 恢复官方模板） */
+const managerOpen = ref(false)
+
+const currentTemplateName = computed(
+  () => templates.value.find((x) => x.templateId === templateId.value)?.name || templateId.value
+)
 
 /**
  * 计数直接用清单接口返回的 counts——它和 records 是后端**同一份快照**算出来的，
@@ -530,6 +553,11 @@ async function refresh() {
 
 function reload(nextPage = page.value) {
   page.value = nextPage
+  refresh()
+}
+
+/** 词表被改过（自定义节点 / 停用官方节点）→ 下拉与统计口径都要跟着刷新 */
+function onNodesChanged() {
   refresh()
 }
 

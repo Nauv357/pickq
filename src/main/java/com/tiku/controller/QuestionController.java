@@ -61,13 +61,11 @@ public class QuestionController {
         return ApiResponse.success(null);
     }
 
-    /** 单题 AI 辅助解析（按需生成，不落库；返回解析文本，前端预览后可选择保存） */
-    @PostMapping("/{id}/ai-analysis")
-    public ApiResponse<String> aiAnalysis(@PathVariable Long id) {
-        return ApiResponse.success(questionService.generateAiAnalysis(id));
-    }
-
-    /** 草稿 AI 解析（编辑/录入面板：基于表单当前内容生成，题目可未保存） */
+    /**
+     * 草稿 AI 解析（编辑/录入面板：基于表单当前内容生成，题目可未保存）。
+     * 注意：题目的"讲解"走 `/api/tutor/explain`（统一引擎，见 TutorService）——
+     * 这里只剩"编辑时按草稿补一份正式解析"这一条路。
+     */
     @PostMapping("/ai-analysis-draft")
     public ApiResponse<String> aiAnalysisDraft(@Valid @RequestBody AnalysisDraftRequest request) {
         return ApiResponse.success(questionService.analyzeDraft(request.bankId(), request.questionTypeLabel(),

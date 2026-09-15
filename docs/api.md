@@ -121,9 +121,12 @@
 | `PUT /api/questions/{id}` | 无 | body = `QuestionUpdateRequest`（null 不更新） | `null` | 400 `选项不能为空`；404 `题目不存在` |
 | `DELETE /api/questions/{id}` | 无 | — | `null` | 404 `题目不存在` |
 | `PUT /api/questions/{id}/favorite` | 无 | body `{favorite*}` | `null` | 400 `收藏状态不能为空`；404 `题目不存在` |
-| `POST /api/questions/{id}/ai-analysis` | 无 | — | `String`（解析文本，**不落库**） | 404 `题目不存在`；500 `已有 AI 解析正在生成中，请稍候再试`（单飞锁）；AI 相关 400/500 |
 | `POST /api/questions/ai-analysis-draft` | 无 | body `{bankId,questionTypeLabel,content*,options,answerKeys,answerText,referenceAnswer,materialContent}` | `String` | 400 `题干不能为空`；500 `已有 AI 解析正在生成中，请稍候再试` |
 | `PUT /api/questions/{id}/analysis` | 无 | body `{analysis*}` | `null` | 400 `解析内容不能为空`；404 `题目不存在` |
+
+> `POST /api/questions/{id}/ai-analysis`（按 id 生成一份中性解析）**已退役**（2026-09-16 解析统一）：
+> 单题讲解统一走 `POST /api/tutor/explain`（流式、带我的作答与错因、可追问、可回看）。
+> 编辑面板的"AI 草稿解析"仍用上面的 `ai-analysis-draft`。
 
 ### 1.3.4 `StudyRecordController` — 刷题记录 / 错题 / 复习（12 个端点，路径前缀 `/api`）
 
@@ -157,17 +160,30 @@
 
 ### 1.3.5.1 `TutorController` — AI 私教（7 个端点，前缀 `/api/tutor`）
 
-生成类端点都是 **SSE**（`text/event-stream`）：事件 `session{sessionId,maxHintLevel}` → `delta{text}`（多次）→ `done{sessionId,maxHintLevel}`，失败为 `error{message}`；请求体统一 `TutorAskRequest{bankId,questionId,practiceSessionId,templateId,kind(PER_QUESTION/POST_REVIEW),selfReason,selfNote,text,level}`。会话由后端按「同题 + 同场练习 + kind」复用，前端不必自己存 id。
+生成类端点都是 **SSE**（`text/event-stream`）：事件 `session{sessionId,maxHintLevel}` → `delta{text}`（多次）→ `done{sessionId,maxHintLevel}`，失败为 `error{message}`；请求体统一 `TutorAskRequest{bankId,questionId,practiceSessionId,templateId,kind(PER_QUESTION/POST_REVIEW),mode(WRONG/NEUTRAL，空=自动),selfReason,selfNote,text,level}`。会话由后端按「同题 + 同场练习 + kind」复用，前端不必自己存 id。
 
 | 方法 + 路径 | 说明 |
 | --- | --- |
-| `POST /api/tutor/explain` | **错题讲解（主线）**：一次给三段（`【错在哪】/【这类题怎么做】/【下次防错】`，标题原样输出供前端分块渲染）；上下文含「我的作答/我的错因/该题历史/该知识点表现」；**不占提示级别**（`hint_level` 为空）。缺 `questionId` → 400 `错题讲解需要指定题目` |
+| `POST /api/tutor/explain` | **讲解（唯一解析入口）**：一次给三段，标题原样输出供前端分块渲染——有作答时 `【错在哪】/【这类题怎么做】/【下次防错】`，没作答或做对时 `【这道题怎么做】/【这类题怎么做】/【易错点】`（口吻由 `mode` 指定，或按"最近一次作答对不对"自动判定）；上下文含「我的作答/我的错因/该题历史/该知识点表现」；**不占提示级别**（`hint_level` 为空）。缺 `questionId` → 400 `讲解需要指定题目` |
 | `POST /api/tutor/hint` | 提示楼梯（`level` 1–3）；整场复盘会话上调 → 400 `整场复盘没有提示楼梯（请直接追问）` |
 | `POST /api/tutor/ask` | 自由追问（带最近 4 轮对话；`text` 空且无 `selfReason` → 400 `请先写一句想问什么`） |
 | `POST /api/tutor/review` | 整场复盘诊断（依据本场公式统计，只讲清单里的题） |
 | `GET /api/tutor/review/{practiceSessionId}/summary` | **公式统计**（成绩 + 按知识点的错题分布 + 错题清单），模型只负责讲人话 |
-| `GET /api/tutor/sessions?questionId=` | 某题的历史会话（接着上次聊） |
+| `GET /api/tutor/sessions?questionId=` | 某题的历史会话（接着上次聊；**界面用它做"回看上次讲解"**） |
 | `GET /api/tutor/sessions/{sessionId}/messages` | `{messages[],maxHintLevel}` |
+
+### 1.3.5.2 `NoteController` — 我的笔记（5 个端点；只存本机，不进内容包）
+
+| 方法 + 路径 | 请求 | 响应 `data` | 常见错误 |
+| --- | --- | --- | --- |
+| `GET /api/banks/{bankId}/notes` | query `questionId`（可选）、`page`、`size` | `PageResult<NoteResponse{id,bankId,questionId,questionNumber,content,source(user/ai),createdAt,updatedAt}>` | 404 `题库不存在` |
+| `GET /api/questions/{questionId}/notes` | — | `List<NoteResponse>`（做题页/回顾页就地显示，不分页） | — |
+| `POST /api/banks/{bankId}/notes` | `{questionId?, content, source?}`（`questionId` 省略 = 题库级随手记） | `NoteResponse` | 400 `笔记内容不能为空` / `题目不属于该题库` |
+| `PUT /api/notes/{id}` | `{content}` | `NoteResponse` | 400 `笔记内容不能为空`；404 `笔记不存在：{id}` |
+| `DELETE /api/notes/{id}` | — | `null` | 404 `笔记不存在：{id}` |
+
+> 与解析的边界：解析走 `PUT /api/questions/{id}/analysis` 并**随题库文件导出**；笔记只在本机
+> （题删/库删时级联清理）。详见 `docs/features.md` §4.9。
 
 ### 1.3.6 `MaterialController` — 共享材料（4 个端点，`/api/banks/{bankId}/materials`）
 

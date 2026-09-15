@@ -57,10 +57,29 @@ export const getQuestionSkills = (questionId, templateId) =>
 
 export const setQuestionSkills = (questionId, body) => http.put(`/questions/${questionId}/skills`, body)
 
-/** 新增自定义知识点（自己的词表，只存本机）：同名会复用已有节点，不会造出两个看起来一样的 */
-export const createSkillNode = (templateId, name) =>
-  http.post(`/skills/templates/${encodeURIComponent(templateId)}/nodes`, { name })
+/**
+ * 新增自定义知识点（自己的词表，只存本机）：同名会复用已有节点，不会造出两个看起来一样的。
+ * stageId 省略 = 挂到「自定义知识点」阶段；也可以挂到官方阶段下。
+ */
+export const createSkillNode = (templateId, name, stageId) =>
+  http.post(`/skills/templates/${encodeURIComponent(templateId)}/nodes`, { name, stageId })
+
+/** 改名 / 换阶段（只针对自定义节点）：**改名不动 nodeId**，所以已打的标签不会失效 */
+export const updateSkillNode = (templateId, nodeId, { name, stageId } = {}) =>
+  http.put(`/skills/templates/${encodeURIComponent(templateId)}/nodes/${encodeURIComponent(nodeId)}`, { name, stageId })
 
 /** 删除自定义知识点（只能删 custom.*）；它上面的标签会变成失效标签，可在题库里一键清理 */
 export const deleteSkillNode = (templateId, nodeId) =>
   http.delete(`/skills/templates/${encodeURIComponent(templateId)}/nodes/${encodeURIComponent(nodeId)}`)
+
+/** 停用 / 恢复官方节点（只影响本机：从词表、下拉与 AI 提示里隐藏；不改官方模板本身） */
+export const setSkillNodeDisabled = (templateId, nodeId, disabled) =>
+  http.put(`/skills/templates/${encodeURIComponent(templateId)}/nodes/${encodeURIComponent(nodeId)}/disabled`, { disabled })
+
+/** 本机对这张图的改动（自定义节点 / 已停用的官方节点 / 阶段列表），「管理知识点」界面用 */
+export const getSkillCustomizations = (templateId) =>
+  http.get(`/skills/templates/${encodeURIComponent(templateId)}/customizations`)
+
+/** 恢复官方模板：清掉这张图的全部自定义节点与停用记录（标签会变成失效标签，可一键清理） */
+export const resetSkillCustomizations = (templateId) =>
+  http.delete(`/skills/templates/${encodeURIComponent(templateId)}/customizations`)

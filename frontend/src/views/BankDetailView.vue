@@ -338,10 +338,13 @@
                 <span class="an-label">解析</span>
                 <div class="an-content" v-html="richHtml(q.analysis)"></div>
               </div>
-              <QuestionAiAnalysis
+              <!-- 讲解（做题后唯一的解析入口；这里通常还没作答，所以讲"这道题怎么做/这类题怎么做/易错点"）。
+                   用 v-if 而不是 v-show：只在真的点开时才挂载，否则一页 50 行会各自去拉一次讲解历史 -->
+              <QuestionExplain
+                v-if="!!aiOpen[q.questionId]"
                 :question-id="q.questionId"
                 :bank-id="Number(id)"
-                :auto-start="!!aiOpen[q.questionId]"
+                auto-start
                 @saved="onAnalysisSaved(q, $event)"
               />
             </div>
@@ -829,7 +832,7 @@ const { t } = useI18n({
     'zh-CN': {
       notFoundDesc: '题库可能已被删除，或地址有误', backToBanks: '返回题库列表', loading: '加载中…',
       authorBy: '作者：{v}', sourceFrom: '来源：{v}', createdOn: '创建于 {d}', questionsN: '共 {n} 题',
-      history: '练习历史', edit: '编辑题库', exportBank: '导出题库文件', skillTags: '知识点', printPaper: '打印试卷', delete: '删除题库', startPractice: '开始练习',
+      history: '练习历史', notes: '我的笔记', edit: '编辑题库', exportBank: '导出题库文件', skillTags: '知识点', printPaper: '打印试卷', delete: '删除题库', startPractice: '开始练习',
       more: '更多', planStarting: '配题中…', customPractice: '自定义练习…',
       startPracticeTip: '一键开练：按「错题 → 今天到期 → 你题量最少的知识点 → 没做过的题」配 {n} 题',
       practiceOptionsTip: '改题量，或自己定范围和题量',
@@ -876,8 +879,8 @@ const { t } = useI18n({
         moreTip: '更多操作（右键同款菜单）',
         edit: '编辑此题',
         practice: '从这题开始做题',
-        ai: 'AI 解析',
-        aiClose: '收起解析',
+        ai: '讲解这道题',
+        aiClose: '收起讲解',
         copy: '复制题干',
         favorite: '收藏此题',
         unfavorite: '取消收藏',
@@ -951,7 +954,7 @@ const { t } = useI18n({
     'en-US': {
       notFoundDesc: 'This bank may have been deleted, or the link is wrong', backToBanks: 'Back to banks', loading: 'Loading…',
       authorBy: 'Author: {v}', sourceFrom: 'Source: {v}', createdOn: 'Created {d}', questionsN: '{n} questions',
-      history: 'History', edit: 'Edit bank', exportBank: 'Export bank file', skillTags: 'Knowledge tags', printPaper: 'Print paper', delete: 'Delete bank', startPractice: 'Start practice',
+      history: 'History', notes: 'My notes', edit: 'Edit bank', exportBank: 'Export bank file', skillTags: 'Knowledge tags', printPaper: 'Print paper', delete: 'Delete bank', startPractice: 'Start practice',
       more: 'More', planStarting: 'Picking…', customPractice: 'Custom practice…',
       startPracticeTip: 'One-click session: mistakes → due today → your thinnest topic → unseen questions ({n} questions)',
       practiceOptionsTip: 'Change the question count, or set the scope yourself',
@@ -997,8 +1000,8 @@ const { t } = useI18n({
         moreTip: 'More actions (same menu as right-click)',
         edit: 'Edit this question',
         practice: 'Practice from here',
-        ai: 'AI analysis',
-        aiClose: 'Hide analysis',
+        ai: 'Explain this question',
+        aiClose: 'Hide explanation',
         copy: 'Copy question text',
         favorite: 'Add to favorites',
         unfavorite: 'Remove from favorites',
@@ -1087,7 +1090,7 @@ import QuestionFormPanel from '../components/QuestionFormPanel.vue'
 import QuestionNavDock from '../components/QuestionNavDock.vue'
 import AiImportDialog from '../components/AiImportDialog.vue'
 import SkillTagDialog from '../components/SkillTagDialog.vue'
-import QuestionAiAnalysis from '../components/QuestionAiAnalysis.vue'
+import QuestionExplain from '../components/QuestionExplain.vue'
 import ActionMenu from '../components/ActionMenu.vue'
 import { useConfirm } from '../composables/useConfirm'
 
@@ -1551,6 +1554,7 @@ async function startWrongSession() {
 const bankMenu = ref(null)
 const bankMenuItems = computed(() => [
   { key: 'history', label: t('history'), icon: 'clock' },
+  { key: 'notes', label: t('notes'), icon: 'edit' },
   { key: 'skillTags', label: t('skillTags'), icon: 'target' },
   { key: 'printPaper', label: t('printPaper'), icon: 'file' },
   { key: 'exportBank', label: t('exportBank'), icon: 'download' },
@@ -1567,6 +1571,9 @@ function onBankMenuSelect(key) {
   switch (key) {
     case 'history':
       router.push(`/banks/${id}/sessions`)
+      return
+    case 'notes':
+      router.push(`/banks/${id}/notes`)
       return
     case 'skillTags':
       openSkillTags()

@@ -232,7 +232,8 @@ try {
   await page.waitForTimeout(800)
 
   console.log('点「分析并标注」（真后端 + 假模型）')
-  await page.locator('.skill-toolbar-right button').first().click()
+  // 工具条右侧第一个按钮现在是「管理知识点」（次级），分析按钮是主按钮
+  await page.locator('.skill-toolbar-right .btn-primary').click()
   await page.waitForSelector('.el-message--success', { timeout: 180000 })
   await page.waitForTimeout(1500)
   await page.screenshot({ path: `${SHOTS}/1-审阅清单.png` })
@@ -384,6 +385,80 @@ try {
   check('编辑器里能看到这题的知识点标签', /当前：/.test(editorText) && /(你标注的|AI 建议|作者标注)/.test(editorText), editorText.slice(0, 200))
   console.log(`  详情打开的题：${detailRowStem.slice(0, 80)}（id=${openedQuestionId}）`)
   await page.screenshot({ path: `${SHOTS}/6-编辑页标签.png` })
+
+  /* ---------- 用户自己编辑词表：改名不动 id / 官方节点可停用 / 一键恢复官方模板 ---------- */
+  console.log('「管理知识点」：自己维护词表（改名、停用官方节点、恢复官方模板）')
+  // 上一步停在题目编辑器里：先关掉，否则页头被遮住点不到「更多」
+  await page.locator('.editor-dialog .panel-head button.icon-btn[title^="关闭"]').first().click().catch(() => {})
+  await page.waitForTimeout(900)
+  await page.locator('button', { hasText: '更多' }).first().click()
+  await page.waitForTimeout(400)
+  await page.locator('.action-menu button', { hasText: '知识点' }).first().click()
+  await page.waitForSelector('.skill-toolbar', { timeout: 8000 })
+  await page.waitForTimeout(800)
+  await page.locator('.skill-toolbar-right button', { hasText: '管理知识点' }).click()
+  await page.waitForSelector('.skm-body', { timeout: 8000 })
+  await page.waitForTimeout(800)
+
+  // ① 新增一个自定义知识点，并给一道题打上它
+  const addRow = page.locator('.skm-row.skm-add')
+  await addRow.locator('.skm-input').fill('端到端自定义点')
+  await addRow.locator('button', { hasText: '添加' }).click()
+  await page.waitForTimeout(1200)
+  let custState = await api(`/skills/templates/${TPL}/customizations`)
+  const newCustom = (custState.customNodes || []).find((n) => n.name === '端到端自定义点')
+  check('新增自定义知识点后立刻进图', !!newCustom, JSON.stringify(custState.customNodes).slice(0, 160))
+  const graphAfterAdd = await api(`/skills/templates/${TPL}`)
+  check('新节点出现在下拉数据源里（技能图）', (graphAfterAdd.nodes || []).some((n) => n.nodeId === newCustom.nodeId), newCustom?.nodeId)
+
+  await api(`/banks/${bankId}/skills/apply`, 'POST', {
+    action: 'set', templateId: TPL, questionIds: [targetQid], newNodes: [newCustom.nodeId]
+  })
+  const taggedWithCustom = await api(`/questions/${targetQid}/skills?templateId=${TPL}`)
+  check('可以把这个自定义知识点打在题目上', taggedWithCustom.some((x) => x.nodeId === newCustom.nodeId), JSON.stringify(taggedWithCustom).slice(0, 160))
+
+  // ② 改名：nodeId 不变，已打的标签跟着换成新名字（不会失效）
+  const nameInput = page.locator('.skm-sec').first().locator('.skm-input').first()
+  await nameInput.fill('端到端自定义点（改名后）')
+  await nameInput.press('Enter')
+  await page.waitForTimeout(1200)
+  const afterRename = await api(`/questions/${targetQid}/skills?templateId=${TPL}`)
+  check('改名后 nodeId 不变（标签不失效）', afterRename.some((x) => x.nodeId === newCustom.nodeId), JSON.stringify(afterRename).slice(0, 160))
+  check('改名后标签显示新名字', afterRename.some((x) => x.name === '端到端自定义点（改名后）'), JSON.stringify(afterRename).slice(0, 160))
+
+  // ③ 停用官方节点：它的标签变成失效标签（如实报告，可一键清理）
+  const officialNodeId = (await api(`/skills/templates/${TPL}`)).nodes
+    .filter((n) => !String(n.nodeId).startsWith('custom.'))
+    .map((n) => n.nodeId)
+    .find((id) => true)
+  await api(`/banks/${bankId}/skills/apply`, 'POST', {
+    action: 'set', templateId: TPL, questionIds: [targetQid], newNodes: [officialNodeId]
+  })
+  const beforeDisable = await reviewApi('all')
+  const putDisable = await fetch(`${API}/api/skills/templates/${encodeURIComponent(TPL)}/nodes/${encodeURIComponent(officialNodeId)}/disabled`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disabled: true })
+  })
+  check('停用官方节点接口成功', putDisable.ok, String(putDisable.status))
+  await page.waitForTimeout(400)
+  const afterDisable = await reviewApi('all')
+  check('停用后该节点的标签变成失效标签（如实报告）', (afterDisable.orphan?.rows || 0) >= (beforeDisable.orphan?.rows || 0) + 1,
+    `${beforeDisable.orphan?.rows} → ${afterDisable.orphan?.rows}`)
+  const custDisabled = await api(`/skills/templates/${TPL}/customizations`)
+  check('停用记录可查（界面能列出并恢复）', (custDisabled.disabledNodes || []).some((d) => d.nodeId === officialNodeId), JSON.stringify(custDisabled.disabledNodes).slice(0, 160))
+
+  // ④ 恢复官方模板：自定义节点与停用记录一起清掉
+  await page.locator('.skm-foot button', { hasText: '恢复官方模板' }).click()
+  await page.waitForSelector('.el-message-box', { timeout: 5000 })
+  await page.locator('.el-message-box__btns button', { hasText: '恢复官方模板' }).click()
+  await page.waitForTimeout(1500)
+  const afterReset = await api(`/skills/templates/${TPL}/customizations`)
+  check('恢复官方模板后自定义节点清空', (afterReset.customNodes || []).length === 0 && afterReset.customized === false,
+    JSON.stringify(afterReset).slice(0, 200))
+  const graphAfterReset = await api(`/skills/templates/${TPL}`)
+  check('恢复后官方节点回到图里', (graphAfterReset.nodes || []).some((n) => n.nodeId === officialNodeId), officialNodeId)
+  await page.screenshot({ path: `${SHOTS}/7-管理知识点.png` })
+  await page.locator('.skm-foot button', { hasText: '完成' }).click()
+  await page.waitForTimeout(400)
 
   check('无 JS 报错', pageErrors.length === 0, pageErrors.join(' | ').slice(0, 300))
 

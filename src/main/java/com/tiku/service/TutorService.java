@@ -279,29 +279,47 @@ public class TutorService {
         return saveAssistant(sessionId, reply, null, settings.getModel());
     }
 
-    // ==================== 错题讲解（结构化三段） ====================
+    // ==================== 讲解（结构化三段；做题后的唯一解析入口） ====================
 
-    /** 讲解三段的小标题：模型原样输出，前端按这三个标记切块渲染（流式时逐块长出来） */
+    /**
+     * 讲解三段的小标题：模型原样输出，前端按这三个标记切块渲染（流式时逐块长出来）。
+     * **两种口吻共用同一套结构**，只有第一、三段的标题不同：
+     * - {@link #MODE_WRONG}（有作答）：错在哪 / 这类题怎么做 / 下次防错；
+     * - {@link #MODE_NEUTRAL}（没作答）：这道题怎么做 / 这类题怎么做 / 易错点。
+     */
     public static final String EXPLAIN_HEAD_WHERE = "【错在哪】";
     public static final String EXPLAIN_HEAD_HOW = "【这类题怎么做】";
     public static final String EXPLAIN_HEAD_GUARD = "【下次防错】";
+    public static final String EXPLAIN_HEAD_HOWTO = "【这道题怎么做】";
+    public static final String EXPLAIN_HEAD_PITFALL = "【易错点】";
+
+    /** 讲解口吻：有作答（针对你的错）/ 没作答（中性讲题） */
+    public static final String MODE_WRONG = "WRONG";
+    public static final String MODE_NEUTRAL = "NEUTRAL";
 
     /**
-     * 错题讲解（2026-09-16 收口后的主线功能）：一次讲清三段——错在哪 / 这类题的通用做法 / 下次怎么防。
+     * 讲解（2026-09-16 起是**做题后唯一的解析入口**）：一次讲清三段。
      *
-     * 与提示楼梯的分工：楼梯是"做题中还不想要答案"时的分级给；讲解是"已经错了、要弄明白"时的一次性交付。
+     * 为什么只有一种解析（用户拍板）：过去"答错即问"和题库里的"AI 解析"是两套 prompt、两种风格，
+     * 同一道错题会出现两段说法不同的话——现在统一成这一个引擎，**两个去处**：
+     * ① 就地看（可继续追问）② 「存为解析」写回题库。
+     *
+     * 与提示楼梯的分工：楼梯是"做题中还不想要答案"时的分级给；讲解是"做完/做错之后要弄明白"时的一次性交付。
      * 因此讲解**不占提示级别**（hintLevel 留空，不进楼梯状态），但会作为对话历史参与后续追问。
+     *
+     * @param mode WRONG / NEUTRAL；传空则按"这道题有没有作答记录"自动判定
      */
     @Transactional
-    public TutorMessage explain(Long sessionId, String templateId, Consumer<String> onDelta) {
+    public TutorMessage explain(Long sessionId, String templateId, String mode, Consumer<String> onDelta) {
         TutorSession session = requireSession(sessionId);
         if (session.getQuestionId() == null) {
-            throw new IllegalArgumentException("错题讲解需要指定题目");
+            throw new IllegalArgumentException("讲解需要指定题目");
         }
         Question question = questionMapper.selectById(session.getQuestionId());
         if (question == null) {
             throw new IllegalArgumentException("题目不存在：" + session.getQuestionId());
         }
+        String effective = resolveExplainMode(session, question.getId(), mode);
         AiSettings settings = requireSettings();
         String context = buildQuestionContext(session, question, templateId, false);
         List<AiClientService.ChatTurn> turns = new ArrayList<>();
@@ -312,9 +330,38 @@ public class TutorService {
             turns.add(AiClientService.ChatTurn.assistant(
                     "（我之前给出的第 " + last.getHintLevel() + " 级提示）" + last.getContent()));
         }
-        turns.add(AiClientService.ChatTurn.user(context + "\n\n" + EXPLAIN_INSTRUCTION));
+        turns.add(AiClientService.ChatTurn.user(context + "\n\n" + explainInstruction(effective)));
         String text = aiClientService.chatStream(settings, EXPLAIN_SYSTEM, turns, onDelta);
         return saveAssistant(sessionId, text, null, settings.getModel());
+    }
+
+    /**
+     * 定这次讲哪种口吻：调用方指定就听调用方的；没指定就看这道题**最近一次作答对不对**
+     * （答错 → 讲"你错在哪"；答对或没作答 → 中性讲"这道题怎么做"）。
+     * 注意：题库列表里点「讲解」时没有练习场次，取的是这道题的最近一次作答——"你上次选的 B" 也是有用的信息，
+     * 但**答对过就不该再讲"你错在哪"**。
+     */
+    private String resolveExplainMode(TutorSession session, Long questionId, String requested) {
+        if (MODE_WRONG.equalsIgnoreCase(requested)) {
+            return MODE_WRONG;
+        }
+        if (MODE_NEUTRAL.equalsIgnoreCase(requested)) {
+            return MODE_NEUTRAL;
+        }
+        StudyRecord last = latestRecord(session.getPracticeSessionId(), questionId);
+        return last != null && isWrongAttempt(last) ? MODE_WRONG : MODE_NEUTRAL;
+    }
+
+    /** 这次作答算不算"错"（客观题看判题结果；主观题看自评：部分对按答错处理，与全库口径一致） */
+    private static boolean isWrongAttempt(StudyRecord r) {
+        if ("WRONG".equals(r.getSelfGrade()) || "PARTIAL".equals(r.getSelfGrade())) {
+            return true;
+        }
+        return Boolean.FALSE.equals(r.getCorrect());
+    }
+
+    private String explainInstruction(String mode) {
+        return MODE_NEUTRAL.equals(mode) ? EXPLAIN_INSTRUCTION_NEUTRAL : EXPLAIN_INSTRUCTION;
     }
 
     // ==================== 整场复盘 ====================
@@ -797,10 +844,32 @@ public class TutorService {
             - 数学公式用 $...$ 包裹的 LaTeX。""";
 
     private static final String EXPLAIN_SYSTEM = """
-            你是题库应用里的讲解老师。用户刚做错一道题，点开讲解就是要一次弄明白。
+            你是题库应用里的讲解老师。用户点开讲解就是要一次弄明白这道题。
             原则：
             - 只讲这道题和这一类题，不讲空泛的学习方法、不打分、不评判人；
-            - 结构必须严格是【错在哪】【这类题怎么做】【下次防错】三段，标题原样保留，不增不减；
+            - 结构必须严格是用户要求的那三段，标题原样保留，不增不减；
             - 诚实：题干信息不足就说明，绝不编造条件、选项或知识点名称；
             - 具体、短句，不用"首先/其次"这类填充词，数学公式用 $...$ 包裹的 LaTeX。""";
+
+    /** 没作答过的题（题库列表里点「讲解」）：不讲"你错在哪"，讲这道题本身 */
+    private static final String EXPLAIN_INSTRUCTION_NEUTRAL = """
+            请把下面这道题给我讲清楚。**严格按下面三段输出**，每段用原样的方括号小标题开头（界面要按标题分块显示）：
+
+            【这道题怎么做】
+            讲清这道题的解法：关键条件是什么、走哪条思路（用哪条公式/哪个概念）、怎么一步步得到答案。2–4 句。
+
+            【这类题怎么做】
+            给一个**可复用的做法**：这类题的识别特征 + 固定步骤（分 2–4 点）。
+            不要只讲这一道题，要让我下次遇到同类题能照着做。
+
+            【易错点】
+            最容易踩的坑 1–2 句：指出具体错法（比如把哪个量当成了哪个量），不要写"注意审题"这种空话。
+
+            规则：
+            - 中文，不寒暄、不复述题干、不写"总的来说"这类空话；
+            - 不要出现"掌握度""你还需要多练""建议你加强"这类评判与空建议；
+            - **我没有作答记录，所以不要写"你选错/你错在"**；
+            - 题目自带的官方解析可以参考，但必须讲透为什么，不要照抄；
+            - 题干信息不足（缺材料/配图）就在【这道题怎么做】里如实说明，绝不编造条件；
+            - 数学公式用 $...$ 包裹的 LaTeX。""";
 }

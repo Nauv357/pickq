@@ -145,13 +145,17 @@
             <p v-if="q.analysis" class="review-text"><b>{{ t('analysisLbl') }}：</b><span v-html="richHtml(q.analysis)"></span></p>
           </template>
 
-          <!-- 单题 AI 辅助解析（回顾错题时按需追问，可保存为正式解析） -->
-          <QuestionAiAnalysis
+          <!-- 讲解（做题后唯一的解析入口）：练习历史里也能直接讲/追问，并且自动回看上次讲过的内容 -->
+          <QuestionExplain
             v-if="q.questionId"
             :question-id="q.questionId"
             :bank-id="Number(id)"
+            :practice-session-id="viewSession.id"
+            :mode="q.correct === false ? 'WRONG' : 'NEUTRAL'"
             @saved="onSavedAnalysis(q, $event)"
           />
+          <!-- 我的笔记（只在本机） -->
+          <QuestionNotes v-if="q.questionId" :bank-id="Number(id)" :question-id="q.questionId" />
         </div>
       </div>
 
@@ -268,7 +272,8 @@ import { selfGradeRecord } from '../api/studyRecords'
 import { formatDate, formatScore } from '../utils/format'
 import { richTextToHtml } from '../utils/richText'
 import TikuIcon from '../components/TikuIcon.vue'
-import QuestionAiAnalysis from '../components/QuestionAiAnalysis.vue'
+import QuestionExplain from '../components/QuestionExplain.vue'
+import QuestionNotes from '../components/QuestionNotes.vue'
 import QuestionNavDock from '../components/QuestionNavDock.vue'
 import PageHeader from '../components/PageHeader.vue'
 import EmptyState from '../components/EmptyState.vue'

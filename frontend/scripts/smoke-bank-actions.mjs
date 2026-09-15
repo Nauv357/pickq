@@ -62,6 +62,18 @@ if (/^\/api\/banks\/\d+\/practice-plan$/.test(pathname)) {
   }
 }
 if (/^\/api\/banks\/\d+\/sessions$/.test(pathname)) return { sessionId: 77, total: 2, questions: [SESSION_Q(101), SESSION_Q(102)] }
+// 我的笔记：列表 + 新建（只存本机，不随题库导出）
+if (/^\/api\/banks\/\d+\/notes$/.test(pathname)) {
+  return {
+    records: [{
+      id: 1, bankId: 1, questionId: 101, questionNumber: 101, content: '先看年份再动笔',
+      source: 'ai', createdAt: '2026-01-01T10:00:00', updatedAt: '2026-01-01T10:00:00'
+    }],
+    total: 1, page: 1, size: 20, pages: 1
+  }
+}
+if (/^\/api\/notes\/\d+$/.test(pathname)) return { id: 1 }
+if (/^\/api\/questions\/\d+\/notes$/.test(pathname)) return []
 if (pathname === '/api/sessions/77') {
   return {
     id: 77, bankId: 1, mode: 'PLAN', questionCount: 2, answeredCount: 0, correctCount: 0,
@@ -227,7 +239,7 @@ await page.locator('.q-row[data-qid="102"]').click({ button: 'right' })
 await page.waitForSelector('.action-menu', { timeout: 5000 })
 const qMenuText = (await page.locator('.action-menu .action-menu-item').allInnerTexts()).join(' | ')
 check('题目右键菜单打开', await page.locator('.action-menu').isVisible())
-for (const label of ['编辑此题', '从这题开始做题', 'AI 解析', '复制题干', '加入批量选择', '删除此题']) {
+for (const label of ['编辑此题', '从这题开始做题', '讲解这道题', '复制题干', '加入批量选择', '删除此题']) {
   check(`题目菜单含「${label}」`, qMenuText.includes(label), qMenuText)
 }
 check('题目行只有 2 个常驻图标（编辑 + 更多）', (await page.locator('.q-row[data-qid="102"] .q-actions button').count()) === 2)
@@ -337,7 +349,29 @@ check('卡片菜单也按配题结果建会话（mode=PLAN）', !!listPlanPost &
 await page.waitForTimeout(1200)
 check('直接落到做题页并带上配题说明', /这 2 题/.test(await page.locator('.plan-banner').innerText().catch(() => '')))
 
-console.log('\n[15] 运行时错误')
+console.log('\n[15] 我的笔记（更多 → 我的笔记：随手记 + 列表）')
+calls.length = 0
+await page.goto(`${BASE}/banks/1`, { waitUntil: 'domcontentloaded' })
+await page.waitForSelector('.header-actions', { timeout: 15000 })
+await page.locator('.header-actions button', { hasText: '更多' }).click()
+await page.waitForSelector('.action-menu', { timeout: 5000 })
+check('「更多」里有「我的笔记」', (await page.locator('.action-menu .action-menu-item', { hasText: '我的笔记' }).count()) > 0,
+  (await page.locator('.action-menu .action-menu-item').allInnerTexts()).join(' | '))
+await page.locator('.action-menu .action-menu-item', { hasText: '我的笔记' }).click()
+await page.waitForURL(/\/notes$/, { timeout: 10000 })
+await page.waitForSelector('.note-item', { timeout: 10000 })
+const noteText = (await page.locator('.note-item').first().innerText()).replace(/\s+/g, ' ')
+check('笔记列表显示内容 / 归属（题号）/ 来源（AI 讲解）', /先看年份再动笔/.test(noteText) && /第 101 题/.test(noteText) && /AI/.test(noteText), noteText)
+check('页面写明"只存本机、不随题库导出"', /只存本机/.test((await page.locator('.note-new').innerText()).replace(/\s+/g, ' ')), await page.locator('.note-new').innerText())
+await page.locator('.note-new textarea').fill('资料分析先看年份')
+await page.locator('.note-new button', { hasText: '保存' }).click()
+await page.waitForTimeout(600)
+const quickPost = calls.find((c) => c.method === 'POST' && /\/api\/banks\/1\/notes$/.test(c.path))
+check('随手记发 POST /banks/1/notes（题库级：questionId 为 null）',
+  !!quickPost && /"content":"资料分析先看年份"/.test(quickPost.body || '') && /"questionId":null/.test((quickPost.body || '').replace(/\s/g, '')),
+  quickPost?.body || '(无请求)')
+
+console.log('\n[16] 运行时错误')
 check('无未捕获的 JS 错误', pageErrors.length === 0, pageErrors.join(' | ').slice(0, 300))
 
 await browser.close()
