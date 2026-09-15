@@ -104,6 +104,35 @@
         </div>
 
         <div class="report-questions">
+          <!-- 复盘（阶段 1）：公式统计 + AI 诊断（流式）；模型只负责把结论讲成人话 -->
+          <div class="review-card">
+            <div class="review-head">
+              <span class="review-title">
+                <TikuIcon name="sparkle" :size="14" />
+                {{ t('reviewTitle') }}
+              </span>
+              <span v-if="reviewSummary" class="text-muted review-stat">
+                {{ t('reviewStat', { total: reviewSummary.total, correct: reviewSummary.correct, wrong: reviewSummary.wrong }) }}
+              </span>
+              <span class="bar-grow"></span>
+              <button class="btn btn-secondary btn-sm" :disabled="tutorBusy || !reviewSummary" @click="runDiagnose">
+                {{ tutorBusy ? t('reviewGenerating') : t('reviewBtn') }}
+              </button>
+            </div>
+            <!-- 公式算出来的薄弱点（不依赖模型，永远给得出来） -->
+            <div v-if="reviewSummary && reviewSummary.byNode.length" class="review-nodes">
+              <span class="text-muted">{{ t('weakNodes') }}</span>
+              <span v-for="n in reviewSummary.byNode.slice(0, 5)" :key="n.nodeId" class="review-node">
+                {{ n.name }} · {{ t('wrongN', { n: n.wrong }) }}
+                <span v-if="n.answered >= 3" class="text-muted">（{{ t('histRate', { r: n.correctRate }) }}）</span>
+                <span v-else class="text-muted">（{{ t('noHistory') }}）</span>
+              </span>
+            </div>
+            <div v-if="diagnosis" class="review-text" v-html="richHtml(diagnosis)"></div>
+            <p v-else-if="!tutorBusy" class="text-muted review-tip">{{ t('reviewTip') }}</p>
+            <p v-if="tutorError" class="review-err">{{ tutorError }}</p>
+          </div>
+
           <div class="section-title"><h2>{{ t('detailTitle') }}</h2></div>
           <div v-for="(q, i) in report.questions" :key="q.questionId" class="report-item">
             <div class="report-row" @click="toggleReportOpen(q.questionId)">
@@ -143,6 +172,26 @@
                 :bank-id="Number(id)"
                 @saved="onReportAnalysisSaved(q)"
               />
+
+              <!-- 答错即问（阶段 1）：先让用户选错因，再让老师针对错因说一句（比重讲整题有用得多） -->
+              <div v-if="isWrongQuestion(q)" class="why-wrong">
+                <span class="text-muted">{{ t('whyWrong') }}</span>
+                <button
+                  v-for="r in SELF_REASONS"
+                  :key="r.value"
+                  class="why-chip"
+                  :class="{ on: wrongReason[q.questionId] === r.value }"
+                  @click="askWhyWrong(q, r.value)"
+                >
+                  {{ r.label }}
+                </button>
+                <button v-if="wrongReason[q.questionId]" class="why-chip" @click="openTutor('ask', q.questionId)">
+                  {{ t('moreAsk') }}
+                </button>
+              </div>
+              <div v-if="wrongReason[q.questionId] && wrongAnswerText[q.questionId]" class="why-answer">
+                <div class="tutor-inline" v-html="richHtml(wrongAnswerText[q.questionId])"></div>
+              </div>
             </div>
           </div>
         </div>
@@ -249,6 +298,15 @@
               <span class="q-type" :class="`type-${String(current.questionType).toLowerCase()}`">{{ current.typeLabel }}</span>
               <span class="q-score text-muted">{{ formatScore(current.score) }} {{ t('unitPoint') }}</span>
               <span class="bar-grow"></span>
+              <!-- 提示楼梯（阶段 1）：只在用户主动要的时候才给，做题过程不自动打扰 -->
+              <button
+                class="bar-btn"
+                :title="t('hintBtnTip')"
+                @click="openTutor('hint', current.questionId)"
+              >
+                <TikuIcon name="sparkle" :size="15" />
+                <span class="bar-back-text">{{ t('hintBtn') }}</span>
+              </button>
               <button
                 class="fav-btn"
                 :class="{ active: current.favorite }"
@@ -338,6 +396,29 @@
       <!-- 数字直达浮标（输入题号跳题，800ms 无输入自动跳转） -->
       <div v-if="jumpBuf" class="jump-chip mono">跳转 #{{ jumpBuf }}</div>
     </template>
+
+    <!-- AI 私教抽屉（阶段 1）：提示楼梯 / 答错即问 / 自由追问。
+         只在用户点了「提示」或某道错题的「为什么错」时才打开，做题过程不自动打扰。 -->
+    <el-drawer
+      v-model="tutorOpen"
+      :title="tutorMode === 'hint' ? '问老师 · 要提示' : '问老师'"
+      direction="rtl"
+      size="420px"
+      :with-header="false"
+      append-to-body
+    >
+      <TutorPanel
+        v-if="tutorOpen"
+        :bank-id="Number(id)"
+        :question-id="tutorQuestionId"
+        :practice-session-id="report?.sessionId || sessionId"
+        :template-id="skillTemplateId"
+        :kind="'PER_QUESTION'"
+        :self-reason="tutorReason"
+        @close="tutorOpen = false"
+        @session="onTutorSession"
+      />
+    </el-drawer>
   </div>
 </template>
 
@@ -367,7 +448,20 @@ const { t } = useI18n({
       msgUnfavorited: '已取消收藏',
       msgReviewSuspended: '已暂停此题复习',
       msgReviewResumed: '已恢复此题复习',
-      msgNoQuestionN: '会话中没有第 {n} 题'
+      msgNoQuestionN: '会话中没有第 {n} 题',
+      hintBtn: '提示',
+      hintBtnTip: '不会做？让老师给一级提示（指方向 → 关键一步 → 完整解析，不会一上来就给答案）',
+      reviewTitle: '这场复盘',
+      reviewStat: '共 {total} 题 · 对 {correct} · 错 {wrong}',
+      reviewBtn: '生成复盘诊断',
+      reviewGenerating: '正在写…',
+      reviewTip: '上面是公式统计出来的薄弱点；点「生成复盘诊断」让 AI 把这场错题按知识点讲一遍（只依据本场错题，不编造）。',
+      weakNodes: '本场错得最多的知识点：',
+      wrongN: '错 {n} 题',
+      histRate: '历史正确率 {r}%',
+      noHistory: '题量还不够',
+      whyWrong: '这题为什么错？',
+      moreAsk: '继续问老师'
     },
     'en-US': {
       notFoundDesc: 'This bank may have been deleted, or the link is wrong', backToBanks: 'Back to banks', back: 'Back', backToBank: 'Back to bank',
@@ -389,7 +483,20 @@ const { t } = useI18n({
       msgUnfavorited: 'Removed from favorites',
       msgReviewSuspended: 'Review paused for this question',
       msgReviewResumed: 'Review resumed for this question',
-      msgNoQuestionN: 'Question {n} is not in this session'
+      msgNoQuestionN: 'Question {n} is not in this session',
+      hintBtn: 'Hint',
+      hintBtnTip: 'Stuck? Ask for one hint level (direction → key step → full solution; never the answer first)',
+      reviewTitle: 'Session review',
+      reviewStat: '{total} questions · {correct} correct · {wrong} wrong',
+      reviewBtn: 'Generate review',
+      reviewGenerating: 'Writing…',
+      reviewTip: 'Above are the weak points computed from your answers; click “Generate review” to have them explained by topic (based only on this session’s mistakes).',
+      weakNodes: 'Most-missed topics:',
+      wrongN: '{n} wrong',
+      histRate: '{r}% historical accuracy',
+      noHistory: 'no history yet',
+      whyWrong: 'Why was it wrong?',
+      moreAsk: 'Keep asking'
     }
   }
 })
@@ -399,10 +506,13 @@ import { getBank } from '../api/banks'
 import { finishSession, getSessionDetail } from '../api/sessions'
 import { selfGradeRecord, setReviewSuspended } from '../api/studyRecords'
 import { setFavorite } from '../api/questions'
+import { SELF_REASONS, getReviewSummary, streamTutor } from '../api/tutor'
+import { getSkillTemplates } from '../api/skills'
 import { formatScore } from '../utils/format'
 import { richTextToHtml } from '../utils/richText'
 import TikuIcon from '../components/TikuIcon.vue'
 import QuestionAiAnalysis from '../components/QuestionAiAnalysis.vue'
+import TutorPanel from '../components/TutorPanel.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -412,6 +522,107 @@ const atIndex = route.query.at ? Number(route.query.at) : 0
 
 const bank = ref(null)
 const bankError = ref('')
+
+/* ---------- AI 私教（阶段 1）：提示楼梯 / 答错即问 / 复盘诊断 ---------- */
+const tutorOpen = ref(false)
+const tutorMode = ref('hint')          // hint（提示楼梯）| ask（答错即问/追问）
+const tutorQuestionId = ref(null)
+const tutorReason = ref('')
+const tutorBusy = ref(false)
+const tutorError = ref('')
+const diagnosis = ref('')              // 复盘诊断文本（流式累积）
+const reviewSummary = ref(null)        // 公式统计（成绩 + 按知识点的错题分布）
+const wrongReason = ref({})            // 每题选的错因
+const wrongAnswerText = ref({})        // 每题"为什么错"的回答（就地显示，不必开抽屉）
+const skillTemplateId = ref('')        // 当前技能图（决定"这题属于哪个知识点"的说法）
+
+/** 打开私教抽屉：hint = 要提示（做题中），ask = 追问某道错题 */
+function openTutor(mode, questionId, reason = '') {
+  tutorMode.value = mode
+  tutorQuestionId.value = questionId ? Number(questionId) : null
+  tutorReason.value = reason
+  tutorOpen.value = true
+}
+
+function onTutorSession(payload) {
+  if (payload?.sessionId) tutorSessionIds.value[tutorQuestionId.value] = payload.sessionId
+}
+const tutorSessionIds = ref({})
+
+/** 交卷后：拉公式统计（成绩 + 薄弱知识点），并记住当前技能图 */
+async function loadReviewSummary() {
+  if (!report.value?.sessionId) return
+  try {
+    const templates = await getSkillTemplates().catch(() => [])
+    const saved = localStorage.getItem('tiku.skillTemplateId')
+    skillTemplateId.value = (templates || []).find((x) => x.templateId === saved)?.templateId
+      || templates?.[0]?.templateId || ''
+  } catch (e) {
+    /* 技能图拉不到也能用（只是没有知识点维度的统计） */
+  }
+  try {
+    reviewSummary.value = await getReviewSummary(report.value.sessionId, Number(id), skillTemplateId.value)
+  } catch (e) {
+    reviewSummary.value = null
+  }
+}
+
+/** 生成复盘诊断（流式） */
+async function runDiagnose() {
+  if (tutorBusy.value || !report.value?.sessionId) return
+  tutorBusy.value = true
+  tutorError.value = ''
+  diagnosis.value = ''
+  const result = await streamTutor('/tutor/review', {
+    bankId: Number(id),
+    practiceSessionId: report.value.sessionId,
+    templateId: skillTemplateId.value || null,
+    kind: 'POST_REVIEW'
+  }, {
+    onDelta: (text) => { diagnosis.value += text },
+    onError: (message) => {
+      tutorError.value = /尚未配置 AI/.test(message)
+        ? '尚未配置 AI 模型：请在「设置 → AI」里填好 Key 再回来。'
+        : message
+    }
+  })
+  tutorBusy.value = false
+  return result
+}
+
+/** 答错即问：选了错因，老师针对它说一句（就地显示；想继续聊再开抽屉） */
+async function askWhyWrong(q, reason) {
+  if (tutorBusy.value) return
+  wrongReason.value = { ...wrongReason.value, [q.questionId]: reason }
+  tutorBusy.value = true
+  tutorError.value = ''
+  wrongAnswerText.value = { ...wrongAnswerText.value, [q.questionId]: '' }
+  const qid = q.questionId
+  const result = await streamTutor('/tutor/ask', {
+    bankId: Number(id),
+    questionId: qid,
+    practiceSessionId: report.value?.sessionId || sessionId,
+    templateId: skillTemplateId.value || null,
+    kind: 'PER_QUESTION',
+    selfReason: reason
+  }, {
+    onDelta: (text) => {
+      wrongAnswerText.value = { ...wrongAnswerText.value, [qid]: (wrongAnswerText.value[qid] || '') + text }
+    },
+    onSession: (payload) => {
+      if (payload?.sessionId) tutorSessionIds.value = { ...tutorSessionIds.value, [qid]: payload.sessionId }
+    },
+    onError: (message) => {
+      tutorError.value = /尚未配置 AI/.test(message)
+        ? '尚未配置 AI 模型：请在「设置 → AI」里填好 Key 再回来。'
+        : message
+    }
+  })
+  tutorBusy.value = false
+  return result
+}
+
+const isWrongQuestion = (q) => q.correct === false || q.selfGrade === 'WRONG' || q.selfGrade === 'PARTIAL'
 
 const questions = ref([])
 const loading = ref(true)
@@ -549,6 +760,8 @@ async function loadAll() {
       pendingSubjective.value = (detail.questions || []).filter(
         (q) => q.questionType === 'SUBJECTIVE' && q.userAnswer && !q.selfGrade
       )
+      // 复盘统计随报告一起准备（公式算的，不耗 token）；AI 诊断由用户点按钮才生成
+      await loadReviewSummary()
     }
   } catch (e) {
     questions.value = []
@@ -724,6 +937,8 @@ async function refreshReport() {
     pendingSubjective.value = (detail.questions || []).filter(
       (q) => q.questionType === 'SUBJECTIVE' && q.userAnswer && !q.selfGrade
     )
+    // 复盘统计随报告一起准备（公式算的，不耗 token）；AI 诊断由用户点按钮才生成
+    await loadReviewSummary()
   } catch (e) {
     report.value = null
   }

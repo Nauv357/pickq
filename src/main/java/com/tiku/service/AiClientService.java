@@ -15,7 +15,10 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.Iterator;
 import java.util.List;
+import java.util.function.Consumer;
+import java.util.stream.Stream;
 
 /**
  * OpenAI 兼容大模型客户端（DeepSeek / 通义 / Kimi / OpenAI / 本地 Ollama）。
@@ -75,6 +78,175 @@ public class AiClientService {
         String reply = chat(settings, "你是连通性测试助手", "请只回复：ok", false);
         long latencyMs = System.currentTimeMillis() - start;
         return new TestResult(true, "连接成功，模型响应：" + reply.trim().substring(0, Math.min(30, reply.trim().length())), latencyMs);
+    }
+
+    /**
+     * 流式文本对话（阶段 1 的提示楼梯 / 追问 / 复盘用它做"边生成边显示"）。
+     *
+     * 实现要点：
+     * - 请求体加 {@code stream: true}，用 {@code BodyHandlers.ofLines()} 按行读 SSE，逐块回调；
+     * - 只认 {@code data:} 行；{@code [DONE]} 结束；解析失败的行直接跳过（各端点偶发心跳/空行）；
+     * - 端点不支持 stream（400/404）时**自动降级为一次性调用**：这样即便模型网关不支持流式，
+     *   功能仍然可用，只是没有打字效果（用返回的整段文本回调一次）；
+     * - 空回复同样是"失败"（见 call 的空白重试策略），由调用方决定要不要重试。
+     *
+     * @param onDelta 每收到一段增量文本回调一次（在**当前线程**同步回调，调用方负责推给前端）
+     * @return 完整文本
+     */
+    public String chatStream(AiSettings settings, String systemPrompt, List<ChatTurn> turns, Consumer<String> onDelta) {
+        boolean thinkingEnabled = Boolean.TRUE.equals(settings.getThinking());
+        ObjectNode body = buildBody(settings, systemPrompt, turns, false, thinkingEnabled);
+        body.put("stream", true);
+        String full = tryStream(settings, body, onDelta);
+        if (full != null) {
+            return full;
+        }
+        // 降级：不带 stream 再要一次（各端点对 stream 的支持不一致，不能因为流式失败就让功能不可用）
+        log.warn("模型端点不支持流式输出，已自动降级为一次性返回（内容不受影响）");
+        String text = call(settings, systemPrompt, turns);
+        if (text != null && !text.isBlank()) {
+            onDelta.accept(text);
+        }
+        return text;
+    }
+
+    /** 返回 null 表示"这个端点不支持流式"，交给调用方降级；抛异常表示真的调用失败 */
+    private String tryStream(AiSettings settings, ObjectNode body, Consumer<String> onDelta) {
+        try {
+            HttpRequest.Builder builder = HttpRequest.newBuilder()
+                    .uri(URI.create(settings.getBaseUrl().replaceAll("/+$", "") + "/chat/completions"))
+                    .timeout(Duration.ofMinutes(5))
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "text/event-stream");
+            String apiKey = settings.getApiKey();
+            if (apiKey != null && !apiKey.isBlank()) {
+                builder.header("Authorization", "Bearer " + apiKey);
+            }
+            HttpRequest request = builder
+                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body), StandardCharsets.UTF_8))
+                    .build();
+            HttpResponse<Stream<String>> response =
+                    httpClient.send(request, HttpResponse.BodyHandlers.ofLines());
+            if (response.statusCode() == 400 || response.statusCode() == 404 || response.statusCode() == 415) {
+                response.body().close();
+                return null; // 端点不认 stream → 降级
+            }
+            if (response.statusCode() != 200) {
+                String err = response.body().limit(20).reduce("", (a, b) -> a + b);
+                throw new IllegalStateException("模型调用失败 HTTP " + response.statusCode() + "："
+                        + sanitize(extractError(err), settings.getApiKey()));
+            }
+            // 有些网关忽略 stream 参数、照样返回整段 JSON（200 + application/json）：
+            // 这时候按普通响应解析即可，不必再发一次请求
+            String contentType = response.headers().firstValue("Content-Type").orElse("");
+            if (contentType.contains("application/json")) {
+                String raw = response.body().reduce("", (a, b) -> a + b);
+                String text = objectMapper.readTree(raw).path("choices").path(0).path("message").path("content").asText("");
+                if (!text.isBlank()) {
+                    onDelta.accept(text);
+                }
+                return text;
+            }
+            StringBuilder full = new StringBuilder();
+            try (Stream<String> lines = response.body()) {
+                Iterator<String> it = lines.iterator();
+                while (it.hasNext()) {
+                    String line = it.next();
+                    if (line == null || line.isBlank() || !line.startsWith("data:")) {
+                        continue;
+                    }
+                    String payload = line.substring(5).trim();
+                    if ("[DONE]".equals(payload)) {
+                        break;
+                    }
+                    String delta = deltaOf(payload);
+                    if (delta != null && !delta.isEmpty()) {
+                        full.append(delta);
+                        onDelta.accept(delta);
+                    }
+                }
+            }
+            // 既没有 Content-Type 也没有任何 delta：当作"这个端点不会流式"，交给调用方降级
+            return full.length() == 0 ? null : full.toString();
+        } catch (IllegalStateException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalStateException("模型调用失败：" + sanitize(String.valueOf(e), settings.getApiKey()), e);
+        }
+    }
+
+    /** 从一条 SSE data 里取增量文本（兼容 chat/completions 的 delta 与少数端点的 message.content） */
+    private String deltaOf(String payload) {
+        try {
+            JsonNode node = objectMapper.readTree(payload);
+            JsonNode choice = node.path("choices").path(0);
+            JsonNode delta = choice.path("delta").path("content");
+            if (!delta.isMissingNode() && !delta.isNull()) {
+                return delta.asText("");
+            }
+            JsonNode message = choice.path("message").path("content");
+            return message.isMissingNode() || message.isNull() ? null : message.asText("");
+        } catch (Exception e) {
+            return null; // 心跳/非 JSON 行，跳过
+        }
+    }
+
+    /**
+     * 多轮对话（一条 system + 若干轮 user/assistant）：追问会话需要把历史带上。
+     */
+    public String call(AiSettings settings, String systemPrompt, List<ChatTurn> turns) {
+        ObjectNode last = objectMapper.createObjectNode();
+        last.put("role", "user");
+        last.put("content", turns.isEmpty() ? "" : turns.get(turns.size() - 1).content());
+        ObjectNode body = buildBody(settings, systemPrompt, last, false, Boolean.TRUE.equals(settings.getThinking()));
+        // buildBody 只放了 system + 最后一条；这里把完整历史重建（顺序：system → 历史 → 最后一条 user）
+        ArrayNode messages = objectMapper.createArrayNode();
+        messages.addObject().put("role", "system").put("content", systemPrompt == null ? "" : systemPrompt);
+        for (ChatTurn turn : turns) {
+            messages.addObject().put("role", turn.role()).put("content", turn.content());
+        }
+        body.set("messages", messages);
+        try {
+            HttpResponse<String> response = send(settings, body);
+            if (response.statusCode() != 200) {
+                throw new IllegalStateException("模型调用失败 HTTP " + response.statusCode() + "："
+                        + sanitize(extractError(response.body()), settings.getApiKey()));
+            }
+            JsonNode root = objectMapper.readTree(response.body());
+            return root.path("choices").path(0).path("message").path("content").asText("");
+        } catch (IllegalStateException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalStateException("模型调用失败：" + sanitize(String.valueOf(e), settings.getApiKey()), e);
+        }
+    }
+
+    /** 多轮对话请求体（system + 历史），用于 chatStream */
+    private ObjectNode buildBody(AiSettings settings, String systemPrompt, List<ChatTurn> turns,
+                                 boolean jsonMode, Boolean thinking) {
+        ObjectNode body = objectMapper.createObjectNode();
+        body.put("model", settings.getModel());
+        body.put("temperature", 0.2);
+        if (thinking != null) {
+            body.putObject("thinking").put("type", thinking ? "enabled" : "disabled");
+        }
+        ArrayNode messages = body.putArray("messages");
+        messages.addObject().put("role", "system").put("content", systemPrompt == null ? "" : systemPrompt);
+        for (ChatTurn turn : turns) {
+            messages.addObject().put("role", turn.role()).put("content", turn.content());
+        }
+        return body;
+    }
+
+    /** 一轮对话（role = user / assistant） */
+    public record ChatTurn(String role, String content) {
+        public static ChatTurn user(String content) {
+            return new ChatTurn("user", content);
+        }
+
+        public static ChatTurn assistant(String content) {
+            return new ChatTurn("assistant", content);
+        }
     }
 
     private String call(AiSettings settings, String systemPrompt, JsonNode userMessage, boolean jsonMode) {
