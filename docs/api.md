@@ -144,15 +144,30 @@
 
 > 记录文件格式属于跨端契约，详见 `doc/study-record-spec.md` 与 `model/StudyRecordFile*.java`（`docs/design-mobile.md` 第 149 行也建议纳入正式契约）。
 
-### 1.3.5 `PracticeSessionController` — 会话（5 个端点，路径前缀 `/api`）
+### 1.3.5 `PracticeSessionController` — 会话与配题（6 个端点，路径前缀 `/api`）
 
 | 方法 + 路径 | 鉴权 | 请求 | 响应 `data` | 常见错误 |
 | --- | --- | --- | --- | --- |
-| `POST /api/banks/{bankId}/sessions` | 无 | body 可选 `{mode, topic[], category[], count, startQuestionId, keyword, questionType, scope}`（空 body 等价「全部随机」） | `SessionCreateResponse{sessionId,total,questions[]}` | 400 `不支持的会话模式：{m}（ALL/SEQUENCE/TOPIC/REVIEW/WRONG/FAVORITE）` / `没有符合条件的题目，请调整练习范围` / `startQuestionId 仅支持 mode=SEQUENCE（从指定题按题号顺序往后做）` / `起点题目不属于该题库：{id}` / `复习计划未开启，请先在题库详情中开启「复习计划」`；404 `题库不存在` |
+| `POST /api/banks/{bankId}/sessions` | 无 | body 可选 `{mode, questionIds[], topic[], category[], nodeIds[], count, startQuestionId, keyword, questionType, scope}`（空 body 等价「全部随机」）；`questionIds` 仅 `mode=PLAN`（顺序即配题优先级，**忽略 count**，重复/不存在的 id 会被丢弃） | `SessionCreateResponse{sessionId,total,questions[]}` | 400 `不支持的会话模式：{m}（ALL/PLAN/SEQUENCE/TOPIC/SKILL/REVIEW/WRONG/FAVORITE）` / `按配题结果练习需要先取 practice-plan 并传入 questionIds` / `按知识点抽题需要指定 nodeIds` / `没有符合条件的题目，请调整练习范围` / `startQuestionId 仅支持 mode=SEQUENCE（从指定题按题号顺序往后做）` / `起点题目不属于该题库：{id}` / `复习计划未开启，请先在题库详情中开启「复习计划」`；404 `题库不存在` |
+| `GET /api/banks/{bankId}/practice-plan` | 无 | query `templateId`（可选，技能图 id）、`count`（默认 20，上限 200） | `Plan{requested,total,wrongCount,dueCount,weakCount,newCount,weakNodeName,weakNodeQuestions,items[{questionId,reason(WRONG/DUE/WEAK/NEW),nodeId,nodeName}],explain}`；**零 token**，纯公式，同状态两次结果一致 | 400 参数非法；404 `题库不存在`（空题库返回 `total=0` + `explain=这个题库还没有题目`，不报错） |
 | `GET /api/banks/{bankId}/sessions` | 无 | query `page,size` | `PageResult<SessionResponse{id,mode,questionCount,answeredCount,correctCount,totalScore,maxScore,totalSeconds,status(IN_PROGRESS/COMPLETED),createdAt,finishedAt}>` | 404 `题库不存在` |
 | `GET /api/sessions/{sessionId}` | 无 | — | `SessionDetailResponse{id,bankId,mode,questionCount,answeredCount,correctCount,totalScore,maxScore,totalSeconds,status,createdAt,finishedAt,questions[SessionQuestionItem]}`；**答案/解析仅在交卷后返回**（`finished ? … : null`） | 404 `会话不存在：{id}` |
 | `POST /api/sessions/{sessionId}/finish` | 无 | body 可选 `{answers:[{questionId,selectedKeys[],userAnswer,seconds}]}`；**幂等**，允许未答完交卷 | `SessionFinishResponse{sessionId,totalQuestions,answeredCount,correctCount,totalScore,maxScore,totalSeconds,questions[{questionId,correct,score,seconds,earnedScore,selfGrade}]}` | 400 `会话已交卷，无法再提交作答`（已交卷又带 answers）/ `答案缺少题目` / `题目不属于该会话的题库` / `题目不属于该会话，无法提交`；404 `会话不存在：{id}` |
 | `GET /api/banks/{bankId}/categories` | 无 | — | `BankCategoriesResponse{topics[],categories[]}`（去重排序） | 404 `题库不存在` |
+
+### 1.3.5.1 `TutorController` — AI 私教（7 个端点，前缀 `/api/tutor`）
+
+生成类端点都是 **SSE**（`text/event-stream`）：事件 `session{sessionId,maxHintLevel}` → `delta{text}`（多次）→ `done{sessionId,maxHintLevel}`，失败为 `error{message}`；请求体统一 `TutorAskRequest{bankId,questionId,practiceSessionId,templateId,kind(PER_QUESTION/POST_REVIEW),selfReason,selfNote,text,level}`。会话由后端按「同题 + 同场练习 + kind」复用，前端不必自己存 id。
+
+| 方法 + 路径 | 说明 |
+| --- | --- |
+| `POST /api/tutor/explain` | **错题讲解（主线）**：一次给三段（`【错在哪】/【这类题怎么做】/【下次防错】`，标题原样输出供前端分块渲染）；上下文含「我的作答/我的错因/该题历史/该知识点表现」；**不占提示级别**（`hint_level` 为空）。缺 `questionId` → 400 `错题讲解需要指定题目` |
+| `POST /api/tutor/hint` | 提示楼梯（`level` 1–3）；整场复盘会话上调 → 400 `整场复盘没有提示楼梯（请直接追问）` |
+| `POST /api/tutor/ask` | 自由追问（带最近 4 轮对话；`text` 空且无 `selfReason` → 400 `请先写一句想问什么`） |
+| `POST /api/tutor/review` | 整场复盘诊断（依据本场公式统计，只讲清单里的题） |
+| `GET /api/tutor/review/{practiceSessionId}/summary` | **公式统计**（成绩 + 按知识点的错题分布 + 错题清单），模型只负责讲人话 |
+| `GET /api/tutor/sessions?questionId=` | 某题的历史会话（接着上次聊） |
+| `GET /api/tutor/sessions/{sessionId}/messages` | `{messages[],maxHintLevel}` |
 
 ### 1.3.6 `MaterialController` — 共享材料（4 个端点，`/api/banks/{bankId}/materials`）
 

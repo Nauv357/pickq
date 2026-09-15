@@ -1,13 +1,15 @@
 /**
- * AI 私教（学习路径引擎阶段 1）**真后端**端到端：
+ * AI 私教（学习路径引擎阶段 1）+ 一键配题（阶段 3.5）**真后端**端到端：
  *   脚本内起一个假模型（支持 OpenAI 兼容的 SSE 流式）→ 真后端 → 真界面（Vite dev）→ Playwright 操作。
  *
  * 为什么必须真后端：这一轮最关键的技术风险是 **SSE 流式链路**（后端 SseEmitter → 前端 fetch+ReadableStream），
- * 假后端冒烟测不出"是不是真的边生成边显示"。这里用假模型按 3 段推文本，验证：
- *   1. 提示楼梯：L1/L2/L3 分级、逐级禁用已给过的级别、上一级作为上下文带进下一级；
- *   2. 答错即问：报告页对错题选错因 → 就地流式回答；错因与追问都落库；
- *   3. 复盘诊断：公式统计（含按知识点的错题分布）先出来，AI 诊断再流式补上；
- *   4. 落库与口径：tutor_session / tutor_message 真的写了（用接口复查）。
+ * 假后端冒烟测不出"是不是真的边生成边显示"。这里用假模型按多段推文本，验证：
+ *   1. 复盘诊断：公式统计（含按知识点的错题分布）先出来，AI 诊断再流式补上；
+ *   2. 一键配题：「开始练习」拿到的配题结果、练习页顶部的说明、实际练的题三者一致（PLAN 会话）；
+ *   3. 错题讲解（主线）：三段结构（错在哪/这类题怎么做/下次防错）分块流式出现，可选错因进 prompt，
+ *      下面能就地追问，能「存为解析」写回题库；
+ *   4. 提示楼梯：L1/L2/L3 分级、逐级禁用已给过的级别、上一级作为上下文带进下一级；
+ *   5. 落库与口径：tutor_session / tutor_message 真的写了（用接口复查），讲解不占提示级别。
  *
  * 前置（脚本不负责起后端，避免动到用户正在用的实例）：
  *   1. 临时数据目录写好模型配置（指向本脚本的假模型端口）：
@@ -56,7 +58,10 @@ const aiServer = http.createServer((req, res) => {
     prompts.push(raw)
     // 三段式回答，便于验证"边生成边显示"（前端应逐段出现，而不是一次出现）
     let pieces
-    if (raw.includes('第 1 级提示：只指方向')) {
+    // 注意判定顺序：追问的上下文里会带上刚才的讲解（含「【错在哪】」），所以「追问」必须排在「讲解」前面判
+    if (raw.includes('【我的追问】')) {
+      pieces = ['先看年份：', '题干里「比 2023 年」说明 2023 是基期，', '再做 5 道同类题巩固。']
+    } else if (raw.includes('第 1 级提示：只指方向')) {
       pieces = ['先看考点', '：这道题问的是增长率，', '方向是「现期 ÷ 基期」']
     } else if (raw.includes('第 2 级提示：关键一步')) {
       pieces = ['关键一步：', '先算出两者的比值', '，再减 1']
@@ -64,6 +69,13 @@ const aiServer = http.createServer((req, res) => {
       pieces = ['完整解析：120/100 = 1.2，', '所以增长率是 20%，选 A。']
     } else if (raw.includes('【本场练习】')) {
       pieces = ['① 这场做完了，错在两处。', '② 最该补的是增长类。', '③ 第 1 题公式记混。', '④ 先把增长类公式默一遍。']
+    } else if (raw.includes('【错在哪】')) {
+      // 错题讲解：三段标题原样输出，逐步推给前端（验证分块流式渲染）
+      pieces = [
+        '【错在哪】', '你选了乙，把基期当成了现期，', '所以算出来的是增长量。\n',
+        '【这类题怎么做】', '看到「增长率」先认出现期与基期，', '再套 现期 ÷ 基期 − 1。\n',
+        '【下次防错】', '先圈出题干里的年份，再动笔。'
+      ]
     } else {
       pieces = ['你的错因是没掌握公式，', '建议先背熟「增长率 = 现期/基期 - 1」', '再做 5 道同类题巩固。']
     }
@@ -205,29 +217,94 @@ try {
   check('复盘统计按知识点分布（后端公式）', summary.byNode.length === 2 && summary.wrong === 2, JSON.stringify(summary.byNode).slice(0, 160))
   check('复盘消息已落库（tutor_session / tutor_message）', Array.isArray(reviewSessions), JSON.stringify(reviewSessions).slice(0, 120))
 
-  /* ---------------- ② 答错即问：选错因 → 就地流式回答 ---------------- */
+  /* ---------------- ② 开始练习 = 一键配题（配题结果 / 说明 / 实际练的题三者一致） ---------------- */
+  const plan = await api(`/banks/${bankId}/practice-plan?count=20&templateId=official.civil-service`)
+  check('配题结果给出可核对的数量与解释', plan.total > 0 && /题/.test(plan.explain), JSON.stringify(plan).slice(0, 200))
+  await page.goto(`${UI}/banks/${bankId}`, { waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('.header-actions', { timeout: 15000 })
+  const headerText = await textOf(page.locator('.header-actions'))
+  check('题库头部只剩「更多」+「开始练习」（学习路线/闪卡已下线）',
+    /开始练习/.test(headerText) && !/学习路线|闪卡/.test(headerText), headerText)
+  await page.locator('.header-actions button', { hasText: '开始练习' }).click()
+  await page.waitForURL(/\/practice\?/, { timeout: 20000 })
+  await page.waitForSelector('.plan-banner', { timeout: 15000 })
+  const banner = await textOf(page.locator('.plan-banner'))
+  check('练习页顶部说明与配题解释一致（同一批题）', banner.includes(plan.explain), `${banner} ‖ ${plan.explain}`)
+  const plannedSessionId = Number(new URL(page.url()).searchParams.get('sessionId'))
+  const planned = await api(`/sessions/${plannedSessionId}`)
+  const plannedIds = (planned.questions || []).map((q) => q.questionId)
+  check('练的题就是配题结果那批（顺序即优先级）',
+    planned.mode === 'PLAN' && JSON.stringify(plannedIds) === JSON.stringify(plan.items.map((i) => i.questionId)),
+    `${planned.mode} [${plannedIds.join(',')}] vs [${plan.items.map((i) => i.questionId).join(',')}]`)
+  await page.screenshot({ path: `${SHOTS}/2-一键配题.png` })
+
+  /* ---------------- ③ 错题讲解：三段结构分块流式 + 可选错因 + 追问 + 存为解析 ---------------- */
+  await page.goto(`${UI}/banks/${bankId}/practice?sessionId=${sessionId}`, { waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('.report-item', { timeout: 15000 })
   const firstWrong = page.locator('.report-item').first()
   await firstWrong.locator('.report-row').click()
   await page.waitForTimeout(600)
-  const whyText = await textOf(firstWrong.locator('.why-wrong'))
-  check('错题里有「这题为什么错？」三选', /为什么错/.test(whyText) && /看错/.test(whyText) && /没见过/.test(whyText), whyText.slice(0, 120))
-  await firstWrong.locator('.why-chip', { hasText: '这个知识点不会' }).click()
-  await firstWrong.locator('.why-answer').waitFor({ state: 'visible', timeout: 20000 })
+  const coachTrigger = firstWrong.locator('.coach-trigger')
+  const coachText = await textOf(coachTrigger)
+  check('错题里有「讲给我听」+ 可选错因三选（不选也能讲）',
+    /讲给我听/.test(coachText) && /看错/.test(coachText) && /没见过/.test(coachText), coachText.slice(0, 140))
+  await coachTrigger.locator('.coach-chip', { hasText: '这个知识点不会' }).click()
+  await coachTrigger.locator('button', { hasText: '讲给我听' }).click()
+
+  // 流式：第一段一出现就有内容，随后继续变长（证明不是一次性返回）
   await page.waitForFunction(() => {
-    const el = document.querySelector('.why-answer .tutor-inline')
-    return el && el.innerText.includes('增长率')
-  }, null, { timeout: 20000 })
-  const whyAnswer = await textOf(firstWrong.locator('.why-answer'))
-  check('答错即问的回答流式显示出来，且针对错因', /先背熟|增长率/.test(whyAnswer), whyAnswer.slice(0, 140))
+    const el = document.querySelector('.coach-sec-text')
+    return el && el.innerText.trim().length > 0
+  }, null, { timeout: 25000 })
+  const coachFirst = (await textOf(firstWrong.locator('.coach-body'))).length
+  await page.waitForTimeout(400)
+  const coachLater = (await textOf(firstWrong.locator('.coach-body'))).length
+  await page.waitForFunction(() => {
+    const el = document.querySelector('.coach-body')
+    return el && el.innerText.includes('先圈出题干里的年份')
+  }, null, { timeout: 25000 })
+  check('讲解是流式出现的（先短后长）', coachLater > coachFirst, `${coachFirst} → ${coachLater}`)
 
-  // 错因与对话都落库（用接口复查）
+  const secTitles = await firstWrong.locator('.coach-sec-title').allInnerTexts()
+  check('三段结构各自成块渲染（错在哪 / 这类题怎么做 / 下次防错）',
+    secTitles.length === 3 && /错在哪/.test(secTitles[0]) && /这类题怎么做/.test(secTitles[1]) && /下次防错/.test(secTitles[2]),
+    JSON.stringify(secTitles))
+  const coachBody = await textOf(firstWrong.locator('.coach-body'))
+  check('讲解内容针对我的作答（不是通用解析）', /你选了乙/.test(coachBody) && /基期/.test(coachBody), coachBody.slice(0, 160))
+
+  const explainPrompt = prompts.filter((p) => p.includes('【错在哪】')).pop() || ''
+  check('讲解 prompt 带上了我的作答与错因',
+    explainPrompt.includes('【我的作答】B（错误）') && explainPrompt.includes('这个知识点不会'),
+    explainPrompt.slice(0, 240))
+  check('讲解 prompt 明确要求讲透而不是照抄解析', explainPrompt.includes('不要照抄'), explainPrompt.slice(-200))
+
+  // 就地追问：不用另开面板
+  await firstWrong.locator('.coach-input').fill('那基期怎么快速认出来？')
+  await firstWrong.locator('.coach-foot button', { hasText: '追问' }).click()
+  await page.waitForFunction(() => {
+    const el = document.querySelector('.coach-body')
+    return el && el.innerText.includes('再做 5 道同类题')
+  }, null, { timeout: 25000 })
+  check('讲解下面能直接追问（一问一答都在原位）', (await firstWrong.locator('.coach-follow').count()) >= 2,
+    String(await firstWrong.locator('.coach-follow').count()))
+
+  // 落库复查：错因进会话，讲解进消息且不占提示级别
   const whySession = (await api(`/tutor/sessions?questionId=${wrongQids[0]}`))[0]
-  const whyMessages = await waitMessages(whySession.id, 1)
+  const whyMessages = await waitMessages(whySession.id, 2)
   check('错因写进了会话（self_reason）', whySession.selfReason === 'NO_KNOWLEDGE', JSON.stringify(whySession).slice(0, 160))
-  check('答错即问的回答落库（tutor_message）', (whyMessages.messages || []).length >= 1, JSON.stringify(whyMessages).slice(0, 160))
-  await page.screenshot({ path: `${SHOTS}/2-答错即问.png` })
+  check('讲解与追问都落库（tutor_message）', (whyMessages.messages || []).length >= 2, JSON.stringify(whyMessages).slice(0, 160))
+  check('讲解不占提示级别（hint_level 为空）',
+    (whyMessages.messages || []).every((m) => m.hintLevel == null),
+    JSON.stringify((whyMessages.messages || []).map((m) => m.hintLevel)))
 
-  /* ---------------- ③ 提示楼梯：做题中要提示，逐级递进 ---------------- */
+  // 存为解析：讲解变成题库的一部分（越用越厚）
+  await firstWrong.locator('.coach-foot button', { hasText: '存为解析' }).click()
+  await page.waitForTimeout(1500)
+  const savedQuestion = await api(`/questions/${wrongQids[0]}`)
+  check('「存为解析」把讲解写回题目解析', /【错在哪】/.test(savedQuestion.analysis || ''), String(savedQuestion.analysis).slice(0, 120))
+  await page.screenshot({ path: `${SHOTS}/3-错题讲解.png` })
+
+  /* ---------------- ④ 提示楼梯：做题中要提示，逐级递进 ---------------- */
   const live = await api(`/banks/${bankId}/sessions`, 'POST', { mode: 'ALL', count: 3 })
   await page.goto(`${UI}/banks/${bankId}/practice?sessionId=${live.sessionId}`, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector('.question-card', { timeout: 15000 })
@@ -247,7 +324,7 @@ try {
   }, null, { timeout: 20000 })
   const afterL1 = await textOf(page.locator('.tutor-body'))
   check('第 1 级提示流式给出（指方向、不给答案）', /先看考点/.test(afterL1) && !/20%/.test(afterL1), afterL1.slice(0, 120))
-  await page.screenshot({ path: `${SHOTS}/3-提示楼梯.png` })
+  await page.screenshot({ path: `${SHOTS}/4-提示楼梯.png` })
 
   await page.locator('.tutor-step', { hasText: '提示 2' }).click()
   await page.waitForFunction(() => {
@@ -266,7 +343,7 @@ try {
   const afterL3 = await textOf(page.locator('.tutor-body'))
   check('第 3 级给出完整解析（此时才出现答案）', afterL3.includes('20%') && afterL3.includes('完整解析'), afterL3.slice(-140))
 
-  /* ---------------- ④ 自由追问：面板里继续聊 ---------------- */
+  /* ---------------- ⑤ 自由追问：面板里继续聊 ---------------- */
   await page.locator('.tutor-input').fill('那这类题还有什么坑？')
   await page.locator('.tutor-foot button').click()
   await page.waitForFunction(() => {
@@ -278,7 +355,7 @@ try {
   const roles = (askedMessages.messages || []).map((m) => m.role).join(',')
   const levels = (askedMessages.messages || []).map((m) => m.hintLevel).join(',')
   check('提示与追问都按消息落库（含 hint_level）', roles.includes('user') && roles.includes('assistant') && levels.includes('1') && levels.includes('2'), `roles=${roles} levels=${levels}`)
-  await page.screenshot({ path: `${SHOTS}/4-追问.png` })
+  await page.screenshot({ path: `${SHOTS}/5-追问.png` })
 
   check('无 JS 报错', pageErrors.length === 0, pageErrors.join(' | ').slice(0, 300))
 

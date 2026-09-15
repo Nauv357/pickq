@@ -165,33 +165,23 @@
                 v-if="!q.analysis && !q.answerText && !(q.answerKeys && q.answerKeys.length) && !q.referenceAnswer"
                 class="text-muted"
               >{{ t('noAnalysis') }}</p>
-              <!-- 单题 AI 辅助解析（交卷回顾时对错题/难题按需追问，可保存为正式解析） -->
+              <!-- 错题讲解（主线）：讲"你这次错在哪 / 这类题怎么做 / 下次防错"，可追问、可存为解析。
+                   做对的题不给"错在哪"（没有可讲的错），但可以生成正式解析补进题库 -->
+              <WrongAnswerCoach
+                v-if="isWrongQuestion(q)"
+                :bank-id="Number(id)"
+                :question-id="q.questionId"
+                :practice-session-id="report?.sessionId || sessionId"
+                :template-id="skillTemplateId"
+                @saved="onReportAnalysisSaved(q)"
+              />
+              <!-- 单题 AI 辅助解析（未作答/做对：让 AI 生成一份可入库的正式解析） -->
               <QuestionAiAnalysis
-                v-if="q.questionId"
+                v-else
                 :question-id="q.questionId"
                 :bank-id="Number(id)"
                 @saved="onReportAnalysisSaved(q)"
               />
-
-              <!-- 答错即问（阶段 1）：先让用户选错因，再让老师针对错因说一句（比重讲整题有用得多） -->
-              <div v-if="isWrongQuestion(q)" class="why-wrong">
-                <span class="text-muted">{{ t('whyWrong') }}</span>
-                <button
-                  v-for="r in SELF_REASONS"
-                  :key="r.value"
-                  class="why-chip"
-                  :class="{ on: wrongReason[q.questionId] === r.value }"
-                  @click="askWhyWrong(q, r.value)"
-                >
-                  {{ r.label }}
-                </button>
-                <button v-if="wrongReason[q.questionId]" class="why-chip" @click="openTutor('ask', q.questionId)">
-                  {{ t('moreAsk') }}
-                </button>
-              </div>
-              <div v-if="wrongReason[q.questionId] && wrongAnswerText[q.questionId]" class="why-answer">
-                <div class="tutor-inline" v-html="richHtml(wrongAnswerText[q.questionId])"></div>
-              </div>
             </div>
           </div>
         </div>
@@ -220,6 +210,15 @@
           {{ finishing ? '交卷中…' : '交卷' }}
         </button>
       </header>
+
+      <!-- 本次配题说明（"开始练习"一键配的题）：只讲可核对的事实，随时可关掉 -->
+      <div v-if="planExplain && !planHidden" class="plan-banner">
+        <TikuIcon name="target" :size="13" />
+        <span class="plan-text">{{ planExplain }}</span>
+        <button class="plan-close" :title="t('planHide')" @click="hidePlan">
+          <TikuIcon name="x" :size="12" />
+        </button>
+      </div>
 
       <div v-if="loading" class="body-loading">
         <div class="card tiku-skeleton">
@@ -460,8 +459,7 @@ const { t } = useI18n({
       wrongN: '错 {n} 题',
       histRate: '历史正确率 {r}%',
       noHistory: '题量还不够',
-      whyWrong: '这题为什么错？',
-      moreAsk: '继续问老师'
+      planHide: '收起这次的配题说明'
     },
     'en-US': {
       notFoundDesc: 'This bank may have been deleted, or the link is wrong', backToBanks: 'Back to banks', back: 'Back', backToBank: 'Back to bank',
@@ -495,8 +493,7 @@ const { t } = useI18n({
       wrongN: '{n} wrong',
       histRate: '{r}% historical accuracy',
       noHistory: 'no history yet',
-      whyWrong: 'Why was it wrong?',
-      moreAsk: 'Keep asking'
+      planHide: 'Hide this session’s question mix'
     }
   }
 })
@@ -506,12 +503,13 @@ import { getBank } from '../api/banks'
 import { finishSession, getSessionDetail } from '../api/sessions'
 import { selfGradeRecord, setReviewSuspended } from '../api/studyRecords'
 import { setFavorite } from '../api/questions'
-import { SELF_REASONS, getReviewSummary, streamTutor } from '../api/tutor'
+import { getReviewSummary, streamTutor } from '../api/tutor'
 import { getSkillTemplates } from '../api/skills'
 import { formatScore } from '../utils/format'
 import { richTextToHtml } from '../utils/richText'
 import TikuIcon from '../components/TikuIcon.vue'
 import QuestionAiAnalysis from '../components/QuestionAiAnalysis.vue'
+import WrongAnswerCoach from '../components/WrongAnswerCoach.vue'
 import TutorPanel from '../components/TutorPanel.vue'
 
 const route = useRoute()
@@ -532,9 +530,29 @@ const tutorBusy = ref(false)
 const tutorError = ref('')
 const diagnosis = ref('')              // 复盘诊断文本（流式累积）
 const reviewSummary = ref(null)        // 公式统计（成绩 + 按知识点的错题分布）
-const wrongReason = ref({})            // 每题选的错因
-const wrongAnswerText = ref({})        // 每题"为什么错"的回答（就地显示，不必开抽屉）
 const skillTemplateId = ref('')        // 当前技能图（决定"这题属于哪个知识点"的说法）
+
+/* ---------- 本次配题说明（"开始练习"一键配的题；从题库详情带过来，只展示不参与判分） ---------- */
+const planExplain = ref('')
+const planHidden = ref(false)
+function loadPlanExplain() {
+  if (!sessionId) return
+  try {
+    planExplain.value = sessionStorage.getItem(`tiku.plan.${sessionId}`) || ''
+  } catch (e) {
+    planExplain.value = ''
+  }
+}
+function hidePlan() {
+  planHidden.value = true
+  if (sessionId) {
+    try {
+      sessionStorage.removeItem(`tiku.plan.${sessionId}`)
+    } catch (e) {
+      /* 隐私模式下写不了也不影响做题 */
+    }
+  }
+}
 
 /** 打开私教抽屉：hint = 要提示（做题中），ask = 追问某道错题 */
 function openTutor(mode, questionId, reason = '') {
@@ -590,37 +608,7 @@ async function runDiagnose() {
   return result
 }
 
-/** 答错即问：选了错因，老师针对它说一句（就地显示；想继续聊再开抽屉） */
-async function askWhyWrong(q, reason) {
-  if (tutorBusy.value) return
-  wrongReason.value = { ...wrongReason.value, [q.questionId]: reason }
-  tutorBusy.value = true
-  tutorError.value = ''
-  wrongAnswerText.value = { ...wrongAnswerText.value, [q.questionId]: '' }
-  const qid = q.questionId
-  const result = await streamTutor('/tutor/ask', {
-    bankId: Number(id),
-    questionId: qid,
-    practiceSessionId: report.value?.sessionId || sessionId,
-    templateId: skillTemplateId.value || null,
-    kind: 'PER_QUESTION',
-    selfReason: reason
-  }, {
-    onDelta: (text) => {
-      wrongAnswerText.value = { ...wrongAnswerText.value, [qid]: (wrongAnswerText.value[qid] || '') + text }
-    },
-    onSession: (payload) => {
-      if (payload?.sessionId) tutorSessionIds.value = { ...tutorSessionIds.value, [qid]: payload.sessionId }
-    },
-    onError: (message) => {
-      tutorError.value = /尚未配置 AI/.test(message)
-        ? '尚未配置 AI 模型：请在「设置 → AI」里填好 Key 再回来。'
-        : message
-    }
-  })
-  tutorBusy.value = false
-  return result
-}
+/** 答错即问 → 已升级为「错题讲解」（WrongAnswerCoach 组件自带错因三选与追问） */
 
 const isWrongQuestion = (q) => q.correct === false || q.selfGrade === 'WRONG' || q.selfGrade === 'PARTIAL'
 
@@ -649,6 +637,7 @@ function stopElapsedTimer() {
 onUnmounted(stopElapsedTimer)
 
 const MODE_LABELS = {
+  PLAN: '智能配题',
   ALL: '全部随机',
   SEQUENCE: '顺序刷题',
   TOPIC: '按试卷 / 章节',
@@ -746,6 +735,7 @@ async function loadAll() {
     }
     const detail = await getSessionDetail(sessionId)
     sessionMode.value = detail.mode || ''
+    loadPlanExplain()
     questions.value = detail.questions || []
     total.value = Number(detail.questionCount || detail.questions?.length || 0)
     if (detail.status !== 'COMPLETED') {
@@ -1199,6 +1189,37 @@ loadAll()
   background: var(--bg-elev);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+}
+/* 本次配题说明：一行、可关掉，不占做题注意力 */
+.plan-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.6;
+  flex-shrink: 0;
+}
+.plan-text {
+  flex: 1;
+  min-width: 0;
+}
+.plan-close {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px;
+  display: inline-flex;
+  border-radius: 4px;
+}
+.plan-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 .bar-btn {
   display: inline-flex;

@@ -40,6 +40,8 @@ const BANKS = [
 ]
 const Q = (n) => ({ questionId: n, questionNumber: n, questionType: 'SINGLE', content: `第 ${n} 题题干`, options: [{ key: 'A', text: 'A' }, { key: 'B', text: 'B' }], answerKeys: ['A'], score: 1 })
 const ROWS = [101, 102, 103].map(Q)
+// 做题格式（无答案）：会话详情/创建会话返回的题目
+const SESSION_Q = (n) => ({ questionId: n, questionNumber: n, questionType: 'SINGLE', content: `第 ${n} 题题干`, options: [{ key: 'A', text: 'A' }, { key: 'B', text: 'B' }], score: 1, favorite: false, materialId: null })
 
 function stub(pathname) {
   if (pathname === '/api/banks') return { records: BANKS, total: BANKS.length }
@@ -50,7 +52,24 @@ function stub(pathname) {
   if (/^\/api\/banks\/\d+\/progress$/.test(pathname)) return { totalQuestions: 3, answeredCount: 1, correctCount: 1, recordsCount: 1, accuracy: 1 }
   if (/^\/api\/banks\/\d+\/materials$/.test(pathname)) return []
   if (/^\/api\/questions\/\d+$/.test(pathname)) return ROWS.find((q) => q.questionId === Number(pathname.split('/').pop())) || Q(999)
-  if (pathname.startsWith('/api/ai-import/jobs')) return []
+  // 配题（「开始练习」一键）：GET practice-plan → POST sessions(mode=PLAN, questionIds)
+if (/^\/api\/banks\/\d+\/practice-plan$/.test(pathname)) {
+  return {
+    requested: 2, total: 2, wrongCount: 1, dueCount: 1, weakCount: 0, newCount: 0,
+    weakNodeName: null, weakNodeQuestions: 0,
+    items: [{ questionId: 101, reason: 'WRONG' }, { questionId: 102, reason: 'DUE' }],
+    explain: '这 2 题：1 题是你之前做错的 · 1 题今天到期复习（题库共 3 题）'
+  }
+}
+if (/^\/api\/banks\/\d+\/sessions$/.test(pathname)) return { sessionId: 77, total: 2, questions: [SESSION_Q(101), SESSION_Q(102)] }
+if (pathname === '/api/sessions/77') {
+  return {
+    id: 77, bankId: 1, mode: 'PLAN', questionCount: 2, answeredCount: 0, correctCount: 0,
+    totalScore: 0, maxScore: 2, totalSeconds: 0, status: 'IN_PROGRESS',
+    createdAt: '2026-01-01T10:00:00', finishedAt: null, questions: [SESSION_Q(101), SESSION_Q(102)]
+  }
+}
+if (pathname.startsWith('/api/ai-import/jobs')) return []
   if (pathname === '/api/exports/prefs') return { lastDir: 'D:\\题库导出', defaultDir: 'D:\\题库导出' }
   if (pathname === '/api/exports/export') return { id: 1, filePath: 'D:\\题库导出\\冒烟题库 A-1.0.0.tiku' }
   if (/^\/api\/banks\/\d+\/(records|wrong-questions|review\/due)$/.test(pathname)) return { records: [], total: 0 }
@@ -81,6 +100,7 @@ await page.route(
     const p = new URL(req.url()).pathname
     const method = req.method()
     if (method !== 'GET') calls.push({ method, path: p, body: req.postData() })
+    else calls.push({ method, path: p, body: null })
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -128,7 +148,7 @@ await page.waitForSelector('.action-menu', { timeout: 5000 })
 const menuItems = await page.locator('.action-menu .action-menu-item').allInnerTexts()
 const menuText = menuItems.join(' | ')
 check('右键打开菜单', await page.locator('.action-menu').isVisible())
-for (const label of ['打开题库', '开始做题', '练习历史', '打印试卷', '重命名', '导出题库文件', '批量管理', '删除题库']) {
+for (const label of ['打开题库', '开始练习', '练习历史', '打印试卷', '重命名', '导出题库文件', '批量管理', '删除题库']) {
   check(`菜单含「${label}」`, menuText.includes(label), menuText)
 }
 await page.keyboard.press('Escape')
@@ -246,7 +266,58 @@ await page.waitForTimeout(1000)
 const qDel = calls.filter((c) => c.method === 'DELETE' && /\/api\/questions\//.test(c.path))
 check('批量删除题目逐个发 DELETE', qDel.length === 2, JSON.stringify(qDel.map((c) => c.path)))
 
-console.log('\n[12] 运行时错误')
+/* ================= 题库详情头部（开始练习 + 更多） ================= */
+console.log('\n[12] 题库头部：一个主按钮 + 「更多」')
+calls.length = 0
+await page.goto(`${BASE}/banks/1`, { waitUntil: 'domcontentloaded' })
+await page.waitForSelector('.header-actions', { timeout: 15000 })
+const headerBtns = await page.locator('.header-actions button').allInnerTexts()
+const headerText = headerBtns.map((s) => s.replace(/\s+/g, ' ').trim()).join(' | ')
+check('头部只剩 2 个按钮（开始练习 + 更多）', headerBtns.length === 2, headerText)
+check('主按钮是「开始练习」', /开始练习/.test(headerText), headerText)
+check('「学习路线」「闪卡」已从头部下线', !/学习路线|闪卡/.test(headerText), headerText)
+
+await page.locator('.header-actions button', { hasText: '更多' }).click()
+await page.waitForSelector('.action-menu', { timeout: 5000 })
+const bankMenuText = (await page.locator('.action-menu .action-menu-item').allInnerTexts()).join(' | ')
+for (const label of ['自定义练习', '练习历史', '知识点', '打印试卷', '导出题库文件', '编辑题库', '删除题库']) {
+  check(`「更多」含「${label}」`, bankMenuText.includes(label), bankMenuText)
+}
+await page.keyboard.press('Escape')
+await page.waitForTimeout(200)
+
+console.log('\n[13] 开始练习 = 一键配题（practice-plan → PLAN 会话 → 说明横幅）')
+calls.length = 0
+await page.locator('.header-actions button', { hasText: '开始练习' }).click()
+await page.waitForURL(/\/practice\?/, { timeout: 15000 })
+const planGet = calls.find((c) => /\/api\/banks\/1\/practice-plan$/.test(c.path))
+check('先取配题结果 GET /banks/1/practice-plan', !!planGet, JSON.stringify(calls.map((c) => c.path)))
+const planPost = calls.find((c) => c.method === 'POST' && /\/api\/banks\/1\/sessions$/.test(c.path))
+check('按配题结果建会话（mode=PLAN）', !!planPost && /"mode":"PLAN"/.test(planPost.body || ''), planPost?.body || '(无请求)')
+check('questionIds 原样带上（顺序即优先级）', !!planPost && /"questionIds":\[101,102\]/.test((planPost.body || '').replace(/\s/g, '')), planPost?.body || '')
+await page.waitForTimeout(1200)
+const bannerText = await page.locator('.plan-banner').innerText().catch(() => '')
+check('练习页顶部显示配题说明（可核对的数量）', /这 2 题/.test(bannerText) && /题库共 3 题/.test(bannerText), bannerText)
+await page.locator('.plan-close').click()
+await page.waitForTimeout(200)
+check('说明可关掉（不占做题注意力）', (await page.locator('.plan-banner').count()) === 0)
+
+console.log('\n[14] 卡片菜单「开始练习」= 同一条一键配题路径（R6：同一动作同一个词）')
+calls.length = 0
+await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' })
+await page.waitForSelector('.bank-card', { timeout: 15000 })
+await page.locator('.bank-card').first().click({ button: 'right' })
+await page.waitForSelector('.action-menu', { timeout: 5000 })
+await page.locator('.action-menu .action-menu-item', { hasText: '开始练习' }).click()
+await page.waitForURL(/\/practice\?/, { timeout: 15000 })
+const listPlanGet = calls.find((c) => /\/api\/banks\/1\/practice-plan$/.test(c.path))
+check('卡片菜单也先取配题结果', !!listPlanGet, JSON.stringify(calls.map((c) => c.path)))
+const listPlanPost = calls.find((c) => c.method === 'POST' && /\/api\/banks\/1\/sessions$/.test(c.path))
+check('卡片菜单也按配题结果建会话（mode=PLAN）', !!listPlanPost && /"mode":"PLAN"/.test(listPlanPost.body || ''), listPlanPost?.body || '')
+await page.waitForTimeout(1200)
+check('直接落到做题页并带上配题说明', /这 2 题/.test(await page.locator('.plan-banner').innerText().catch(() => '')))
+
+console.log('\n[15] 运行时错误')
 check('无未捕获的 JS 错误', pageErrors.length === 0, pageErrors.join(' | ').slice(0, 300))
 
 await browser.close()

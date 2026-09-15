@@ -3,9 +3,15 @@ import http from './http'
 // 刷题会话接口（粉笔式：选范围 + 数量，服务端抽题）
 
 // 创建会话（服务端抽题）→ { sessionId, total, questions[]（做题格式，无答案） }
-// mode: ALL 全部随机(未做优先) / SEQUENCE 按题号顺序 / TOPIC 按分类(多选) / REVIEW / WRONG / FAVORITE
+// mode: PLAN 按配题结果（"开始练习"用）/ ALL 全部随机(未做优先) / SEQUENCE 按题号顺序 /
+//       TOPIC 按分类(多选) / SKILL 按知识点 / REVIEW / WRONG / FAVORITE
+// PLAN 模式：questionIds = 配题结果的 items（顺序即优先级，服务端原样练这几题）
 // TOPIC 模式下 topic/category 为多选数组（可为空 = 不限；两组之间 AND，组内 OR）
 export const createSession = (bankId, data) => http.post(`/banks/${bankId}/sessions`, data)
+
+// 练习配题（"开始练习"一键用）：错题 → 到期复习 → 薄弱知识点 → 新题，返回
+// { total, wrongCount, dueCount, weakCount, newCount, items[], explain }。零 token，纯公式。
+export const getPracticePlan = (bankId, params) => http.get(`/banks/${bankId}/practice-plan`, { params })
 
 // 练习历史（状态 IN_PROGRESS/COMPLETED、得分、用时）
 export const listSessions = (bankId, params) => http.get(`/banks/${bankId}/sessions`, { params })

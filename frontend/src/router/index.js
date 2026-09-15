@@ -31,20 +31,6 @@ const routes = [
         meta: { title: '练习历史' }
       },
       {
-        // 学习路线（阶段 2）：今天做什么 / 下一步 / 还缺什么 —— 全部公式算，零 token
-        path: 'banks/:id/roadmap',
-        name: 'roadmap',
-        component: () => import('../views/RoadmapView.vue'),
-        meta: { title: '学习路线' }
-      },
-      {
-        // 闪卡（阶段 3）：题目测"再认"、卡片测"回忆"
-        path: 'banks/:id/cards',
-        name: 'cards',
-        component: () => import('../views/CardsView.vue'),
-        meta: { title: '闪卡' }
-      },
-      {
         path: 'ai-import/jobs',
         name: 'ai-import-jobs',
         component: () => import('../views/AiImportJobsView.vue'),

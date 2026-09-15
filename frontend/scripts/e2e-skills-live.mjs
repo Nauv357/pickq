@@ -224,7 +224,10 @@ try {
 
   await page.goto(`${UI}/banks/${bankId}`, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(2000)
-  await page.locator('button', { hasText: '知识点' }).first().click()
+  // 「知识点」收在头部「更多」下拉里
+  await page.locator('button', { hasText: '更多' }).first().click()
+  await page.waitForTimeout(400)
+  await page.locator('.action-menu button', { hasText: '知识点' }).first().click()
   await page.waitForSelector('.skill-toolbar', { timeout: 8000 })
   await page.waitForTimeout(800)
 

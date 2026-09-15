@@ -280,4 +280,49 @@ class TutorServiceTest {
         assertTrue(e.getMessage().contains("提示楼梯"), e.getMessage());
         assertEquals(0, messageMapper.selectCount(null), "失败的调用不应留下消息");
     }
+
+    /**
+     * 错题讲解（主线）：三段结构指令进 prompt、讲的是"你这次的错"、且**不占提示级别**。
+     * 讲解与提示楼梯是两件事：楼梯是做题中分级取用，讲解是错了之后一次看明白。
+     */
+    @Test
+    void explainGivesThreeSectionsWithoutConsumingHintLevel() {
+        Long qid = insertQuestion(11, "2024 年该省 GDP 为 120 亿，2023 年为 100 亿，增长率是多少？", "增长率 = 现期/基期 - 1 = 20%");
+        tag(qid, "gk.zl.growth");
+        insertRecord(qid, false, "B", 45L);
+        TutorSession session = tutor.openSession(BANK_ID, qid, SESSION_ID, TutorSession.KIND_PER_QUESTION,
+                TutorSession.REASON_NO_KNOWLEDGE, null);
+
+        StringBuilder streamed = new StringBuilder();
+        TutorMessage msg = tutor.explain(session.getId(), TEMPLATE, streamed::append);
+
+        assertTrue(streamed.length() > 0, "讲解要流式给出来");
+        assertEquals(null, msg.getHintLevel(), "讲解不占提示级别");
+        assertEquals(0, tutor.maxHintLevel(session.getId()), "看完讲解后提示楼梯仍然从第 1 级开始");
+
+        String prompt = prompts.get(prompts.size() - 1);
+        for (String section : new String[]{"【错在哪】", "【这类题怎么做】", "【下次防错】",
+                "【我的作答】B（错误）", "【我的错因】这个知识点不会", "【官方解析】"}) {
+            assertTrue(prompt.contains(section), "讲解 prompt 缺少「" + section + "」");
+        }
+        assertTrue(prompt.contains("不要照抄"), "要讲透而不是照抄官方解析");
+
+        // 讲解落库后就是这场对话的历史：接着追问要能看到它（否则追问等于重新问一遍）
+        tutor.ask(session.getId(), "基期到底是哪一个？", TEMPLATE, d -> {
+        });
+        String askPrompt = prompts.get(prompts.size() - 1);
+        assertTrue(askPrompt.contains("【最近的对话】"), askPrompt.substring(0, Math.min(200, askPrompt.length())));
+        assertTrue(askPrompt.contains("老师：先看这个方向"), "追问上下文要包含刚才的讲解：" + askPrompt.substring(0, Math.min(300, askPrompt.length())));
+    }
+
+    /** 讲解必须有具体题目：整场复盘会话上点"讲给我听"要说清楚，不能空跑 */
+    @Test
+    void explainRequiresAQuestion() {
+        TutorSession session = tutor.openSession(BANK_ID, null, SESSION_ID, TutorSession.KIND_POST_REVIEW, null, null);
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> tutor.explain(session.getId(), TEMPLATE, d -> {
+                }));
+        assertTrue(e.getMessage().contains("指定题目"), e.getMessage());
+        assertEquals(0, messageMapper.selectCount(null));
+    }
 }

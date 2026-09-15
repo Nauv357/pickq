@@ -46,7 +46,7 @@ import java.util.stream.Collectors;
 @Service
 public class PracticeSessionService {
 
-    private static final Set<String> MODES = Set.of("ALL", "SEQUENCE", "TOPIC", "SKILL", "REVIEW", "WRONG", "FAVORITE");
+    private static final Set<String> MODES = Set.of("ALL", "PLAN", "SEQUENCE", "TOPIC", "SKILL", "REVIEW", "WRONG", "FAVORITE");
 
     private final PracticeSessionMapper sessionMapper;
     private final PracticeSessionQuestionMapper sessionQuestionMapper;
@@ -85,7 +85,7 @@ public class PracticeSessionService {
         questionBankService.findByIdOrThrow(bankId);
         if (request == null) {
             //空请求体（前端可能不带 body）：等价于"全部随机刷全库"
-            request = new SessionCreateRequest(null, null, null, null, null, null, null, null, null);
+            request = new SessionCreateRequest(null, null, null, null, null, null, null, null, null, null);
         }
         String mode = normalizeMode(request.mode());
 
@@ -119,7 +119,7 @@ public class PracticeSessionService {
                 Collections.shuffle(doneUnits);
                 units = new ArrayList<>(undoneUnits);
                 units.addAll(doneUnits);
-            } else {
+            } else if (!"PLAN".equals(mode)) {
                 Collections.shuffle(units);
             }
         } else if (request.startQuestionId() != null) {
@@ -128,9 +128,10 @@ public class PracticeSessionService {
         }
 
         int totalRemaining = units.subList(startUnit, units.size()).stream().mapToInt(List::size).sum();
-        //count 缺省：SEQUENCE 带起点时 = 剩余数量，否则 = 范围内全部
+        //count 缺省：SEQUENCE 带起点时 = 剩余数量，否则 = 范围内全部；
+        //PLAN 忽略 count（配题引擎已经按 count 挑好了，这里原样练，保证题数和解释里的数字一致）
         int requested;
-        if (request.count() == null || request.count() <= 0) {
+        if (request.count() == null || request.count() <= 0 || "PLAN".equals(mode)) {
             requested = totalRemaining;
         } else {
             requested = Math.min(request.count(), totalRemaining);
@@ -169,7 +170,7 @@ public class PracticeSessionService {
     private String normalizeMode(String mode) {
         String m = mode == null || mode.isBlank() ? "ALL" : mode.toUpperCase();
         if (!MODES.contains(m)) {
-            throw new IllegalArgumentException("不支持的会话模式：" + mode + "（ALL/SEQUENCE/TOPIC/SKILL/REVIEW/WRONG/FAVORITE）");
+            throw new IllegalArgumentException("不支持的会话模式：" + mode + "（ALL/PLAN/SEQUENCE/TOPIC/SKILL/REVIEW/WRONG/FAVORITE）");
         }
         return m;
     }
@@ -208,6 +209,15 @@ public class PracticeSessionService {
         switch (mode) {
             case "SEQUENCE" -> wrapper.orderByAsc(Question::getQuestionNumber).orderByAsc(Question::getId);
             case "FAVORITE" -> wrapper.eq(Question::getFavorite, true);
+            // PLAN（"开始练习"的默认）：练配题引擎给的那几题，顺序即优先级
+            // （练习入口先取 /practice-plan，再把 items 原样传进来，保证"看到的解释"和"练的题"是同一批）
+            case "PLAN" -> {
+                List<Long> ids = request.questionIds();
+                if (ids == null || ids.isEmpty()) {
+                    throw new IllegalArgumentException("按配题结果练习需要先取 practice-plan 并传入 questionIds");
+                }
+                wrapper.in(Question::getId, ids);
+            }
             // SKILL（阶段 2）：按知识点抽题——学习路线的"开始今天的任务"用它。
             // 题与节点的关联走 question_skill（只认当前技能图里存在的节点，与知识点页同口径）
             case "SKILL" -> {
@@ -252,7 +262,32 @@ public class PracticeSessionService {
             }
             //TOPIC：topic/category 已按通用筛选应用（多选 in）；ALL：无额外条件
         }
-        return questionMapper.selectList(wrapper);
+        List<Question> pool = questionMapper.selectList(wrapper);
+        return "PLAN".equals(mode) ? orderByGivenIds(pool, request.questionIds()) : pool;
+    }
+
+    /**
+     * 按调用方给过来的题目顺序排列（PLAN 模式）：数据库返回顺序不保证与 in(...) 一致，
+     * 而配题结果的顺序就是优先级顺序（错题 → 到期 → 薄弱 → 新题）。
+     * 顺带完成去重与"不属于本库的 id"剔除（wrapper 已按 bankId 过滤）。
+     */
+    private List<Question> orderByGivenIds(List<Question> pool, List<Long> ids) {
+        Map<Long, Question> byId = new HashMap<>();
+        for (Question q : pool) {
+            byId.put(q.getId(), q);
+        }
+        List<Question> ordered = new ArrayList<>();
+        Set<Long> seen = new HashSet<>();
+        for (Long id : ids) {
+            if (id == null) {
+                continue;
+            }
+            Question q = byId.get(id);
+            if (q != null && seen.add(id)) {
+                ordered.add(q);
+            }
+        }
+        return ordered;
     }
 
     //题库中已作答过的题目 id（"未做优先"判断依据）

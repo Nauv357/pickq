@@ -58,6 +58,15 @@ public class TutorController {
         return stream(request, (sessionId, delta) -> tutorService.ask(sessionId, request.text(), request.templateId(), delta));
     }
 
+    /** 错题讲解（主线）：一次给出三段——错在哪 / 这类题怎么做 / 下次防错 */
+    @PostMapping(value = "/explain", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter explain(@RequestBody TutorAskRequest request) {
+        if (request.questionId() == null) {
+            throw new IllegalArgumentException("错题讲解需要指定题目");
+        }
+        return stream(request, (sessionId, delta) -> tutorService.explain(sessionId, request.templateId(), delta));
+    }
+
     /** 整场复盘诊断（这是"答错即问一句"的批量版本：一次看完这场的问题） */
     @PostMapping(value = "/review", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter review(@RequestBody TutorAskRequest request) {

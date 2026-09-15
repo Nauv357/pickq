@@ -84,8 +84,8 @@ frontend/src/
 ├── main.js                     入口：注册 Element Plus / i18n / router，先 initTheme() 再 initLang()
 ├── App.vue                     根组件：el-config-provider + router-view + 两个 Teleport（图片灯箱、更新进度弹窗）
 ├── router/index.js             12 条路由，全部懒加载；只有 afterEach 设 document.title（无鉴权守卫）
-├── api/                        薄封装（10）：http.js（唯一 axios 实例）+ 按后端资源分文件
-├── components/                 复用组件（11）——见 §3.2 与 §3.3
+├── api/                        薄封装（12）：http.js（唯一 axios 实例）+ 按后端资源分文件（含 skills.js / tutor.js）
+├── components/                 复用组件（14）——见 §3.2 与 §3.3
 ├── composables/                useConfirm.js（统一确认框；界面规范见 docs/design-ui.md）
 ├── i18n/                       index.js（建实例 + 全局 common.* 词表）+ lang.js（切换/持久化/Element Plus 联动）
 ├── layouts/AppLayout.vue       唯一外壳：侧栏导航 + AI 任务全局监控（5s 轮询 + Notification）
@@ -93,13 +93,17 @@ frontend/src/
 ├── utils/                      纯函数与平台适配（9）——见 §5.1
 └── views/                      路由页面（11）——见 §3.1
 
-frontend/scripts/              前端检查与冒烟（`npm run check:ui` / `check:i18n` / `smoke:editor`）
+frontend/scripts/              前端检查与冒烟（`npm run check:ui` / `check:i18n` / `smoke:*` / `e2e:*`）
 ├── check-pseudo-interp.mjs     属性值伪插值、双冒号属性
 ├── check-i18n-dup.mjs          词典重复键
 ├── check-i18n-keys.mjs         t() 用了但没定义的 key（eval 词典再展开 a.b.c）
 ├── check-hardcoded-zh.mjs      模板里未走 t() 的中文清单
 ├── smoke-editor-dialog.mjs     编辑大弹窗 Playwright 冒烟（需先起 dev server）
-├── smoke-bank-actions.mjs      右键菜单 / 批量管理 / 导出所选冒烟（需先起 dev server）
+├── smoke-bank-actions.mjs      右键菜单 / 批量管理 / 导出所选 / **头部一键配题**冒烟（假后端，需先起 dev server）
+├── smoke-skills.mjs            知识点弹窗冒烟（假后端：入口在头部「更多」里）
+├── smoke-ai-setup.mjs / smoke-ai-mineru.mjs / smoke-import-file.mjs   AI 设置 / MinerU 选项 / 文件导入冒烟
+├── e2e-skills-live.mjs         知识点真后端端到端（假模型；`npm run e2e:skills`）
+├── e2e-tutor-live.mjs          AI 私教真后端端到端（假模型；`npm run e2e:tutor`）
 └── shot-routes.mjs             批量路由截图（假数据，人工核对骨架）
 ```
 
@@ -173,7 +177,10 @@ web/
 | **题号导航盘** | `QuestionBankController` `/{id}/question-nav` | `QuestionBankService` | `dto/QuestionNavItemResponse`；前端 `QuestionNavDock.vue` |
 | **单题判题（预览用）** | `QuestionController` `/{id}/answer` | `QuestionService.checkAnswer` | `dto/AnswerRequest`、`AnswerResultResponse` |
 | **收藏** | `QuestionController` `/{id}/favorite` | `QuestionService.setFavorite` | `dto/FavoriteRequest` |
-| **刷题会话（六模式）** | `PracticeSessionController.java` 55 | `PracticeSessionService.java` 548 | `PracticeSessionMapper`（`FOR UPDATE` 行锁防重复交卷）、`PracticeSessionQuestionMapper`；`dto/Session*` |
+| **刷题会话（八模式）** | `PracticeSessionController.java` 55 | `PracticeSessionService.java` 605 | 模式 `PLAN/ALL/SEQUENCE/TOPIC/SKILL/REVIEW/WRONG/FAVORITE`；`PracticeSessionMapper`（`FOR UPDATE` 行锁防重复交卷）、`PracticeSessionQuestionMapper`；`dto/Session*`（`questionIds` 仅 PLAN 用，顺序即优先级） |
+| **练习配题（"开始练习"一键）** | `PracticeSessionController` `/{bankId}/practice-plan` | `PracticePlanService.java` 430 | 错题 30% → 到期 30% → 薄弱知识点 30% → 新题补满（去重；短练习按优先级保底 1 题）；掌握度公式 `nodeStates`；`dto` 用 record `Plan/PlanItem`；**接口名带 plan 但界面不出现"计划"二字**（收口见 `features.md` §4.8） |
+| **AI 私教（讲解/提示/追问/复盘）** | `TutorController.java` 147（`/tutor/{explain,hint,ask,review}` SSE + `review/{id}/summary`） | `TutorService.java` 753 | `model/TutorSession`、`TutorMessage`；`AiClientService.chatStream`；讲解三段小标题常量 `EXPLAIN_HEAD_*`；会话按"同题 + 同场练习"复用 |
+| **知识点标签（技能图）** | `SkillController.java` | `QuestionTaggingService.java`、`SkillGraphService.java` | `model/QuestionSkill`、`V17__learning_path_skill_tags.sql`；自定义节点落 `{dataDir}/skill-custom-nodes.json`；`ReviewPage.orphan` 统计失效标签 |
 | **提交作答（判题 + 记录 + 复习联动）** | `StudyRecordController.java` 105 | `StudyRecordService.java` 611 | `dto/StudyRecordSubmit{Request,Response}`；`model/StudyRecord` |
 | **主观题自评** | `StudyRecordController` `/study-records/{id}/self-grade` | `StudyRecordService.selfGrade` / `earnedScore` | `dto/SelfGrade{Request,Response}` |
 | **错题本** | `StudyRecordController` `/banks/{id}/wrong-questions` | `StudyRecordService.computeWrongQuestionIds` | `dto/WrongQuestionResponse`（**全仓共用的错题口径**） |
@@ -246,8 +253,8 @@ web/
 | 路由 | name | 文件 | 行数 | 职责 | 主要子组件 |
 | --- | --- | --- | --- | --- | --- |
 | `/` | `bank-list` | `BankListView.vue` | **1774** | 首页：概览卡带（最近练习 / 今日待复习）、题库分页 + 名称筛选、新建题库、合并题库、三种导入入口（AI / JSON / .tiku）、首次使用引导；**卡片操作菜单**（右键 /「…」：打开 / 做题 / 历史 / 打印 / 重命名 / 导出 / 批量管理 / 删除）、**批量管理模式**（勾选 + Shift 连选 + 底部批量条：导出所选 / 合并 / 删除所选）、卡片显示「共 N 题 · 已做 M」 | `TikuIcon`、`AiImportDialog`、`ActionMenu` |
-| `/banks/:id` | `bank-detail` | `BankDetailView.vue` | **3077** | 题库详情与**题库级全部操作**：信息编辑、导出（含**导出范围**：全部/收藏/错题/未做/**已勾选 N 题**）、删除、复习计划开关、复习队列/重置、进度与错题、题目检索分页与收藏、题号盘、**题目行菜单**（右键 /「…」）、批量选择（导出所选 / 另存为新题库 / 并入现有题库 / **删除所选**）、批量建题、AI 补答案、材料 CRUD、图片上传、开练习会话（支持 `?start=1` 直达）、打印入口 | `TikuIcon`、`QuestionFormPanel`、`QuestionNavDock`、`AiImportDialog`、`QuestionAiAnalysis`、`ActionMenu` |
-| `/banks/:id/practice` | `practice` | `PracticeView.vue` | **1822** | 做题页（会话制）：计时、逐题作答、收藏、暂停复习、交卷 → 成绩报告、报告内主观题自评、进入回顾 | `TikuIcon`、`QuestionAiAnalysis` |
+| `/banks/:id` | `bank-detail` | `BankDetailView.vue` | **3176** | 题库详情与**题库级全部操作**：头部只有「开始练习」（一键配题 → 建 PLAN 会话）+「更多」（自定义练习…/练习历史/知识点/打印试卷/导出题库文件/编辑题库/删除题库）、信息编辑、导出（含**导出范围**：全部/收藏/错题/未做/**已勾选 N 题**）、删除、复习计划开关、复习队列/重置、进度与错题、题目检索分页与收藏、题号盘、**题目行菜单**（右键 /「…」）、批量选择（导出所选 / 另存为新题库 / 并入现有题库 / **删除所选**）、批量建题、AI 补答案、材料 CRUD、图片上传、打印入口 | `TikuIcon`、`QuestionFormPanel`、`QuestionNavDock`、`AiImportDialog`、`SkillTagDialog`、`QuestionAiAnalysis`、`ActionMenu` |
+| `/banks/:id/practice` | `practice` | `PracticeView.vue` | **2036** | 做题页（会话制）：顶部**配题说明横幅**（一句可核对的事实，可关）、计时、逐题作答、收藏、暂停复习、交卷 → 成绩报告、报告内主观题自评、**错题「讲给我听」三段讲解 + 追问 + 存为解析**、复盘诊断 | `TikuIcon`、`WrongAnswerCoach`、`QuestionAiAnalysis`、`TutorPanel` |
 | `/banks/:id/sessions` | `session-history` | `SessionHistoryView.vue` | **940** | 双视图：历史列表（继续练习）/ 会话回顾（每题对错、答案、解析、材料折叠、自评、题号状态盘） | `TikuIcon`、`QuestionAiAnalysis`、`QuestionNavDock` |
 | `/banks/:id/print` | `print-paper` | `PrintPaperView.vue` | 528 | **独立页面（无侧栏）**：按范围（全部/错题/收藏/未做）+ 分类本地过滤渲染，切换`仅题目/含答案解析`，`window.print()` | `TikuIcon` |
 | `/ai-import/jobs` | `ai-import-jobs` | `AiImportJobsView.vue` | 414 | AI 导入任务列表：5s 轮询、状态/耗时展示、进入预览、两阶段取消/删除 | `TikuIcon` |
@@ -267,7 +274,7 @@ web/
 | `App.vue` | 519 | 根组件：`<el-config-provider>` + `<router-view>` + 2 个 `Teleport to="body"`（图片灯箱、更新下载弹窗）；文档级事件委托（外链→系统浏览器、`img.rich-img`→灯箱）；启动后自动检查更新（`tiku:skip-update-version` 可跳过） |
 | `main.js` | 26 | 注册 Element Plus / i18n / router；`initTheme()` → `initLang()` |
 
-### 3.3 复用组件（`frontend/src/components/`，10 个）
+### 3.3 复用组件（`frontend/src/components/`，14 个）
 
 界面位置约定与规则见 [`docs/design-ui.md`](design-ui.md)。
 
@@ -289,7 +296,10 @@ web/
 | `AiImportDialog.vue` | 847 | AI 导入对话框：校验 AI 配置 → 选文件（多选可逐个移除）→ 目标题库 → 处理模式（快速/标准/深度）→ 补充答案与思考开关 → 提交并订阅 SSE（**8s 无事件回退轮询**） | props `bankId` / `bankName`；emits `done`；`defineExpose({ open })` |
 | `QuestionNavDock.vue` | 427 | 可拖动题号盘：题号按钮 + 状态色（对/错/部分/未答）、跳转输入、三档尺寸、位置与尺寸持久化到 localStorage | props `title`/`items`/`activeId`/`showLegend`/`hint`/`draggable`/`storageKey`/`activeFill`；emits `select` |
 | `StatsHeatmap.vue` | 285 | 每日做题量热力图：30 天/90 天/全年三视图、分级上色、点击展开当日题量与正确率 | props `daily` |
-| `QuestionAiAnalysis.vue` | 222 | 单题 AI 解析：生成/重新生成、保存为正式解析、`autoStart`、模型失效时引导去设置页 | props `questionId`/`bankId`/`autoStart`；emits `saved`；`defineExpose({ generate })` |
+| `QuestionAiAnalysis.vue` | 222 | 单题 AI 解析（**未作答/做对**时用）：生成/重新生成、保存为正式解析、`autoStart`、模型失效时引导去设置页 | props `questionId`/`bankId`/`autoStart`；emits `saved`；`defineExpose({ generate })` |
+| `WrongAnswerCoach.vue` | 432 | **错题讲解（主线）**：流式三段（`【错在哪】/【这类题怎么做】/【下次防错】` 按标记分块渲染）+ 可选错因三选 + 就地追问 + 存为解析；模型没按标题分段时兜底整段渲染 | props `bankId`/`questionId`/`practiceSessionId`/`templateId`/`autoStart`；emits `saved`；`defineExpose({ explain })` |
+| `TutorPanel.vue` | 404 | AI 私教抽屉：提示楼梯（L1→L3，落库后回填"已给到第 N 级"）+ 错因三选 + 自由追问 + 复盘诊断；历史消息随题拉回 | props `bankId`/`questionId`/`practiceSessionId`/`templateId`/`kind`/`sessionId`/`selfReason`/`selfNote`/`showReasons`；emits `close`/`session`；`defineExpose({ diagnose, run })` |
+| `SkillTagDialog.vue` | 1026 | 知识点审阅弹窗：逐题一行（题号/题型/状态/题干 + 行内标签下拉 + 来源）、状态计数筛选、知识点筛选、全选/选中全部、批量设为知识点/确认/丢弃、失效标签一键清理 | props `bankId`；emits `close`/`changed` |
 | `FieldImages.vue` | 127 | 把 `obj[field]` 文本里的 `[图片N]` 渲染为任务临时图片缩略图（可预览、悬停删除该编号引用） | props `obj`/`field`/`jobId` |
 | `TikuIcon.vue` | 62 | **无依赖内联 SVG 图标组件**（24×24 stroke，随 `currentColor`），内置 32 个图标（含 `more` 横向省略号、`folder`）；全仓唯一图标来源（不引入图标库） | props `name`/`size`/`filled` |
 

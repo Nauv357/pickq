@@ -279,6 +279,44 @@ public class TutorService {
         return saveAssistant(sessionId, reply, null, settings.getModel());
     }
 
+    // ==================== 错题讲解（结构化三段） ====================
+
+    /** 讲解三段的小标题：模型原样输出，前端按这三个标记切块渲染（流式时逐块长出来） */
+    public static final String EXPLAIN_HEAD_WHERE = "【错在哪】";
+    public static final String EXPLAIN_HEAD_HOW = "【这类题怎么做】";
+    public static final String EXPLAIN_HEAD_GUARD = "【下次防错】";
+
+    /**
+     * 错题讲解（2026-09-16 收口后的主线功能）：一次讲清三段——错在哪 / 这类题的通用做法 / 下次怎么防。
+     *
+     * 与提示楼梯的分工：楼梯是"做题中还不想要答案"时的分级给；讲解是"已经错了、要弄明白"时的一次性交付。
+     * 因此讲解**不占提示级别**（hintLevel 留空，不进楼梯状态），但会作为对话历史参与后续追问。
+     */
+    @Transactional
+    public TutorMessage explain(Long sessionId, String templateId, Consumer<String> onDelta) {
+        TutorSession session = requireSession(sessionId);
+        if (session.getQuestionId() == null) {
+            throw new IllegalArgumentException("错题讲解需要指定题目");
+        }
+        Question question = questionMapper.selectById(session.getQuestionId());
+        if (question == null) {
+            throw new IllegalArgumentException("题目不存在：" + session.getQuestionId());
+        }
+        AiSettings settings = requireSettings();
+        String context = buildQuestionContext(session, question, templateId, false);
+        List<AiClientService.ChatTurn> turns = new ArrayList<>();
+        //已给过提示的话，把最后一级带进来，避免讲解与提示重复或互相矛盾
+        List<TutorMessage> hints = previousAssistantMessages(sessionId);
+        if (!hints.isEmpty()) {
+            TutorMessage last = hints.get(hints.size() - 1);
+            turns.add(AiClientService.ChatTurn.assistant(
+                    "（我之前给出的第 " + last.getHintLevel() + " 级提示）" + last.getContent()));
+        }
+        turns.add(AiClientService.ChatTurn.user(context + "\n\n" + EXPLAIN_INSTRUCTION));
+        String text = aiClientService.chatStream(settings, EXPLAIN_SYSTEM, turns, onDelta);
+        return saveAssistant(sessionId, text, null, settings.getModel());
+    }
+
     // ==================== 整场复盘 ====================
 
     /**
@@ -736,4 +774,33 @@ public class TutorService {
             - 不打分、不夸张、不评判人格，只谈题目与知识点；
             - 结论可执行：指出最该补的知识点，并给出一个具体动作；
             - 中文，四小段，每段短句，不要用表格、不要用一级标题，数学公式用 $...$ 包裹的 LaTeX。""";
+
+    private static final String EXPLAIN_INSTRUCTION = """
+            请把这道题给我讲清楚。**严格按下面三段输出**，每段用原样的方括号小标题开头（界面要按标题分块显示）：
+
+            【错在哪】
+            针对我选的答案讲清我错在哪：我选的那个选项/我的写法为什么不对（客观题就逐项对照），
+            以及我为什么会这么选（概念混了、公式用错了、还是漏看了条件）。2–4 句。
+
+            【这类题怎么做】
+            给一个**可复用的做法**：这类题的识别特征 + 固定步骤（分 2–4 点）。
+            不要只讲这一道题，要让我下次遇到同类题能照着做。
+
+            【下次防错】
+            一个具体的检查动作：我下次做题时到底看什么、算什么。一句话，必须能立刻执行。
+
+            规则：
+            - 中文，不寒暄、不复述题干、不写"总的来说"这类空话；
+            - 不要出现"掌握度""你还需要多练""建议你加强"这类评判与空建议；
+            - 题目自带的官方解析可以参考，但必须讲透为什么，不要照抄；
+            - 题干信息不足（缺材料/配图）就在【错在哪】里如实说明，绝不编造条件；
+            - 数学公式用 $...$ 包裹的 LaTeX。""";
+
+    private static final String EXPLAIN_SYSTEM = """
+            你是题库应用里的讲解老师。用户刚做错一道题，点开讲解就是要一次弄明白。
+            原则：
+            - 只讲这道题和这一类题，不讲空泛的学习方法、不打分、不评判人；
+            - 结构必须严格是【错在哪】【这类题怎么做】【下次防错】三段，标题原样保留，不增不减；
+            - 诚实：题干信息不足就说明，绝不编造条件、选项或知识点名称；
+            - 具体、短句，不用"首先/其次"这类填充词，数学公式用 $...$ 包裹的 LaTeX。""";
 }

@@ -172,12 +172,17 @@ async function closeDropdown() {
   await page.waitForTimeout(300)
 }
 
-console.log('打开题库详情 → 「知识点」')
+console.log('打开题库详情 →「更多」→「知识点」')
 await page.goto(`${BASE}/banks/1`, { waitUntil: 'domcontentloaded' })
 await page.waitForTimeout(1500)
 
-const entry = page.locator('button', { hasText: '知识点' }).first()
-check('详情页有「知识点」入口', (await entry.count()) > 0)
+// 「知识点」现在收在头部「更多」下拉里（头部只留「开始练习」一个主按钮）
+const moreBtn = page.locator('button', { hasText: '更多' }).first()
+check('详情页头部有「更多」入口', (await moreBtn.count()) > 0)
+await moreBtn.click()
+await page.waitForTimeout(400)
+const entry = page.locator('.action-menu button', { hasText: '知识点' }).first()
+check('「更多」里有「知识点」入口', (await entry.count()) > 0)
 await entry.click()
 await page.waitForSelector('.skill-toolbar', { timeout: 8000 })
 check('点开是独立弹窗', (await page.locator('.el-dialog .skill-toolbar').count()) === 1)
@@ -323,7 +328,9 @@ check('「详情」关掉弹窗并跳题目编辑器', !(await page.locator('.el
 
 await page.locator('.editor-dialog .panel-head button.icon-btn[title^="关闭"]').first().click().catch(() => {})
 await page.waitForTimeout(600)
-await page.locator('button', { hasText: '知识点' }).first().click()
+await page.locator('button', { hasText: '更多' }).first().click()
+await page.waitForTimeout(400)
+await page.locator('.action-menu button', { hasText: '知识点' }).first().click()
 await page.waitForSelector('.skill-toolbar', { timeout: 8000 })
 await waitToastsGone()
 await page.locator('.skill-toolbar-right button').first().click()

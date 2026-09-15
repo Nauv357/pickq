@@ -1,6 +1,7 @@
 package com.tiku.controller;
 
 import com.tiku.dto.*;
+import com.tiku.service.PracticePlanService;
 import com.tiku.service.PracticeSessionService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
@@ -10,9 +11,12 @@ import org.springframework.web.bind.annotation.*;
 public class PracticeSessionController {
 
     private final PracticeSessionService practiceSessionService;
+    private final PracticePlanService practicePlanService;
 
-    public PracticeSessionController(PracticeSessionService practiceSessionService) {
+    public PracticeSessionController(PracticeSessionService practiceSessionService,
+                                     PracticePlanService practicePlanService) {
         this.practiceSessionService = practiceSessionService;
+        this.practicePlanService = practicePlanService;
     }
 
     //创建刷题会话（选范围 + 数量，服务端抽题）
@@ -21,6 +25,18 @@ public class PracticeSessionController {
             @PathVariable Long bankId,
             @RequestBody(required = false) SessionCreateRequest request) {
         return ApiResponse.success(practiceSessionService.createSession(bankId, request));
+    }
+
+    /**
+     * 配一节课（「开始练习」的默认动作）：错题重做 → 到期复习 → 薄弱知识点 → 新题，
+     * 并返回**一句事实解释**（"这 20 题：8 题是你之前做错的 · 6 题今天到期…"）。
+     * 纯公式、不调模型；界面拿到 items 后按 PLAN 模式建会话（题单与解释一致）。
+     */
+    @GetMapping("/banks/{bankId}/practice-plan")
+    public ApiResponse<PracticePlanService.Plan> practicePlan(@PathVariable Long bankId,
+                                                              @RequestParam(required = false) String templateId,
+                                                              @RequestParam(required = false) Integer count) {
+        return ApiResponse.success(practicePlanService.plan(bankId, templateId, count));
     }
 
     //会话历史（含每场成绩）

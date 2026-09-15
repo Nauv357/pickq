@@ -29,42 +29,16 @@
           </div>
         </div>
         <div class="header-actions">
-          <button class="btn btn-secondary" :disabled="!bank" @click="$router.push(`/banks/${id}/sessions`)">
-            <TikuIcon name="clock" :size="14" />
-            {{ t('history') }}
+          <!-- 主路径只有一个：开始练习（一键配题：错题 → 到期复习 → 薄弱知识点 → 新题，
+               配完在练习页顶部用一句可核对的事实解释说明这批题是怎么来的）。
+               其余低频入口收进「更多」（R2），主按钮按 R1 落在页头最右。 -->
+          <button class="btn btn-secondary" :disabled="!bank" @click="openMoreMenu($event)">
+            <TikuIcon name="more" :size="14" />
+            {{ t('more') }}
           </button>
-          <button class="btn btn-secondary" :disabled="!bank" @click="openEditBank">
-            <TikuIcon name="edit" :size="14" />
-            {{ t('edit') }}
-          </button>
-          <button class="btn btn-secondary" :disabled="!bank" @click="openExport">
-            <TikuIcon name="download" :size="14" />
-            {{ t('exportBank') }}
-          </button>
-          <button class="btn btn-secondary" :disabled="!bank" @click="openSkillTags">
-            <TikuIcon name="target" :size="14" />
-            {{ t('skillTags') }}
-          </button>
-          <!-- 学习路线（阶段 2）：今天做什么 / 下一步 / 还缺什么，全部公式算，零 token -->
-          <button class="btn btn-secondary" :disabled="!bank" @click="$router.push(`/banks/${id}/roadmap`)">
-            <TikuIcon name="chart" :size="14" />
-            {{ t('roadmap') }}
-          </button>
-          <button class="btn btn-secondary" :disabled="!bank" @click="$router.push(`/banks/${id}/cards`)">
-            <TikuIcon name="book" :size="14" />
-            {{ t('cards') }}
-          </button>
-          <button class="btn btn-secondary" :disabled="!bank" @click="$router.push(`/banks/${id}/print`)">
-            <TikuIcon name="file" :size="14" />
-            {{ t('printPaper') }}
-          </button>
-          <button class="btn btn-danger" :disabled="!bank" @click="confirmDeleteBank">
-            <TikuIcon name="trash" :size="14" />
-            {{ t('delete') }}
-          </button>
-          <button class="btn btn-primary" :disabled="!bank" @click="openSession">
+          <button class="btn btn-primary" :disabled="!bank || planStarting" @click="startSmartSession">
             <TikuIcon name="play" :size="14" />
-            {{ t('startPractice') }}
+            {{ planStarting ? t('planStarting') : t('startPractice') }}
           </button>
         </div>
       </header>
@@ -139,6 +113,8 @@
 
       <!-- 题目行操作菜单（右键 /「…」按钮共用） -->
       <ActionMenu ref="qMenu" :items="questionMenuItems" @select="onQuestionMenuSelect" />
+      <!-- 题库低频操作（练习之外的一切都收在这里，头部只留「开始练习」） -->
+      <ActionMenu ref="bankMenu" :items="bankMenuItems" @select="onBankMenuSelect" />
 
       <!-- 编辑大弹窗：单独聚焦（列表被遮罩挡住，不存在"点另一行静默丢弃未保存修改"的问题；
            题号盘浮于弹窗之上、弹窗右侧预留出题号盘的位置（editor-gutter），
@@ -834,7 +810,9 @@ const { t } = useI18n({
     'zh-CN': {
       notFoundDesc: '题库可能已被删除，或地址有误', backToBanks: '返回题库列表', loading: '加载中…',
       authorBy: '作者：{v}', sourceFrom: '来源：{v}', createdOn: '创建于 {d}', questionsN: '共 {n} 题',
-      history: '练习历史', edit: '编辑', exportBank: '导出题库文件', skillTags: '知识点', roadmap: '学习路线', cards: '闪卡', printPaper: '打印试卷', delete: '删除', startPractice: '开始做题',
+      history: '练习历史', edit: '编辑题库', exportBank: '导出题库文件', skillTags: '知识点', printPaper: '打印试卷', delete: '删除题库', startPractice: '开始练习',
+      more: '更多', planStarting: '配题中…', customPractice: '自定义练习…',
+      msgPlanEmpty: '这个题库还没有可练的题',
     bankWord: '题库', thisQuestion: '该题',
       answeredOf: '已做 / 共 {n} 题', accuracyOf: '正确率（作答 {n} 次）', progressPct: '完成度',
       noDesc: '暂无描述',
@@ -949,7 +927,9 @@ const { t } = useI18n({
     'en-US': {
       notFoundDesc: 'This bank may have been deleted, or the link is wrong', backToBanks: 'Back to banks', loading: 'Loading…',
       authorBy: 'Author: {v}', sourceFrom: 'Source: {v}', createdOn: 'Created {d}', questionsN: '{n} questions',
-      history: 'History', edit: 'Edit', exportBank: 'Export bank file', skillTags: 'Knowledge tags', roadmap: 'Learning path', cards: 'Flashcards', printPaper: 'Print paper', delete: 'Delete', startPractice: 'Start practice',
+      history: 'History', edit: 'Edit bank', exportBank: 'Export bank file', skillTags: 'Knowledge tags', printPaper: 'Print paper', delete: 'Delete bank', startPractice: 'Start practice',
+      more: 'More', planStarting: 'Picking…', customPractice: 'Custom practice…',
+      msgPlanEmpty: 'This bank has no questions to practice yet',
     bankWord: 'Bank', thisQuestion: 'this question',
       answeredOf: '{n} answered / total', accuracyOf: 'Accuracy ({n} attempts)', progressPct: 'Progress',
       noDesc: 'No description',
@@ -1067,7 +1047,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { batchCreateQuestions, aiFillAnswers, copyQuestionSelection, deleteBank, exportBank, exportTikuBank, getBank, getBankQuestionNav, getBankQuestions, getBanks, mergeCategoryIntoTopic, setReviewEnabled, updateBank } from '../api/banks'
 import { deleteQuestion, getQuestion, setFavorite } from '../api/questions'
 import { getBankProgress, getReviewDue, getReviewSummary, getWrongQuestions, resetReviewStates } from '../api/studyRecords'
-import { createSession, getBankCategories } from '../api/sessions'
+import { createSession, getBankCategories, getPracticePlan } from '../api/sessions'
 import { formatDate, formatScore } from '../utils/format'
 import { richTextToHtml } from '../utils/richText'
 import { isModelError, offerModelRecovery } from '../utils/aiModelHelp'
@@ -1538,6 +1518,74 @@ async function startWrongSession() {
   await startSessionWith({ mode: 'WRONG' }, wrongTotal.value)
 }
 
+/* ---------- 更多菜单（练习之外的低频操作） ---------- */
+const bankMenu = ref(null)
+const bankMenuItems = computed(() => [
+  { key: 'customPractice', label: t('customPractice'), icon: 'settings' },
+  { divider: true },
+  { key: 'history', label: t('history'), icon: 'clock' },
+  { key: 'skillTags', label: t('skillTags'), icon: 'target' },
+  { key: 'printPaper', label: t('printPaper'), icon: 'file' },
+  { key: 'exportBank', label: t('exportBank'), icon: 'download' },
+  { key: 'edit', label: t('edit'), icon: 'edit' },
+  { divider: true },
+  { key: 'delete', label: t('delete'), icon: 'trash', danger: true }
+])
+
+function openMoreMenu(e) {
+  bankMenu.value?.openFromEl(e?.currentTarget)
+}
+
+function onBankMenuSelect(key) {
+  switch (key) {
+    case 'customPractice':
+      openSession()
+      return
+    case 'history':
+      router.push(`/banks/${id}/sessions`)
+      return
+    case 'skillTags':
+      openSkillTags()
+      return
+    case 'printPaper':
+      router.push(`/banks/${id}/print`)
+      return
+    case 'exportBank':
+      openExport()
+      return
+    case 'edit':
+      openEditBank()
+      return
+    case 'delete':
+      confirmDeleteBank()
+      return
+    default:
+  }
+}
+
+/* ---------- 开始练习（一键配题：配好直接开练，说明写在练习页顶部） ---------- */
+const planStarting = ref(false)
+
+async function startSmartSession() {
+  if (planStarting.value || sessionCreating.value) return
+  planStarting.value = true
+  try {
+    const plan = await getPracticePlan(id, { count: 20 })
+    if (!plan?.items?.length) {
+      ElMessage.warning(t('msgPlanEmpty'))
+      return
+    }
+    await startSessionWith({
+      mode: 'PLAN',
+      questionIds: plan.items.map((x) => x.questionId)
+    }, null, plan.explain)
+  } catch (e) {
+    /* 拦截器已提示 */
+  } finally {
+    planStarting.value = false
+  }
+}
+
 /* ---------- 会话（{{ t('startPractice') }} / 复习 / 错题重做） ---------- */
 const sessionVisible = ref(false)
 const sessionCreating = ref(false)
@@ -1606,7 +1654,7 @@ async function submitSession() {
   await startSessionWith(body)
 }
 
-async function startSessionWith(body, expectedTotal) {
+async function startSessionWith(body, expectedTotal, planExplain = '') {
   if (sessionCreating.value) return // 防双击/多入口并发重复建会话
   sessionCreating.value = true
   try {
@@ -1616,6 +1664,14 @@ async function startSessionWith(body, expectedTotal) {
       return
     }
     ElMessage.success(t('msgSessionStarted', { n: data.total }))
+    // 配题说明跟着会话走：练习页顶部显示"这批题是怎么来的"，关掉即删（换设备/重开会话不再出现）
+    if (planExplain && data.sessionId) {
+      try {
+        sessionStorage.setItem(`tiku.plan.${data.sessionId}`, planExplain)
+      } catch (e) {
+        /* 隐私模式下写不了也不影响开练 */
+      }
+    }
     sessionVisible.value = false
     wrongVisible.value = false
     dueVisible.value = false
@@ -1907,12 +1963,6 @@ if (route.query.new === '1') {
   openCreatePanel()
   router.replace({ path: `/banks/${id}` })
 }
-/* 题库列表卡片菜单「开始做题」= 跳到本页并带 ?start=1，直接打开开始做题弹窗 */
-if (route.query.start === '1') {
-  openSession()
-  router.replace({ path: `/banks/${id}` })
-}
-
 /* ---------- {{ t('edit') }}题库 ---------- */
 const editBankVisible = ref(false)
 const editBankSubmitting = ref(false)
