@@ -56,6 +56,16 @@ if (-not $AllowStaleFrontend) {
 }
 
 Write-Host '== 2/6 后端打包 =='
+# 先清掉上一次构建留在 target/classes/static 里的前端产物：
+# maven 只做"复制覆盖"，不会删除已消失的文件，所以删过的页面（如学习路线/闪卡）
+# 与每次构建的旧 hash 分块会一直堆在 jar 里（实测堆到 65MB，而当前 dist 只有 7MB），
+# 安装包因此虚胖，且会把已下线页面的代码一起发出去。
+$staleStatic = Join-Path $root 'target\classes\static'
+if (Test-Path $staleStatic) {
+  $staleMB = [Math]::Round((Get-ChildItem $staleStatic -Recurse -File | Measure-Object Length -Sum).Sum/1MB,1)
+  Remove-Item -Recurse -Force $staleStatic
+  Write-Host ('    已清理旧的 static 产物 ' + $staleMB + 'MB（jar 内前端 = 本次 dist）')
+}
 Push-Location $root
 $mvnCode = Invoke-Native { & $mvn -nsu -q -DskipTests package }
 Pop-Location
