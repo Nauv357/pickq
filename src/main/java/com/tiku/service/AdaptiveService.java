@@ -166,11 +166,13 @@ public class AdaptiveService {
             for (StudyRecord r : studyRecordMapper.selectList(new LambdaQueryWrapper<StudyRecord>()
                     .eq(StudyRecord::getBankId, question.getBankId())
                     .in(StudyRecord::getQuestionId, qids))) {
-                if (r.getCorrect() != null) {
+                //统一口径：主观题看自评（PARTIAL/WRONG 算错），未判定既不算对也不算错
+                //（此前只看 correct 列，主观题的自评结果完全不参与能力分）
+                if (StudyRecordService.isCorrect(r)) {
                     answered++;
-                    if (Boolean.TRUE.equals(r.getCorrect())) {
-                        ok++;
-                    }
+                    ok++;
+                } else if (StudyRecordService.isWrong(r)) {
+                    answered++;
                 }
             }
             // 贝叶斯收缩：样本少时向 0.5 靠（3 次先验），避免"做对一题就当成高手"
@@ -215,8 +217,11 @@ public class AdaptiveService {
     }
 
     /**
-     * 交错混练（设计 §5.5）：低掌握度**分块集中练**，掌握之后与相邻节点**交错**。
-     * 返回混入比例（0 = 纯集中练，0.3 = 三成题目来自相邻节点）。
+     * 交错混练比例：设计 §5.5 写的是"低掌握度集中练、掌握后与相邻节点交错"。
+     *
+     * **当前未接入**（2026-09-16 审计：全库零调用）。改配题顺序要动"薄弱知识点"那一桶的取题逻辑，
+     * 而它现在只按"掌握度最低的节点"取——在没有真实数据证明交错更有用之前不引入第二个变量。
+     * 保留这个方法是为了让设计稿与代码对得上；**别把它写进文档当已生效**（features.md 已同步）。
      */
     public static double interleaveRatio(double mastery) {
         return mastery >= 0.85 ? 0.35 : mastery >= 0.6 ? 0.15 : 0.0;

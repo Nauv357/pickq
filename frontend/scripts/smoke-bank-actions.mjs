@@ -6,7 +6,7 @@
  *   2. 卡片「…」与右键打开同一份菜单，菜单项齐备、Esc 可关；
  *   3. 卡片显示「共 N 题 · 已做 M」；
  *   4. 批量管理模式：勾选、Shift 连选、底部条计数；批量删除会逐个发 DELETE；
- *   5. 重命名弹窗发 PUT；导出所选逐个发 POST /exports/export；
+ *   5. 改名称与描述的弹窗发 PUT；导出所选逐个发 POST /exports/export；
  *   6. 题目行右键菜单齐备；选择条有「导出所选」「删除所选」；
  *   7. 「导出所选」打开导出弹窗且范围默认=已勾选。
  *
@@ -160,7 +160,7 @@ await page.waitForSelector('.action-menu', { timeout: 5000 })
 const menuItems = await page.locator('.action-menu .action-menu-item').allInnerTexts()
 const menuText = menuItems.join(' | ')
 check('右键打开菜单', await page.locator('.action-menu').isVisible())
-for (const label of ['打开题库', '开始练习', '练习历史', '打印试卷', '重命名', '导出题库文件', '批量管理', '删除题库']) {
+for (const label of ['打开题库', '开始练习', '练习历史', '打印试卷', '改名称与描述', '导出题库文件', '批量管理', '删除题库']) {
   check(`菜单含「${label}」`, menuText.includes(label), menuText)
 }
 await page.keyboard.press('Escape')
@@ -173,17 +173,17 @@ await page.waitForSelector('.action-menu', { timeout: 5000 })
 check('「…」按钮打开同一份菜单', await page.locator('.action-menu').isVisible())
 await page.keyboard.press('Escape')
 
-console.log('\n[4] 重命名（不必进详情页）')
+console.log('\n[4] 改名称与描述（不必进详情页）')
 await page.locator('.bank-card').nth(1).hover()
 await page.locator('.bank-card').nth(1).locator('.bank-more').click()
-await page.locator('.action-menu .action-menu-item', { hasText: '重命名' }).click()
+await page.locator('.action-menu .action-menu-item', { hasText: '改名称与描述' }).click()
 await page.waitForSelector('.el-dialog', { timeout: 5000 })
 const renameInput = page.locator('.el-dialog input').first()
 await renameInput.fill('改名后的题库')
 await page.locator('.el-dialog .btn-primary').click()
 await page.waitForTimeout(500)
 const putCall = calls.find((c) => c.method === 'PUT' && /\/api\/banks\/2$/.test(c.path))
-check('重命名发出 PUT /api/banks/2', !!putCall, JSON.stringify(calls.slice(-3)))
+check('改名称发 PUT /api/banks/2', !!putCall, JSON.stringify(calls.slice(-3)))
 check('请求体带新名称', !!putCall && /改名后的题库/.test(putCall.body || ''), putCall?.body)
 
 console.log('\n[5] 删除题库（确认框 + DELETE）')
@@ -251,8 +251,14 @@ await page.locator('.action-menu .action-menu-item', { hasText: '复制题干' }
 await page.waitForTimeout(400)
 check('复制题干给出反馈', (await page.locator('.el-message').count()) > 0)
 
-// 选择条：导出所选 / 删除所选
-await page.locator('.section-actions button', { hasText: '选题另存' }).first().click()
+// 选择条：导出所选 / 删除所选（「选题另存」现在收在题目区「更多」里，见 R2）
+await page.locator('.section-actions button', { hasText: '更多' }).first().click()
+await page.waitForSelector('.action-menu', { timeout: 5000 })
+const sectionMenuText = (await page.locator('.action-menu .action-menu-item').allInnerTexts()).join(' | ')
+for (const label of ['共用材料', 'AI 补答案', '选题另存']) {
+  check(`题目区「更多」含「${label}」`, sectionMenuText.includes(label), sectionMenuText)
+}
+await page.locator('.action-menu .action-menu-item', { hasText: '选题另存' }).click()
 await page.waitForTimeout(300)
 check('进入选择模式', await page.locator('.selection-bar').isVisible())
 await page.locator('.q-row[data-qid="101"]').click()

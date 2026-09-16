@@ -127,13 +127,10 @@ class SkillControllerHttpTest {
                 .andExpect(jsonPath("$.data.nodes", hasSize(greaterThan(10))))
                 .andExpect(jsonPath("$.data.nodes[?(@.nodeId=='gk.pd.figure.num')].prereq", hasSize(1)));
 
+        // 已退役（2026-09-16 审计）：把内置模板写进 skill_node/skill_edge 的同步端点删掉了——
+        // 那两张表从没有人读过（读路径一直是内存图），留着会让后来者以为库里那份才是真相。
         mockMvc.perform(post("/api/skills/templates/{id}/sync", TEMPLATE))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.nodesWritten", greaterThan(10)));
-        Integer nodes = jdbc.queryForObject("SELECT COUNT(*) FROM skill_node WHERE template_id = ?", Integer.class, TEMPLATE);
-        Integer edges = jdbc.queryForObject("SELECT COUNT(*) FROM skill_edge WHERE template_id = ?", Integer.class, TEMPLATE);
-        org.junit.jupiter.api.Assertions.assertTrue(nodes != null && nodes > 10, "节点应已入库：" + nodes);
-        org.junit.jupiter.api.Assertions.assertTrue(edges != null && edges > 0, "前置边应已入库：" + edges);
+                .andExpect(status().isNotFound());
     }
 
     @Test

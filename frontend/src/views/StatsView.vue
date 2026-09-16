@@ -164,11 +164,12 @@
         </button>
 
         <div v-show="deepOpen" class="second-grid">
-        <!-- D 题库 × 掌握度 -->
+        <!-- D 题库 × 进度与正确率（卡片名不能叫"掌握度"：我们只报可核对的进度与正确率，不做掌握度宣判，
+             见 docs/features.md §4.8） -->
         <section class="card chart-card">
           <div class="chart-head">
-            <h2 class="chart-title">{{ t('mastery') }}</h2>
-            <span class="text-muted chart-range">{{ t('masteryHint') }}</span>
+            <h2 class="chart-title">{{ t('bankProgress') }}</h2>
+            <span class="text-muted chart-range">{{ t('bankProgressHint') }}</span>
           </div>
           <div v-if="detailLoading" class="chart-empty text-muted">{{ t('loading') }}</div>
           <div v-else-if="!detail || !weakBanks.length" class="chart-empty text-muted">{{ t('noBankData') }}</div>
@@ -238,13 +239,15 @@
                   <span class="heal-meta text-muted">{{ h.bankName }}{{ h.questionNumber != null ? ' · #' + h.questionNumber : '' }} · {{ fmtDate(h.answeredAt) }}</span>
                 </div>
               </div>
-              <div v-else-if="!wrongHeal.currentWrong && !wrongHeal.recentlyHealed.length" class="chart-empty text-muted">
-                还没有错题历史：做几轮题后这里会追踪错题本是否真的在变小
-              </div>
-              <div v-else-if="!wrongHeal && !detailLoading" class="chart-empty text-muted">
-                统计加载失败，请刷新页面重试
+              <div v-else-if="!wrongHeal.currentWrong" class="chart-empty text-muted">
+                {{ t('noWrongHistory') }}
               </div>
             </template>
+            <!-- 加载失败：说清原因并给出路（此前这一支永远不可达，失败会被当成"没有记录"） -->
+            <div v-else class="chart-empty text-muted">
+              {{ t('loadFailed') }}
+              <button class="btn btn-secondary btn-sm" @click="loadDetail">{{ t('retry') }}</button>
+            </div>
           </section>
 
           <!-- F 最近练习 -->
@@ -254,8 +257,9 @@
               <span class="text-muted chart-range">{{ t('sessionsRange') }}</span>
             </div>
             <div v-if="detailLoading" class="chart-empty text-muted">{{ t('loading') }}</div>
-            <div v-else-if="!detail || !detail.recentSessions.length" class="chart-empty text-muted">
-              还没有完成过会话：去刷完第一场吧
+            <div v-else-if="!detail" class="chart-empty text-muted">{{ t('loadFailed') }}</div>
+            <div v-else-if="!detail.recentSessions.length" class="chart-empty text-muted">
+              {{ t('noSessions') }}
             </div>
             <div v-else ref="sessionEl" class="echart-box echart-box-lg"></div>
           </section>
@@ -295,10 +299,13 @@ const { t } = useI18n({
       calendar: '学习日历', reviewHealth: '复习健康', todayN: '今天 {n} 题', proficiencyDist: '熟练度分布',
       lvNew: '新', lvLearning: '初学', lvStabilizing: '渐稳', lvStable: '稳定',
       accuracyTrend: '正确率趋势', trendRange: '近 90 天 · 7 天均线', totalAccuracy: '累计正确率', totalTime: '总用时',
-      deepAnalysis: '深入分析', deepSub: '错题治愈 · 题库掌握度 · 最近练习',
-      mastery: '题库 × 掌握度', masteryHint: '薄弱优先 · 正确率 < 60% 标红', loading: '加载中…', noBankData: '还没有题库数据', weak: '薄弱',
+      deepAnalysis: '深入分析', deepSub: '错题治愈 · 题库进度 · 最近练习',
+      bankProgress: '题库 × 进度与正确率', bankProgressHint: '薄弱优先 · 正确率 < 60% 标红', loading: '加载中…', noBankData: '还没有题库数据', weak: '薄弱',
       wrongHeal: '错题治愈', currentN: '当前 {n} 题', wrongCleared: '错题本已清空', currentWrong: '当前错题（最近一次答错）', healedAccuracy: '曾错题再考正确率', wrong6m: '近 6 月错题数', recentHealed: '最近治愈（曾错 → 现已做对）',
       recentSessions: '最近练习', sessionsRange: '最近 10 场 · 得分率',
+      noWrongHistory: '还没有错题历史：做几轮题后这里会追踪错题本是否真的在变小',
+      noSessions: '还没有完成过会话：去练完第一场吧',
+      loadFailed: '统计加载失败（后端可能已退出）', retry: '重试',
       goalRangeWarn: '目标需在 1~300 之间', goalSetDone: '每日目标已设为 {n} 题'
     },
     'en-US': {
@@ -312,10 +319,13 @@ const { t } = useI18n({
       calendar: 'Study calendar', reviewHealth: 'Review health', todayN: '{n} due today', proficiencyDist: 'Proficiency',
       lvNew: 'New', lvLearning: 'Learning', lvStabilizing: 'Stabilizing', lvStable: 'Stable',
       accuracyTrend: 'Accuracy trend', trendRange: 'Last 90 days · 7-day average', totalAccuracy: 'Overall accuracy', totalTime: 'Total time',
-      deepAnalysis: 'Deep dive', deepSub: 'Mistake healing · mastery per bank · recent sessions',
-      mastery: 'Bank × mastery', masteryHint: 'Weak first · accuracy < 60% marked red', loading: 'Loading…', noBankData: 'No bank data yet', weak: 'Weak',
+      deepAnalysis: 'Deep dive', deepSub: 'Mistake healing · bank progress · recent sessions',
+      bankProgress: 'Bank × progress & accuracy', bankProgressHint: 'Weak first · accuracy < 60% marked red', loading: 'Loading…', noBankData: 'No bank data yet', weak: 'Weak',
       wrongHeal: 'Mistake healing', currentN: '{n} current', wrongCleared: 'Mistake book cleared', currentWrong: 'Current mistakes (last wrong answer)', healedAccuracy: 'Accuracy on previously-missed', wrong6m: 'Mistakes in last 6 months', recentHealed: 'Recently healed (missed → now correct)',
       recentSessions: 'Recent sessions', sessionsRange: 'Last 10 sessions · score rate',
+      noWrongHistory: 'No mistake history yet — after a few rounds this tracks whether your mistake book really shrinks',
+      noSessions: 'No finished session yet — go complete your first one',
+      loadFailed: 'Could not load stats (the backend may have stopped)', retry: 'Retry',
       goalRangeWarn: 'The goal must be between 1 and 300', goalSetDone: 'Daily goal set to {n} questions'
     }
   }
@@ -353,9 +363,10 @@ const todayRate = computed(() => {
 })
 const todayRateText = computed(() => (todayRate.value == null ? '—' : pct(s.value.todayCorrect, s.value.todayDecided)))
 
-/* ============ 二期 D/E/F（题库掌握度 / 错题治愈 / 最近练习） ============ */
+/* ============ 二期 D/E/F（题库进度与正确率 / 错题治愈 / 最近练习） ============ */
 const detail = ref(null)
 const detailLoading = ref(true)
+/** 失败时 detail 保持 null（界面据此显示"加载失败 + 重试"，不再伪装成"还没有记录"） */
 async function loadDetail() {
   detailLoading.value = true
   try {

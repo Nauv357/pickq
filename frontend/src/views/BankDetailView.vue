@@ -96,9 +96,11 @@
           >
             <span class="toggle-knob"></span>
           </button>
+          <!-- 次级样式：R1 要求每屏只有页头那一个主按钮（「开始练习」）；
+               到期题已经包含在一键配题里，这里只是"我想先看/先练到期题"的快捷入口 -->
           <button
             v-if="reviewEnabled"
-            class="btn btn-primary btn-sm due-btn"
+            class="btn btn-secondary btn-sm due-btn"
             :disabled="dueLoading || dueTotal === 0"
             @click="openDue"
           >
@@ -132,6 +134,8 @@
       <ActionMenu ref="qMenu" :items="questionMenuItems" @select="onQuestionMenuSelect" />
       <!-- 题库低频操作（练习之外的一切都收在这里，头部只留「开始练习」） -->
       <ActionMenu ref="bankMenu" :items="bankMenuItems" @select="onBankMenuSelect" />
+      <!-- 题目区低频操作（共用材料 / AI 补答案 / 选题另存） -->
+      <ActionMenu ref="sectionMenu" :items="sectionMenuItems" @select="onSectionMenuSelect" />
       <!-- 主按钮的变体：题量 / 自定义范围 -->
       <ActionMenu ref="planMenu" :items="planMenuItems" @select="onPlanMenuSelect" />
 
@@ -175,34 +179,20 @@
             <span class="count-badge">{{ qTotal }}</span>
           </div>
           <div class="section-actions">
-            <button class="btn btn-secondary btn-sm" @click="openMaterials">
-              <TikuIcon name="file" :size="13" />
-              {{ t('materials') }}
-            </button>
-            <button class="btn btn-secondary btn-sm" @click="aiDialog?.open()">
+            <!-- 三种"加题"方式按门槛递减排：手写一道 → 粘贴结构化 JSON → 交给 AI 读文档。
+                 都是"加题"，所以文案要说清**怎么加**（用户实测分不清"AI 追加 / 批量导入"哪个是哪个）。
+                 低频维护动作（共用材料 / AI 补答案 / 选题另存）收进「更多」，避免一排按钮抢注意力（R2）。 -->
+            <button class="btn btn-secondary btn-sm" :disabled="!bank" @click="aiDialog?.open()">
               <TikuIcon name="sparkle" :size="13" />
-              {{ t('aiAppend') }}
+              {{ t('aiImportDoc') }}
             </button>
             <button class="btn btn-secondary btn-sm" @click="openBatch">
               <TikuIcon name="upload" :size="13" />
-              {{ t('batchImport') }}
+              {{ t('batchPaste') }}
             </button>
-            <button
-              class="btn btn-secondary btn-sm"
-              :title="t('aiFillTip')"
-              @click="openAiFill"
-            >
-              <TikuIcon name="sparkle" :size="13" />
-              {{ t('aiFillAnswers') }}
-            </button>
-            <button
-              class="btn btn-secondary btn-sm"
-              :class="{ active: selectionMode }"
-              :title="selectionMode ? t('exitSelectMode') : t('selectModeTip')"
-              @click="toggleSelectionMode"
-            >
-              <TikuIcon name="check" :size="13" />
-              {{ selectionMode ? t('cancelSelect') : t('selectSave') }}
+            <button class="btn btn-ghost btn-sm" :title="t('sectionMoreTip')" @click="openSectionMenu($event)">
+              <TikuIcon name="more" :size="13" />
+              {{ t('more') }}
             </button>
             <button class="btn btn-primary btn-sm" @click="openCreatePanel">
               <TikuIcon name="plus" :size="13" />
@@ -612,8 +602,8 @@
         </template>
       </el-dialog>
 
-      <!-- {{ t('batchImport') }}弹窗 -->
-      <el-dialog v-model="batchVisible" :title="t('batchImport') + t('questions')" width="min(92vw, 560px)" align-center>
+      <!-- 粘贴 JSON 建题弹窗 -->
+      <el-dialog v-model="batchVisible" :title="t('batchPaste')" width="min(92vw, 560px)" align-center>
         <div class="batch-head">
           <p class="text-secondary batch-desc">
             粘贴 AI 整理或结构化的题目 JSON（数组，或 <code>{ "questions": [...] }</code>），也可以选择 .json 文件
@@ -769,7 +759,7 @@
         </template>
       </el-dialog>
 
-      <!-- {{ t('aiAppend') }}弹窗（目标锁定当前题库） -->
+      <!-- AI 导入文档弹窗（目标锁定当前题库） -->
       <AiImportDialog ref="aiDialog" :bank-id="id" :bank-name="bank?.name" @done="onAiDone" />
 
       <!-- {{ t('materials') }}管理弹窗 -->
@@ -824,7 +814,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n({
@@ -840,21 +830,29 @@ const { t } = useI18n({
       planDefaultHint: '默认',
       customPracticeHint: '自己定范围和题量',
       msgPlanEmpty: '这个题库还没有可练的题',
+      msgFocusNotFound: '这题不在当前筛选结果里（清掉筛选后再试一次）',
+      confirmDeleteQuestion: '删除题目',
+      confirmDeleteMaterial: '删除材料',
     bankWord: '题库', thisQuestion: '该题',
       answeredOf: '已做 / 共 {n} 题', accuracyOf: '正确率（作答 {n} 次）', progressPct: '完成度',
       noDesc: '暂无描述',
       noRecordHint: '还没有做题记录，点击「{act}」刷第一轮', favStartTip: '一键开刷全部收藏题（收藏模式）', noFavTip: '还没有收藏题',
       reviewPlan: '复习计划', dueTodayN: '今日待复习 {n} 题', reviewOffTip: '关闭时进度照记、错题照收，只是不提醒到期复习；重新开启后到期题会回到队列',
       wrongTab0: '错题', favTab0: '收藏',
-      questions: '题目', materials: '共用材料', aiAppend: 'AI 追加', batchImport: '批量导入', aiFillAnswers: 'AI 补答案',
-      aiFillTip: '把本库无答案的客观题分批送 AI 判定回填（答案后配的批量兑现）', exitSelectMode: '退出选择模式', selectModeTip: '勾选若干题目，另存为新题库或并入其他题库',
+      questions: '题目', materials: '共用材料', aiImportDoc: 'AI 导入文档…', batchPaste: '粘贴 JSON 建题…', aiFillAnswers: 'AI 补答案',
+      sectionMoreTip: '更多题目操作',
+      materialsHint: '资料分析等大题干',
+      aiFillHint: '给无答案的题批量回填',
+      selectModeHint: '勾选后另存 / 并入',
+      noteCount: '{n} 条',
+      aiFillHint: '给无答案的题批量回填',
       cancelSelect: '取消选题', selectSave: '选题另存', addQuestion: '添加题目',
       searchPh: '搜索题干 / 选项关键词', qType: '题型', qScope: '范围', all: '全部', undone: '未做', qTopic: '试卷/章节',
       legacyCategoryTip: '这个题库里还有老版本写入的「分类」值（现在只保留「试卷 / 章节」一个归属字段）。',
       legacyCategoryBtn: '把「分类」并入「试卷 / 章节」',
       legacyCategoryDone: '已把 {n} 题的「分类」并入「试卷 / 章节」（原有内容没被覆盖）',
       filterResultN: '筛选结果 {n} 题', noMatch: '没有匹配的题目，试试调整筛选条件', noQuestions: '题库还没有题目', addFirstQuestion: '录入第一题',
-      clickEditHint: '点击编辑该题（右侧按钮可做题 / AI 解析 / 删除）',
+      clickEditHint: '点击编辑该题（右侧「…」里还有：讲解这道题 / 从这题开始做题 / 复制题干 / 删除）',
       noMaterialsTip: '还没有共用材料。共用材料是多道题共用的一段文字或图片（阅读材料、图表、案例背景等），创建后可在这里或录题时关联到题目。',
       dupNumberTitle: '该题号在当前列表中重复，可能是重复导入的题目，请删除或修改题号',
       noAnswerTitle: '未配置答案：做题时无法判对错，点击编辑补配',
@@ -962,21 +960,28 @@ const { t } = useI18n({
       planDefaultHint: 'default',
       customPracticeHint: 'Pick scope and count yourself',
       msgPlanEmpty: 'This bank has no questions to practice yet',
+      msgFocusNotFound: 'That question is not in the current filter result (clear filters and retry)',
+      confirmDeleteQuestion: 'Delete question',
+      confirmDeleteMaterial: 'Delete material',
     bankWord: 'Bank', thisQuestion: 'this question',
       answeredOf: '{n} answered / total', accuracyOf: 'Accuracy ({n} attempts)', progressPct: 'Progress',
       noDesc: 'No description',
       noRecordHint: 'No practice records yet — click “{act}” for your first round', favStartTip: 'Practice all favorites in one go (favorites mode)', noFavTip: 'No favorites yet',
       reviewPlan: 'Review plan', dueTodayN: '{n} due today', reviewOffTip: 'Progress and mistakes are still recorded while off — only due reminders stop; due questions return when re-enabled',
       wrongTab0: 'Mistakes', favTab0: 'Favorites',
-      questions: 'Questions', materials: 'Shared material', aiAppend: 'AI Append', batchImport: 'Batch import', aiFillAnswers: 'AI Fill answers',
-      aiFillTip: 'Batch-send unanswered objective questions to AI for judging & filling (for answer keys added later)', exitSelectMode: 'Exit select mode', selectModeTip: 'Select questions to save as a new bank or merge into another',
+      questions: 'Questions', materials: 'Shared material', aiImportDoc: 'Import documents with AI…', batchPaste: 'Paste JSON…', aiFillAnswers: 'AI Fill answers',
+      sectionMoreTip: 'More question actions',
+      materialsHint: 'Shared passage for a question group',
+      aiFillHint: 'Batch-fill missing answers',
+      selectModeHint: 'Pick questions to copy or merge',
+      noteCount: '{n}',
       cancelSelect: 'Cancel select', selectSave: 'Select & save as', addQuestion: 'Add question',
       searchPh: 'Search stem / options', qType: 'Type', qScope: 'Scope', all: 'All', undone: 'Undone', qTopic: 'Paper / chapter',
       legacyCategoryTip: 'This bank still has legacy “category” values (only the paper/chapter field remains now).',
       legacyCategoryBtn: 'Merge “category” into “paper / chapter”',
       legacyCategoryDone: 'Merged “category” into “paper / chapter” for {n} questions (existing values untouched)',
       filterResultN: '{n} results', noMatch: 'No matching questions — try adjusting filters', noQuestions: 'No questions in this bank yet', addFirstQuestion: 'Add your first question',
-      clickEditHint: 'Click to edit (right-side buttons: practice / AI analyze / delete)',
+      clickEditHint: 'Click to edit (the “…” menu also has: explain / practice from here / copy / delete)',
       noMaterialsTip: 'No shared material yet. Shared material is one text/image used by several questions (reading passage, chart, case background…). Create it here or link it while editing a question.',
       dupNumberTitle: 'This number appears more than once in the list — likely a duplicate import; delete it or change the number',
       noAnswerTitle: 'No answer configured — practice cannot grade it; click to edit and fill it in',
@@ -1084,6 +1089,7 @@ import { formatDate, formatScore } from '../utils/format'
 import { richTextToHtml } from '../utils/richText'
 import { isModelError, offerModelRecovery } from '../utils/aiModelHelp'
 import { createMaterial, deleteMaterial, listMaterials, updateMaterial, uploadImage } from '../api/materials'
+import { listNotes } from '../api/notes'
 import { pickFile, readTextFile, saveBlob, saveJsonFile } from '../utils/files'
 import TikuIcon from '../components/TikuIcon.vue'
 import QuestionFormPanel from '../components/QuestionFormPanel.vue'
@@ -1120,6 +1126,7 @@ async function loadBank() {
     if (reviewEnabled.value) {
       loadReviewDue()
     }
+    loadNoteCount()
   } catch (e) {
     bankError.value = e.message || '题库不存在'
   }
@@ -1187,6 +1194,41 @@ async function loadQuestions() {
   }
   //同步"全部题目"题号盘数据（编辑模式右侧题号盘用；删除/导入/保存后保持最新；接口轻量）
   loadQuestionNav()
+  //「我的笔记」里点某题的题号跳回来：把这题的讲解面板展开并滚进视野（不是打开编辑器）
+  if (pendingFocusQid.value) {
+    const qid = pendingFocusQid.value
+    pendingFocusQid.value = null
+    focusExplain(qid)
+  }
+}
+
+/** 待聚焦的题目（来自 ?q=<questionId>，例如"我的笔记"里点"第 N 题"） */
+const pendingFocusQid = ref(null)
+
+/** 翻到该题所在页并把它的「讲解」面板展开、滚到视野中间 */
+async function focusExplain(questionId) {
+  if (!filterActive.value) {
+    const idx = qNav.value.findIndex((n) => n.questionId === questionId)
+    if (idx >= 0) {
+      const targetPage = Math.floor(idx / qPageSize) + 1
+      if (targetPage !== qPage.value) {
+        qPage.value = targetPage
+        pendingFocusQid.value = questionId
+        await loadQuestions()
+        return
+      }
+    }
+  }
+  if (!questions.value.some((q) => q.questionId === questionId)) {
+    ElMessage.info(t('msgFocusNotFound'))
+    return
+  }
+  aiOpen[questionId] = true
+  await nextTick()
+  const row = document.querySelector(`.q-row[data-qid="${questionId}"]`)
+  if (row) {
+    row.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }
 }
 
 /* ---------- 题号盘（{{ t('edit') }}模式右侧：全部题目圆形题号，任意跳转） ---------- */
@@ -1485,7 +1527,7 @@ async function resetReviewPlan() {
   try {
     const ok = await confirmDanger(t('msgResetReviewConfirm'), t('msgResetReviewTitle'), {
       confirmText: t('resetReview'),
-      cancelText: t('common.thinkAgain')
+      cancelText: t('common.cancel')
     })
     if (!ok) return
   } catch (e) {
@@ -1550,11 +1592,35 @@ async function startWrongSession() {
   await startSessionWith({ mode: 'WRONG' }, wrongTotal.value)
 }
 
+/* ---------- 题目区的「更多」（低频维护动作：共用材料 / AI 补答案 / 选题另存） ---------- */
+const sectionMenu = ref(null)
+const sectionMenuItems = computed(() => [
+  { key: 'materials', label: t('materials'), icon: 'file', hint: t('materialsHint') },
+  { key: 'aiFill', label: t('aiFillAnswers'), icon: 'sparkle', hint: t('aiFillHint') },
+  { divider: true },
+  {
+    key: 'select',
+    label: selectionMode.value ? t('cancelSelect') : t('selectSave'),
+    icon: 'check',
+    hint: t('selectModeHint')
+  }
+])
+
+function openSectionMenu(e) {
+  sectionMenu.value?.openFromEl(e?.currentTarget)
+}
+
+function onSectionMenuSelect(key) {
+  if (key === 'materials') return openMaterials()
+  if (key === 'aiFill') return openAiFill()
+  if (key === 'select') return toggleSelectionMode()
+}
+
 /* ---------- 更多菜单（练习之外的低频操作） ---------- */
 const bankMenu = ref(null)
 const bankMenuItems = computed(() => [
   { key: 'history', label: t('history'), icon: 'clock' },
-  { key: 'notes', label: t('notes'), icon: 'edit' },
+  { key: 'notes', label: t('notes'), icon: 'edit', hint: noteCount.value ? t('noteCount', { n: noteCount.value }) : '' },
   { key: 'skillTags', label: t('skillTags'), icon: 'target' },
   { key: 'printPaper', label: t('printPaper'), icon: 'file' },
   { key: 'exportBank', label: t('exportBank'), icon: 'download' },
@@ -1565,6 +1631,17 @@ const bankMenuItems = computed(() => [
 
 function openMoreMenu(e) {
   bankMenu.value?.openFromEl(e?.currentTarget)
+}
+
+/** 笔记条数（菜单里显示「N 条」，与「错题（N）」「收藏（N）」同一个口径：让你知道里面有没有东西） */
+const noteCount = ref(0)
+async function loadNoteCount() {
+  try {
+    const data = await listNotes(id, { page: 1, size: 1 })
+    noteCount.value = Number(data?.total || 0)
+  } catch (e) {
+    noteCount.value = 0
+  }
 }
 
 function onBankMenuSelect(key) {
@@ -1795,8 +1872,7 @@ async function loadMaterials() {
 
 const richHtml = (text) => richTextToHtml(text, id)
 
-function openMaterials() {
-  materialsVisible.value = true
+function openMaterials() {  materialsVisible.value = true
   resetMaterialForm()
   loadMaterials()
 }
@@ -1837,8 +1913,10 @@ async function saveMaterial() {
 
 async function removeMaterial(m) {
   try {
+    // 确认按钮文案 = 动作本身（R3）；此前复用了值为「删除题库」的 delete 键，
+    // 于是"删除这段材料"的按钮写着"删除题库"（2026-09-16 审计抓出的文案 bug）。
     const ok = await confirmDanger(t('msgDeleteMaterialConfirm'), t('msgDeleteMaterialTitle'), {
-      confirmText: t('delete')
+      confirmText: t('confirmDeleteMaterial')
     })
     if (!ok) return
   } catch (e) {
@@ -1872,7 +1950,7 @@ async function insertMaterialImage() {
   }
 }
 
-/* ---------- {{ t('aiAppend') }}（目标锁定当前题库） ---------- */
+/* ---------- AI 导入文档（目标锁定当前题库） ---------- */
 const aiDialog = ref(null)
 
 function onAiDone(jobId) {
@@ -2024,6 +2102,14 @@ async function onPanelSaved() {
 /* 创建题库后跳转带 ?new=1，自动打开录题面板 */
 if (route.query.new === '1') {
   openCreatePanel()
+  router.replace({ path: `/banks/${id}` })
+}
+/* 「我的笔记」里点「第 N 题」跳回来：记下要聚焦的题，等列表加载完再展开它的讲解面板 */
+if (route.query.q) {
+  const qid = Number(route.query.q)
+  if (Number.isFinite(qid) && qid > 0) {
+    pendingFocusQid.value = qid
+  }
   router.replace({ path: `/banks/${id}` })
 }
 /* ---------- {{ t('edit') }}题库 ---------- */
@@ -2283,7 +2369,7 @@ async function deleteSelectedQuestions() {
   }
 }
 
-/* ---------- {{ t('batchImport') }}题目 ---------- */
+/* ---------- 粘贴 JSON 建题 ---------- */
 const batchVisible = ref(false)
 const batchText = ref('')
 const batchSubmitting = ref(false)
@@ -2436,13 +2522,13 @@ async function toggleRowFavorite(q) {
   }
 }
 
-/* ---------- {{ t('delete') }}题目 ---------- */
+/* ---------- 删除题目 ---------- */
 async function confirmDeleteQuestion(q) {
   try {
     const ok = await confirmDanger(
       t('msgDeleteQuestionConfirm', { num: q.questionNumber ?? '—' }),
       t('msgDeleteQuestionTitle'),
-      { confirmText: t('delete') }
+      { confirmText: t('confirmDeleteQuestion') }
     )
     if (!ok) return
   } catch (e) {
@@ -3046,7 +3132,7 @@ loadTopicOptions() // 分类筛选选项（与 TOPIC 会话共用，幂等）
   color: var(--text-secondary);
 }
 
-/* {{ t('batchImport') }} */
+/* 粘贴 JSON 建题 */
 .batch-head {
   display: flex;
   align-items: flex-start;

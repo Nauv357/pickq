@@ -235,10 +235,13 @@
 - **界面上撤掉的**：学习路线页、目标与题量设定、每日任务清单、抽测（及"抽测掉下来了"）、闪卡页。
   入口一并下线：题库头部的「学习路线」「闪卡」按钮已删除，路由与 E2E 脚本同步删除。
 - **保留在后台的引擎**（不再有界面，但配题/复习调度仍然用它们）：
-  掌握度公式与缺口统计（用于挑薄弱知识点）、85% 难度规则与交错混练、间隔重复调度、
-  AI 私教（讲解/提示/追问/复盘）。`CardService` 与相关表（`card`、`question_difficulty`、
-  `daily_task`、`learner_profile`、`practice_session.scope_node`）**保留不删**：
-  删表要做迁移、有丢数据的风险，而留着的成本只是几个空表；将来若要接"广场上的路线模板"可以复用。
+  掌握度公式与缺口统计（用于挑薄弱知识点）、**85% 难度规则**（`AdaptiveService.orderByTargetSuccess`，
+  配题桶内排序与难度初值都走它）、间隔重复调度、AI 私教（讲解/提示/追问/复盘）。
+  2026-09-16 审计纠偏两处**文档承诺与代码不符**的地方：`interleaveRatio`（交错混练）**从未接入**配题；
+  `CardService`（闪卡）**没有任何生产调用方**，是纯测试资产。
+  相关表（`card`、`question_difficulty`、`daily_task`、`learner_profile`、`practice_session.scope_node`）
+  以及 `skill_node`/`skill_edge` **保留不删**：删表要做迁移、有丢数据的风险，而留着的成本只是几个空表；
+  将来若要接"广场上的路线模板"可以复用（`skill_node`/`skill_edge` 的**写入口**已随审计删除——它们从来没被读过）。
 - **知识点的定位下调**：从"判定掌握的地基"变成**筛选与讲解的维度**（见 §4.5）——
   标签只为"按知识点筛题 / 说清这题考什么 / 挑最该补的点"服务，不再要求用户先把标签确认齐才算数。
 - **下一步的投入方向**（按价值排序）：① 错题讲解做到最好（本轮已完成，见 §4.6）；
@@ -283,7 +286,10 @@ AI 讲解下面的「**存进笔记**」把整段讲解存进来（`source=ai`�
 
 **错题口径（全局统一，务必遵守）**
 > 一道题"**最近一次作答为错**"才算错题；历史答错但最近已答对的题**不算**。主观题自评 `PARTIAL`/`WRONG` 算错（此时 `is_correct` 为 null，不能只看该列）；**未自评不算错**。
-> 实现：`StudyRecordService.computeWrongQuestionIds`，被错题本、会话 `WRONG`、题目列表 `scope=wrong`、导出范围 `wrong` 共用。
+> 实现：**统一在 `StudyRecordService.isWrong / isCorrect / effectiveGrade` 三个静态方法里**，配题、错题本、会话 `WRONG`、
+> 题目列表 `scope=wrong`、导出范围 `wrong`、统计页的错题治愈、讲解口吻判定、能力分**全部**调它。
+> 2026-09-16 审计发现这条规则曾被复制成 5 份且互不相等（统计页与错题本的口径相反、"未判定"在会话页被算作答错），
+> 已合并，并由 `WrongAnswerRuleConsistencyTest` 用同一批数据把五个出口钉在一起。
 
 **复习算法（简化间隔重复，`updateReviewState`）**
 - 每个"题目"维护一条复习状态（`review_state`：`level`、`interval_days`、`due_at`、`suspended`）。

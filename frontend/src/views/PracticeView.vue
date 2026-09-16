@@ -455,7 +455,11 @@ const { t } = useI18n({
       wrongN: '错 {n} 题',
       histRate: '历史正确率 {r}%',
       noHistory: '题量还不够',
-      planHide: '收起这次的配题说明'
+      planHide: '收起这次的配题说明',
+      kbHint: '{sel} · ←/→ 切题 · 数字直达题号（1 秒内连按可跳多位数）· Enter 交卷',
+      kbJudge: 'A/B 选 正确/错误',
+      kbMulti: '选项字母勾选（可多选）',
+      kbSingle: '选项字母选择答案'
     },
     'en-US': {
       notFoundDesc: 'This bank may have been deleted, or the link is wrong', backToBanks: 'Back to banks', back: 'Back', backToBank: 'Back to bank',
@@ -489,7 +493,11 @@ const { t } = useI18n({
       wrongN: '{n} wrong',
       histRate: '{r}% historical accuracy',
       noHistory: 'no history yet',
-      planHide: 'Hide this session’s question mix'
+      planHide: 'Hide this session’s question mix',
+      kbHint: '{sel} · ←/→ to switch · digits jump to a question number (type quickly for multi-digit) · Enter to submit',
+      kbJudge: 'A/B for true/false',
+      kbMulti: 'option letters to tick (multi-select)',
+      kbSingle: 'option letter to answer'
     }
   }
 })
@@ -1011,16 +1019,20 @@ const jumpBuf = ref('')
 let jumpTimer = null
 const jumpTimeoutMs = 800
 
+/**
+ * 快捷键提示：**文案必须与实现一致**（2026-09-16 审计：原先写死「A~H」，但实现是按题目的实际选项键判断，
+ * 选项超过 8 个时提示是错的；这套提示也没走 i18n，英文界面下仍是中文）。
+ */
 const kbHint = computed(() => {
   const q = current.value
   if (!q) return ''
   const sel =
     q.questionType === 'JUDGE'
-      ? 'A/B 选 正确/错误'
+      ? t('kbJudge')
       : q.questionType === 'MULTIPLE'
-        ? 'A~H 勾选选项'
-        : 'A~H 选择答案'
-  return `${sel} · ←/→ 切题 · 数字直达题号 · Enter 交卷`
+        ? t('kbMulti')
+        : t('kbSingle')
+  return t('kbHint', { sel })
 })
 
 // 做题可用状态（报告/加载/引导/空态/交卷中都不响应快捷键）

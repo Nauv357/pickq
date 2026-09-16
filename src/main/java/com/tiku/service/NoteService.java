@@ -113,21 +113,14 @@ public class NoteService {
         noteMapper.deleteById(id);
     }
 
-    /** 题库内的笔记条数（题目列表/入口显示"我记了 N 条"） */
+    /**
+     * 题库内的笔记条数。
+     * 注：界面上的条数走 {@link #list} 的 `total`（顺带把第一页数据拿回来），这里留给需要"只数数"的调用方与测试。
+     * 级联删除不在这里——题库/题目被删时的清理与其它表一样由 `QuestionBankService` / `QuestionService`
+     * 直接调 mapper 完成（放这里会让 NoteService ↔ 两者互相依赖）。
+     */
     public int countByBank(Long bankId) {
         return Math.toIntExact(noteMapper.selectCount(new LambdaQueryWrapper<Note>().eq(Note::getBankId, bankId)));
-    }
-
-    /** 题库被删时一起清掉它的笔记（与题目、作答记录同一批级联删除） */
-    @Transactional
-    public int deleteByBank(Long bankId) {
-        return noteMapper.delete(new LambdaQueryWrapper<Note>().eq(Note::getBankId, bankId));
-    }
-
-    /** 某道题被删时清掉它的笔记（笔记挂在题上，题没了就没有挂靠对象） */
-    @Transactional
-    public int deleteByQuestion(Long questionId) {
-        return noteMapper.delete(new LambdaQueryWrapper<Note>().eq(Note::getQuestionId, questionId));
     }
 
     private Note require(Long id) {

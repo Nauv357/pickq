@@ -420,11 +420,9 @@ public class PracticeSessionService {
             StudyRecord rec = recordByQuestion.get(q.getId());
             if (rec != null) {
                 answered++;
-                //有效判定：主观题看自评（部分对按答错计）；客观题看判题结果；
-                //题目未配置答案/主观未自评（correct 与 selfGrade 均 null）→ 不判对错（不计答对、得 0 分、不进错题）
-                String effectiveGrade = rec.getSelfGrade() != null ? rec.getSelfGrade()
-                        : rec.getCorrect() == null ? null
-                        : (Boolean.TRUE.equals(rec.getCorrect()) ? "CORRECT" : "WRONG");
+                //有效判定统一走 StudyRecordService.effectiveGrade（主观看自评、客观看判题结果；
+                //未判定返回 null：不计答对、得 0 分、不进错题）
+                String effectiveGrade = StudyRecordService.effectiveGrade(rec);
                 double earned = StudyRecordService.earnedScore(q.getScore(), effectiveGrade, rec.getSelfScore());
                 if ("CORRECT".equals(effectiveGrade)) {
                     correctCount++;
@@ -500,8 +498,8 @@ public class PracticeSessionService {
             SessionQuestionItem item;
             if (rec != null) {
                 answered++;
-                String effectiveGrade = rec.getSelfGrade() != null ? rec.getSelfGrade()
-                        : Boolean.TRUE.equals(rec.getCorrect()) ? "CORRECT" : "WRONG";
+                //统一口径：未判定（未配答案 / 主观未自评）返回 null，不能落成 WRONG
+                String effectiveGrade = StudyRecordService.effectiveGrade(rec);
                 if ("CORRECT".equals(effectiveGrade)) {
                     correctCount++;
                 }
@@ -557,8 +555,8 @@ public class PracticeSessionService {
             StudyRecord rec = recordByQuestion.get(q.getId());
             if (rec != null) {
                 answered++;
-                String effectiveGrade = rec.getSelfGrade() != null ? rec.getSelfGrade()
-                        : Boolean.TRUE.equals(rec.getCorrect()) ? "CORRECT" : "WRONG";
+                //统一口径：未判定（未配答案 / 主观未自评）返回 null，不能落成 WRONG
+                String effectiveGrade = StudyRecordService.effectiveGrade(rec);
                 if ("CORRECT".equals(effectiveGrade)) {
                     correctCount++;
                 }

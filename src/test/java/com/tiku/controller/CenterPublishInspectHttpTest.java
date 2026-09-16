@@ -36,19 +36,9 @@ class CenterPublishInspectHttpTest {
     void setUp() {
         authStore = mock(CenterAuthStore.class);
         when(authStore.isLoggedIn()).thenReturn(true);
-        View errorView = new View() {
-            @Override
-            public String getContentType() {
-                return "application/json";
-            }
 
-            @Override
-            public void render(Map<String, ?> model, HttpServletRequest request, HttpServletResponse response) {
-                // 测试不渲染错误页
-            }
-        };
         mockMvc = MockMvcBuilders.standaloneSetup(new CenterPublishController(authStore))
-                .setControllerAdvice(new GlobalExceptionHandler(errorView))
+                .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
 

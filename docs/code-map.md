@@ -15,6 +15,10 @@
 
 ## 1. 目录结构
 
+> **关于本文件里的行数**：这些数字是**快照**，每次改动都会漂移（2026-09-16 功能/模块审计发现整篇落后 1–3 个迭代，
+> 个别处还自相矛盾）。它们的用途只有一个：**判断哪些文件已经大到该拆**。要精确数字请现算：
+> `(Get-Content <file>).Count`（口径：按 `\n` 计数、不含末尾空行）。
+
 ### 1.1 仓库顶层
 
 ```
@@ -23,14 +27,14 @@ Tiku/
 │                               两份 <resource>：src/main/resources 与 frontend/dist → classpath:/static
 ├── mvnw / mvnw.cmd / .mvn/      Maven Wrapper
 ├── src/                        后端（Spring Boot + MyBatis-Plus + H2 + Flyway）
-│   ├── main/java/com/tiku/**   142 个 .java（config 6 / controller 16 / dto 64 / mapper 9 / model 16 / service 27 / util 3 + TikuApplication）
-│   ├── main/resources/         application.yml + db/migration/V1..V14__*.sql
-│   └── test/java/com/tiku/**   19 个测试与工具类（含依赖私有样例的 GenerateSampleFiles / GraphPositionProbeTest）
+│   ├── main/java/com/tiku/**   195 个 .java（config 5 / controller 19 / dto 68 / mapper 16 / model 21 / service 56 / util 3 + TikuApplication；2026-09-16 审计实测）
+│   ├── main/resources/         application.yml + db/migration/V1..V21__*.sql
+│   └── test/java/com/tiku/**   50 个测试与工具类（含依赖私有样例的 GenerateSampleFiles / GraphPositionProbeTest）
 ├── frontend/                   桌面端 Vue 3 SPA（Vite 6 + Element Plus 2 + vue-router 4 + vue-i18n 9 + ECharts 6）
 │   ├── index.html              防闪屏内联脚本（先按 localStorage['tiku:theme'] 给 <html> 加 dark）
 │   ├── vite.config.js          端口 5173；/api 代理到 localhost:8080；无 outDir/alias/base
 │   ├── package.json            scripts 仅 dev/build/preview（无 lint、无测试运行器）
-│   └── src/                    44 个文件（见 §3/§5）
+│   └── src/                    58 个文件（见 §3/§5）
 ├── tauri/                      桌面壳（Tauri 2）与打包流水线
 │   ├── build-desktop.ps1       一键打包：mvn package → jlink → 复制资源 → tauri build --bundles nsis → 便携 zip
 │   ├── ui/                     壳自带的静态页：index.html（启动占位页）、error.html（启动失败页）
@@ -60,8 +64,8 @@ src/main/java/com/tiku/
 │   ├── MybatisPlusConfig.java    分页插件等
 │   ├── SpaForwardConfig.java     /** 资源处理 + SPA 回退（/api/** 不回退）
 │   └── WebConfig.java            CORS：仅放行 localhost:3000 / localhost:5173
-├── controller/                  HTTP 层（16 个文件：15 个 controller + GlobalExceptionHandler）——见 §2
-├── dto/                         请求/响应 record（64 个文件 / 73 个 record）+ ApiResponse / PageResult
+├── controller/                  HTTP 层（19 个文件：18 个 controller + GlobalExceptionHandler）——见 §2
+├── dto/                         请求/响应 record（68 个文件 / 78 个 record，2026-09-16 实测）+ ApiResponse / PageResult
 ├── mapper/                      MyBatis-Plus（9）——6 个为空的 BaseMapper，3 个写注解 SQL（两处 FOR UPDATE 行锁 + 一处关联查询/级联删除）
 ├── model/                       实体与枚举（16）
 │   ├── QuestionBank / Question / Material / StudyRecord / ReviewState
@@ -575,7 +579,7 @@ web/
 | --- | --- | --- |
 | 内容包读写（最关键，需逐字节对齐） | `util/PackageContainer.java`、`service/ContentPackageService.java`、`service/ContentPackageInspector.java` | Kotlin `.tiku` 解析/生成器（zip 魔数、4096/10MB/512MB 上限、`media/` 命名、打包排序） |
 | 业务规则 | `service/*.java`（27 个） | Repository / UseCase（判分、错题、复习、自评、会话模式、版本自增） |
-| 数据模型 | `src/main/resources/db/migration/V1..V14*.sql` + `model/*.java` | Room 实体 + 手写迁移（映射建议见 `data-model.md` §1.7） |
+| 数据模型 | `src/main/resources/db/migration/V1..V21*.sql` + `model/*.java` | Room 实体 + 手写迁移（映射建议见 `data-model.md` §1.7） |
 | 页面 | `frontend/src/views/*.vue`（11 个）+ `components/*.vue`（7 个） | Compose Screen（交互按手机重做，不做平移） |
 | 接口封装 | `frontend/src/api/*.js`（10 个） | Retrofit Service（本地后端那部分**不要移植**，改为直连或本地 Repository） |
 | 广场直连 | `controller/Center*.java`（转发层） | Retrofit + OkHttp 直连 `https://pickq.cn`，Bearer 鉴权；**不移植转发层** |

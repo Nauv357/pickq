@@ -1,7 +1,7 @@
 # API 契约（本地后端 Spring Boot + 题库广场 Nuxt）
 
 > 本文只写**代码里能验证的事实**，每条标注来源文件；无法确认的写「待确认」。
-> **覆盖统计**：本地后端 **101 个端点**（15 个 `@RestController`，按方法级映射注解逐个数出）；广场服务端 **42 个端点**（`web/server/api/**` 全部路由文件）。
+> **覆盖统计**：本地后端 **128 个端点**（19 个 `@RestController`，按方法级映射注解逐个数出，2026-09-16 实测）；广场服务端 **42 个端点**（`web/server/api/**` 全部路由文件；`web/` 不入库，本机无此目录时无法复核）。
 > 相关文档：[`data-model.md`](data-model.md)（表结构）、[`package-format.md`](package-format.md)（内容包格式，跨端契约）、[`features.md`](features.md)（业务规则）、[`design-mobile.md`](design-mobile.md)（Android 方案）。
 > 注意：`web/` 被 `.gitignore` 忽略（官网不开源），广场侧事实取自本机工作树实现（**待确认**线上是否一致）。
 
@@ -184,6 +184,32 @@
 
 > 与解析的边界：解析走 `PUT /api/questions/{id}/analysis` 并**随题库文件导出**；笔记只在本机
 > （题删/库删时级联清理）。详见 `docs/features.md` §4.9。
+
+### 1.3.5.3 `SkillController` — 技能图与知识点标签（15 个端点，路径前缀 `/api`）
+
+> 2026-09-16 审计补录：这套端点此前**完全没有 API 文档**（知识点功能唯一的本地接口面）。
+> 词表 = 内置两张官方模板 + **本机改动**（自定义节点、停用官方节点，落 `{dataDir}/skill-custom-nodes.json`）。
+
+| 方法 + 路径 | 请求 | 响应 `data` | 常见错误 |
+| --- | --- | --- | --- |
+| `GET /api/skills/templates` | — | `List<{templateId,name,version,graphVersion,goalHint,sourceType,stageCount,nodeCount}>` | — |
+| `GET /api/skills/templates/{templateId}` | — | 全图：`{templateId,name,version,graphVersion,nodes[{nodeId,name,stageId,stageName,stageOrder,level,weight,optional,keywords[],prereq[]}]}` | 400 `未知的技能模板：{id}` |
+| `GET /api/skills/templates/{templateId}/customizations` | — | `{customized,customNodes[],disabledNodes[{nodeId,name}],stages[{stageId,stageName}],graphVersion}`（「管理知识点」界面用） | 400 未知模板 |
+| `POST /api/skills/templates/{templateId}/nodes` | `{name, stageId?}` | `{nodeId,name,stageId,stageName}`（同名复用已有节点） | 400 `知识点名称不能为空` / `阶段不存在：{id}` |
+| `PUT /api/skills/templates/{templateId}/nodes/{nodeId}` | `{name, stageId?}` | 同上（**改名不动 nodeId**，已打的标签不会失效） | 400 `只能修改/删除自定义知识点` / `自定义知识点不存在` / 名称空 / 阶段不存在 |
+| `DELETE /api/skills/templates/{templateId}/nodes/{nodeId}` | — | `{nodeId}`（它上面的标签变成失效标签，可一键清理） | 400 同上 |
+| `PUT /api/skills/templates/{templateId}/nodes/{nodeId}/disabled` | `{disabled}` | `{nodeId,disabled}`（只影响本机；停用时**连前置引用一起摘掉**） | 400 `自定义知识点请直接删除，不需要停用` / `知识点不在当前技能图里：{id}` |
+| `DELETE /api/skills/templates/{templateId}/customizations` | — | `{templateId}`（恢复官方模板：清掉本模板全部本机改动） | 400 未知模板 |
+| `POST /api/banks/{bankId}/skills/suggest` | query `templateId`、`includeUntagged`、`maxAiCalls` | `SuggestResult{aiCalls,taggedQuestions,truncated,message…}`（按批推进，可中断续跑） | 400 未配置 AI / 未知模板 |
+| `GET /api/banks/{bankId}/skills/questions` | query `templateId`、`status(all/confirmed/pending/untagged)`、`nodeId`、`page`、`size` | `ReviewPage{total,page,size,counts{total,confirmed,pending,untagged,usable},orphan{rows,questions},records[…]}` | 400 未知模板 |
+| `POST /api/banks/{bankId}/skills/apply` | `{action(confirm/set/retag/reject),templateId,nodeId?,newNodes?[],questionIds?[],filterStatus?}` | `{affected}`（**影响到的题数**，不是标签行数） | 400 `缺少 templateId` |
+| `GET /api/banks/{bankId}/skills/coverage` | query `templateId` | `Coverage{totalQuestions,confirmedQuestions,pendingQuestions,untaggedQuestions,usableQuestions,nodes[{nodeId,name,stageName,questionCount,evidenceEnough,confirmed}]}` | 400 未知模板 |
+| `POST /api/banks/{bankId}/skills/cleanup-orphans` | query `templateId` | `{affected}`（清理"指向当前图里已不存在节点"的旧标签） | 400 未知模板 |
+| `GET /api/questions/{questionId}/skills` | query `templateId`（必填） | `List<{nodeId,name,stageName,source,confidence,confirmed,origin}>` | — |
+| `PUT /api/questions/{questionId}/skills` | `{templateId,nodeIds[]}` | `{nodeIds,written}`（用户手动标注，覆盖 AI 与作者，只影响本机） | 400 `缺少 templateId` |
+
+> 已退役（2026-09-16 审计）：`POST /api/skills/templates/{id}/sync`——把内置模板写进 `skill_node`/`skill_edge`，
+> 而这两张表从来没有被读过（读路径一直走内存图）。
 
 ### 1.3.6 `MaterialController` — 共享材料（4 个端点，`/api/banks/{bankId}/materials`）
 

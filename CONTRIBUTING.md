@@ -149,7 +149,7 @@ node ..\..\frontend\node_modules\@tauri-apps\cli\tauri.js dev
 
 1. **`frontend/dist` 必须先存在**：`mvn package` 不负责构建前端。目录不存在时 Maven 只告警、不失败，
    于是你会得到一个「能启动、但页面 404」的 jar——这是最常见的「为什么界面没更新」；
-   `tauri\build-desktop.ps1` 同样只跑 Maven（第 1 步），**不会**替你 `npm run build`。
+   `tauri\build-desktop.ps1` 的第 1 步**就是** `npm run build`（可加 `-SkipFrontend` 跳过，并且会校验 `dist` 不比 `src` 旧）。
 2. 开发时用 5173 的 Vite dev server（热更新）；要验证打包形态，必须 `npm run build` 后重新 `mvn package`。
 3. 生产形态下前端由后端同源托管，路由回退由 `SpaForwardConfig` 负责：无扩展名且非 `/api` 的路径回退到
    `index.html`（深链刷新可用），而 `/api/**` 一律 404 JSON——**别改这个语义**，前端 axios 依赖它。
@@ -167,13 +167,14 @@ mvn package -DskipTests     # 只关心产物时
 .\tauri\build-desktop.ps1
 ```
 
-脚本步骤（与文件内注释一致）：
+脚本步骤（与文件内注释一致，共 6 步）：
 
-1. `mvn -nsu -q -DskipTests package` → `target/Tiku-0.0.1-SNAPSHOT.jar`；
-2. `jlink` 裁剪 JRE（已存在 `target/jre` 时跳过）→ `target/jre`；
-3. 复制 `jre/` 与 `app.jar` 到 `tauri/src-tauri/`（`tauri.conf.json` 的 `bundle.resources`）；
-4. `tauri build --bundles nsis` → `tauri/src-tauri/target/release/bundle/nsis/`；
-5. 便携版 zip → `tauri/src-tauri/target/release/bundle/zip/拾题-便携版.zip`（含 `tauri/portable-assets/` 里的说明与快捷方式脚本）。
+1. `npm run build`（脚本里的「1/6」；`-SkipFrontend` 可跳过）→ `frontend/dist`；
+2. 清掉 `target/classes/static` 里的历史分块，再 `mvn -nsu -q -DskipTests package` → `target/Tiku-0.0.1-SNAPSHOT.jar`；
+3. `jlink` 裁剪 JRE（已存在 `target/jre` 时跳过）→ `target/jre`；
+4. 复制 `jre/` 与 `app.jar` 到 `tauri/src-tauri/`（`tauri.conf.json` 的 `bundle.resources`）；
+5. `tauri build --bundles nsis` → `tauri/src-tauri/target/release/bundle/nsis/`；
+6. 便携版 zip → `tauri/src-tauri/target/release/bundle/zip/拾题-便携版.zip`（含 `tauri/portable-assets/` 里的说明与快捷方式脚本）。
 
 脚本的路径假设：`JAVA_HOME`（或回退 `C:\Program Files\Java\jdk-21`）与
 `C:\Maven\apache-maven-3.9.9\bin\mvn.cmd`（或回退 `PATH` 上的 `mvn`）；`@tauri-apps/cli` 从
@@ -234,7 +235,7 @@ mvn package -DskipTests     # 只关心产物时
 
 ### 前端：静态检查 + Playwright 冒烟（2026-09-12 起）
 
-`frontend/package.json` 现在有 4 个脚本，**改前端后请都跑一遍**：
+`frontend/package.json` 现在有 15 个脚本（`dev/build/preview` + `check:ui`/`check:i18n` + 7 个 `smoke:*` + 2 个 `e2e:*`），**改前端后请都跑一遍**：
 
 | 脚本 | 作用 | 需要后端？ |
 | --- | --- | --- |

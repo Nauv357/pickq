@@ -30,6 +30,13 @@
       </div>
     </div>
 
+    <!-- 失败要说清原因并给出路（以前这里静默落成"空"） -->
+    <div v-else-if="loadError" class="note-failed">
+      <TikuIcon name="info" :size="16" />
+      <span>{{ loadError }}</span>
+      <button class="btn btn-secondary btn-sm" @click="load">{{ t('retry') }}</button>
+    </div>
+
     <EmptyState
       v-else-if="!notes.length"
       icon="edit"
@@ -84,6 +91,7 @@ import { formatDate } from '../utils/format'
 import PageHeader from '../components/PageHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
 import Pager from '../components/Pager.vue'
+import TikuIcon from '../components/TikuIcon.vue'
 import { useConfirm } from '../composables/useConfirm'
 
 const { t } = useI18n({
@@ -110,6 +118,8 @@ const { t } = useI18n({
       removed: '已删除',
       delAsk: '删除这条笔记？',
       delTitle: '删除笔记',
+      loadFail: '笔记加载失败，请检查后端是否还在运行',
+      retry: '重试',
       fail: '操作失败'
     },
     'en-US': {
@@ -134,6 +144,8 @@ const { t } = useI18n({
       removed: 'Note deleted',
       delAsk: 'Delete this note?',
       delTitle: 'Delete note',
+      loadFail: 'Could not load notes — check that the backend is still running',
+      retry: 'Retry',
       fail: 'Action failed'
     }
   }
@@ -153,11 +165,14 @@ const saving = ref(false)
 const draft = ref('')
 const editingId = ref(null)
 const error = ref('')
+/** 加载失败：页面要显示原因 + 重试（不能与"还没有笔记"混为一谈） */
+const loadError = ref('')
 
 const formatTime = (iso) => (iso ? formatDate(iso) : '')
 
 async function load() {
   loading.value = true
+  loadError.value = ''
   try {
     const data = await listNotes(id, { page: page.value, size: size.value })
     notes.value = data?.records || []
@@ -165,6 +180,7 @@ async function load() {
   } catch (e) {
     notes.value = []
     total.value = 0
+    loadError.value = t('loadFail')
   } finally {
     loading.value = false
   }
@@ -333,5 +349,16 @@ function openQuestion(questionId) {
 }
 .note-loading {
   padding: 6px 0;
+}
+.note-failed {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 13px;
 }
 </style>

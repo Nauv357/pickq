@@ -431,7 +431,7 @@ sequenceDiagram
 | 失败可观测性 | `AiImportFailureClassifier` 把超时、限流、连接、响应协议和文档解析问题归为稳定 `errorCode`；落库文案 = 可操作提示 + 脱敏诊断摘要（`sk-…`/`apiKey=` 会被替换为 `***`），日志按任务 ID 写脱敏摘要 | `AiImportFailureClassifier`、`AiImportModelCallService`（失败分类）→ `AiImportJobLifecycleService.writeTerminal`（落库） |
 | 确认幂等 | `AiImportJobMapper` 行锁读取，串行化「读 confirmed → 导入 → 写 confirmed」，防双击/重放重复导入 | `mapper/AiImportJobMapper.java` |
 | 补答案（另一条链路） | `POST /api/banks/{id}/questions/ai-fill-answers`：串行分批 **10 题/批**思考模式判定；有图题带图；不确定/选项不全/请求失败一律留空 | `AnswerFillService.java` |
-| 单题 AI 解析 | `POST /api/questions/{id}/ai-analysis` 与草稿 `POST /api/questions/ai-analysis-draft`；`QuestionService` 用 `ReentrantLock` 限制并发槽 | `QuestionService.java` |
+| 单题解析 | **做题后的讲解**走 `POST /api/tutor/explain`（流式、带我的作答与错因；2026-09-16 统一，见 `api.md` §1.3.5.1）；编辑器里的"草稿解析"走 `POST /api/questions/ai-analysis-draft`。**按 id 生成中性解析的 `POST /api/questions/{id}/ai-analysis` 已退役**（代码里只剩草稿那条链路） | `QuestionService.java` |
 
 ### 4.4 复习 / 间隔重复
 

@@ -1,6 +1,5 @@
 package com.tiku.dto;
 
-import com.tiku.model.Question;
 import com.tiku.model.enums.QuestionType;
 
 import java.util.List;
@@ -10,6 +9,10 @@ import java.util.List;
  * 交卷后回顾场景展示答案与解析（answerKeys/answerText/analysis/referenceAnswer 仅在交卷后返回）。
  * 主观题（SUBJECTIVE）：无 answerKeys/answerText，参考答案在 referenceAnswer；自评结果在 selfGrade。
  * favorite 为实时值（每次查询从 question 表现取，反映详情页最新收藏，与做题页星标同步）。
+ *
+ * 说明（2026-09-16 审计）：这里原先有个 `fromEntity(Question)` 工厂，把 referenceAnswer/materialContent
+ * 一律填 null，而真正在用的构造点在 {@code PracticeSessionService} 里显式区分"交卷后才给答案"——
+ * 两个语义冲突的构造并存只会让人误用，所以删掉了没人调用的那个。
  */
 public record SessionQuestionItem(
         Long questionId,
@@ -35,19 +38,4 @@ public record SessionQuestionItem(
         String referenceAnswer,   //主观题参考答案（交卷后返回）
         String materialContent    //共享材料大题干（组内题返回；其余为 null）
 ) {
-    public static SessionQuestionItem fromEntity(Question question) {
-        return new SessionQuestionItem(
-                question.getId(),
-                question.getQuestionType(),
-                question.getQuestionType().getLabel(),
-                question.getQuestionNumber(),
-                question.getContent(),
-                question.getOptions(),
-                question.getScore(),
-                question.getCategory(),
-                question.getTopic(),
-                question.getFavorite(),
-                null, null, null, null, null, null, null, null, null, null, null, null
-        );
-    }
 }

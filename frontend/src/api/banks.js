@@ -21,9 +21,6 @@ export const getBankQuestions = (id, params) => http.get(`/banks/${id}/questions
 // 题号导航（详情页右侧目录）：与题目列表同过滤同排序，全量轻量字段 → [{ questionId, questionType, questionNumber }]
 export const getBankQuestionNav = (id, params) => http.get(`/banks/${id}/question-nav`, { params })
 
-// 做题数据（有选项、无答案）
-export const getPracticeQuestions = (id, params) => http.get(`/banks/${id}/questions/practice`, { params })
-
 // 导入内容包（body = 内容包 JSON 原文，v1）→ data = { result, bankId, message }
 // timeout: 0 = 不设客户端超时：含图题库在慢机器上可能超过全局 15s，超时中止会让"后端已导入成功、
 // 界面却当作失败"（用户实测：点导入没反应，刷新后题库其实已经在了）。

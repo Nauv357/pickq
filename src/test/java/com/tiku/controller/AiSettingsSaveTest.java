@@ -13,7 +13,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.servlet.View;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -54,19 +53,8 @@ class AiSettingsSaveTest {
     }
 
     private static MockMvc standalone(AiImportController controller) {
-        View errorView = new View() {
-            @Override
-            public String getContentType() {
-                return "application/json";
-            }
-
-            @Override
-            public void render(Map<String, ?> model, HttpServletRequest req, HttpServletResponse resp) {
-                // 测试不渲染错误页
-            }
-        };
         return MockMvcBuilders.standaloneSetup(controller)
-                .setControllerAdvice(new GlobalExceptionHandler(errorView))
+                .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
 

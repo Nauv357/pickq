@@ -199,8 +199,10 @@ const NARROW_BREAKPOINT = 1100
 watch(
   () => route.path,
   (path) => {
-    // /banks/:id、/banks/:id/practice、/banks/:id/sessions → 折叠
-    routeCollapses.value = /^\/banks\/\d+(\/(practice|sessions))?$/.test(path)
+    // 题库的子页面统一折叠侧栏（题库详情 / 做题 / 练习历史 / 我的笔记）——
+    // 这些都是"信息密集、要横向空间"的页面；打印页是独立布局（不在本壳内）。
+    // 2026-09-16 审计发现原先漏了 /banks/:id/notes，于是同是题库子页，笔记页却留着宽侧栏。
+    routeCollapses.value = /^\/banks\/\d+(\/(practice|sessions|notes))?$/.test(path)
     sidebarCollapsed.value = routeCollapses.value || isNarrowViewport()
   },
   { immediate: true }

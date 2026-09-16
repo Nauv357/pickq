@@ -169,22 +169,24 @@ public class StatsService {
     }
 
     /** 判定一条作答：客观 correct 非空 → 原值；主观按自评 CORRECT；其余（未判/未自评）→ null */
+    /**
+     * 这条记录判对了吗：**统一走 StudyRecordService**（自评优先、未判定返回 null）。
+     * 2026-09-16 审计：这里原先自己写了一遍"correct 优先"，与错题口径相反——
+     * 于是「判题正确但自评部分对」的记录在题库统计里算对、在错题本里算错（同一份数据两个答案）。
+     */
     private Boolean decide(StudyRecord r) {
-        if (r.getCorrect() != null) {
-            return r.getCorrect();
+        if (StudyRecordService.effectiveGrade(r) == null) {
+            return null;
         }
-        if (r.getSelfGrade() != null) {
-            return "CORRECT".equals(r.getSelfGrade());
-        }
-        return null;
+        return StudyRecordService.isCorrect(r);
     }
 
-    /** 判错（含主观 PARTIAL/WRONG；未判不算） */
+    /**
+     * 判错：**统一走 StudyRecordService.isWrong**（2026-09-16 审计：这里曾有一份优先级相反的副本，
+     * 「判题正确但自评部分对」的记录在统计里算对、在错题本里算错）。
+     */
     private boolean isWrongDecide(StudyRecord r) {
-        if (Boolean.FALSE.equals(r.getCorrect())) {
-            return true;
-        }
-        return r.getSelfGrade() != null && !"CORRECT".equals(r.getSelfGrade());
+        return StudyRecordService.isWrong(r);
     }
 
     // ==================== 二期 D/E/F（题库掌握度 / 错题治愈 / 最近练习） ====================

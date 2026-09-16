@@ -4,7 +4,6 @@ import com.tiku.dto.ApiResponse;
 import com.tiku.dto.SkillApplyRequest;
 import com.tiku.service.QuestionTaggingService;
 import com.tiku.service.SkillGraphService;
-import com.tiku.service.SkillGraphSyncService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
@@ -17,10 +16,14 @@ import java.util.Map;
  * 技能图与知识点标签（学习路径引擎阶段 0，设计见 docs/learning-path-design.md）。
  *
  * 接口分工：
- * - 技能图是**只读**的受控词表（内置模板；将来支持私有/社区模板时再开写接口）；
+ * - 技能图是**受控词表**：内置两张官方模板 + **用户自己的本机改动**（自定义节点、停用官方节点，
+ *   落 `{dataDir}/skill-custom-nodes.json`）。2026-09-16 起补上了"自己编辑词表"的那几个端点；
  * - 标签是"AI 提建议 + 人拍板"：suggest 产出建议 → pending 看队列（**带全部单题**）→
  *   apply 批量或逐题确认/改挂/丢弃；questions 按状态把题列全（未匹配的题要能逐题打开去修）；
  * - 单题也可以直接标注：{@code PUT /api/questions/{id}/skills}（覆盖 AI 与作者，只影响本机）。
+ *
+ * 已退役（2026-09-16 审计）：`POST /skills/templates/{id}/sync`——它把内置模板写进 `skill_node`/`skill_edge`
+ * 两张**从没有人读过**的表（读路径一直走内存图），留着只会让后来者以为数据库里那份才是真相。
  */
 @Slf4j
 @RestController
@@ -28,13 +31,10 @@ import java.util.Map;
 public class SkillController {
 
     private final SkillGraphService graphService;
-    private final SkillGraphSyncService graphSyncService;
     private final QuestionTaggingService taggingService;
 
-    public SkillController(SkillGraphService graphService, SkillGraphSyncService graphSyncService,
-                           QuestionTaggingService taggingService) {
+    public SkillController(SkillGraphService graphService, QuestionTaggingService taggingService) {
         this.graphService = graphService;
-        this.graphSyncService = graphSyncService;
         this.taggingService = taggingService;
     }
 
@@ -87,12 +87,6 @@ public class SkillController {
         return ApiResponse.success(out);
     }
 
-    /** 把内置模板写入数据库（阶段 0 只用于核对与将来的编辑器；读路径走内存图） */
-    @PostMapping("/skills/templates/{templateId}/sync")
-    public ApiResponse<Map<String, Object>> syncTemplate(@PathVariable String templateId) {
-        int nodes = graphSyncService.sync(templateId);
-        return ApiResponse.success(Map.of("templateId", templateId, "nodesWritten", nodes));
-    }
 
     /** 触发知识点标注（AI 提建议，落待确认队列；按批推进，可中断续跑） */
     @PostMapping("/banks/{bankId}/skills/suggest")

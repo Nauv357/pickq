@@ -349,15 +349,7 @@ public class TutorService {
             return MODE_NEUTRAL;
         }
         StudyRecord last = latestRecord(session.getPracticeSessionId(), questionId);
-        return last != null && isWrongAttempt(last) ? MODE_WRONG : MODE_NEUTRAL;
-    }
-
-    /** 这次作答算不算"错"（客观题看判题结果；主观题看自评：部分对按答错处理，与全库口径一致） */
-    private static boolean isWrongAttempt(StudyRecord r) {
-        if ("WRONG".equals(r.getSelfGrade()) || "PARTIAL".equals(r.getSelfGrade())) {
-            return true;
-        }
-        return Boolean.FALSE.equals(r.getCorrect());
+        return last != null && StudyRecordService.isWrong(last) ? MODE_WRONG : MODE_NEUTRAL;
     }
 
     private String explainInstruction(String mode) {
@@ -401,9 +393,10 @@ public class TutorService {
         int wrong = 0;
         List<StudyRecord> wrongRecords = new ArrayList<>();
         for (StudyRecord r : records) {
-            if (Boolean.TRUE.equals(r.getCorrect())) {
+            //统一口径（含主观题自评 PARTIAL/WRONG 算错、未判定不算对也不算错）
+            if (StudyRecordService.isCorrect(r)) {
                 correct++;
-            } else if (Boolean.FALSE.equals(r.getCorrect())) {
+            } else if (StudyRecordService.isWrong(r)) {
                 wrong++;
                 wrongRecords.add(r);
             }
@@ -517,7 +510,7 @@ public class TutorService {
         List<StudyRecord> history = studyRecordMapper.selectList(new LambdaQueryWrapper<StudyRecord>()
                 .eq(StudyRecord::getQuestionId, q.getId())
                 .orderByDesc(StudyRecord::getAnsweredAt));
-        long wrongTimes = history.stream().filter(r -> Boolean.FALSE.equals(r.getCorrect())).count();
+        long wrongTimes = history.stream().filter(StudyRecordService::isWrong).count();
         if (wrongTimes > 0) {
             LocalDateTime lastAt = history.stream().map(StudyRecord::getAnsweredAt)
                     .filter(java.util.Objects::nonNull).max(Comparator.naturalOrder()).orElse(null);

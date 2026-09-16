@@ -207,23 +207,6 @@ public class QuestionBankService {
         return wrapper;
     }
 
-    //做题用题目列表：含选项，不含答案与解析（供做题页面渲染，避免剧透）；组内题附共享材料内容
-    public PageResult<QuestionPracticeResponse> getBankPracticeQuestions(Long bankId, int page, int size){
-        findByIdOrThrow(bankId);
-        IPage<Question> questionPage = questionMapper.selectPage(
-                new Page<>(com.tiku.util.Paging.page(page), com.tiku.util.Paging.size(size)),
-                //与做题顺序一致（SEQUENCE：题号优先、插入序兜底）
-                new LambdaQueryWrapper<Question>().eq(Question::getBankId, bankId)
-                        .orderByAsc(Question::getQuestionNumber).orderByAsc(Question::getId)
-        );
-        Map<Long, String> materialContentById = materialMapper.selectList(
-                        new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Material>()
-                                .eq(Material::getBankId, bankId))
-                .stream().collect(Collectors.toMap(Material::getId, Material::getContent));
-        return PageResult.from(questionPage.convert(q ->
-                QuestionPracticeResponse.fromEntity(q, q.getMaterialId() == null ? null : materialContentById.get(q.getMaterialId()))));
-    }
-
     //更新题库：仅允许修改 name / description / source / authorName
     //（package_key、version、checksum、parent_key 为系统管理字段，不可手动修改）
     public void updateQuestionBank(Long id, QuestionBankUpdateRequest request){

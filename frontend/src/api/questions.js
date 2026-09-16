@@ -11,9 +11,6 @@ export const updateQuestion = (id, data) => http.put(`/questions/${id}`, data)
 
 export const deleteQuestion = (id) => http.delete(`/questions/${id}`)
 
-// 判题（不写记录，预览用；做题请用 study-records）
-export const submitAnswer = (id, selectedKeys) => http.post(`/questions/${id}/answer`, { selectedKeys })
-
 // 收藏/取消收藏
 export const setFavorite = (id, favorite) => http.put(`/questions/${id}/favorite`, { favorite })
 

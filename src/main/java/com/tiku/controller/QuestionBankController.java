@@ -92,15 +92,6 @@ public class QuestionBankController {
                 id, keyword, questionType, category, topic, scope));
     }
 
-    //做题用题目列表（含选项，不含答案与解析）
-    @GetMapping("/{id}/questions/practice")
-    public ApiResponse<PageResult<QuestionPracticeResponse>> getBankPracticeQuestions(
-            @PathVariable Long id,
-            @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "20") int size
-    ) {
-        return ApiResponse.success(questionBankService.getBankPracticeQuestions(id, page, size));
-    }
 
     //更新题库（仅 name/description/source/authorName；身份字段为系统字段不可改）
     @PutMapping("/{id}")

@@ -11,11 +11,6 @@ export function getCenterUrl() {
   return CENTER_URL
 }
 
-/** 兼容旧调用：不再支持自定义，返回官方地址 */
-export function setCenterUrl() {
-  return CENTER_URL
-}
-
 /** 广场根地址 + 作品路径拼装（保证单斜杠） */
 export function centerPacksUrl() {
   return `${CENTER_URL}/packs`

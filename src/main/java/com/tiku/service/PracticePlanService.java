@@ -255,23 +255,35 @@ public class PracticePlanService {
         }
     }
 
-    /** 桶内按 85% 规则排序：优先"预测成功率落在这个人能力附近"的题 */
+    /**
+     * 桶内按 85% 规则排序：**统一走 `AdaptiveService` 的那一份**（含"优先落在 80%–90% 区间"）。
+     *
+     * 2026-09-16 审计：这里曾有一份私有副本，只有"离 85% 的距离"而没有区间优待，
+     * 于是文档承诺的"优先挑预测成功率 80%–90% 的题"实际没生效（`AdaptiveService.orderByTargetSuccess` 无人调用）。
+     * 排名的分数口径只允许有一处实现——否则改了 A 忘了 B，用户看到的顺序与文档说的不一致。
+     */
     private List<Long> orderByTargetSuccess(List<Long> ids, Map<Long, Question> byId,
                                             Map<Long, Double> masteryOfQuestion) {
         if (ids.isEmpty()) {
             return List.of();
         }
-        // 按掌握度分组排序（同一批里掌握度接近的题一起排），避免为每题单独排序
+        // 同掌握度的题一起算：把候选题按掌握度分组，每组只调一次共享排序
         List<Long> out = new ArrayList<>(ids);
-        Map<Long, Double> difficulty = adaptiveService.difficultiesOf(
-                out.stream().map(byId::get).filter(java.util.Objects::nonNull).toList());
-        out.sort(Comparator.comparingDouble(id -> {
-            double mastery = masteryOfQuestion.getOrDefault(id, 0.5);
-            double p = AdaptiveService.predict(difficulty.getOrDefault(id, 400.0),
-                    AdaptiveService.abilityOf(mastery));
-            return Math.abs(p - AdaptiveService.TARGET_SUCCESS);
-        }));
-        return out;
+        Map<Double, List<Long>> byMastery = new LinkedHashMap<>();
+        for (Long id : out) {
+            byMastery.computeIfAbsent(masteryOfQuestion.getOrDefault(id, 0.5), k -> new ArrayList<>()).add(id);
+        }
+        List<Long> sorted = new ArrayList<>();
+        byMastery.forEach((mastery, group) -> {
+            List<Question> questions = group.stream().map(byId::get)
+                    .filter(java.util.Objects::nonNull).toList();
+            if (questions.isEmpty()) {
+                return;
+            }
+            sorted.addAll(adaptiveService.orderByTargetSuccess(questions, mastery).stream()
+                    .map(Question::getId).toList());
+        });
+        return sorted;
     }
 
     private LocalDateTime lastAnsweredAt(Long bankId, Long questionId) {

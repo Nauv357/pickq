@@ -1,23 +1,14 @@
 import http from './http'
 
 // 刷题记录接口（纯本地，错题/进度/复习由此派生）
-
-// 提交作答：判题 + 写记录 + 自动更新复习状态（做题页主接口）
-// 客观题 body { questionId, selectedKeys, sessionId? }
-// 主观题 body { questionId, userAnswer, sessionId? }（不判题，correct=null）
-// → { correct, correctKeys, correctText, analysis, recordId }
-export const submitStudyAnswer = (data) => http.post('/study-records', data)
+//
+// 说明（2026-09-16 审计）：`submitStudyAnswer` / `getBankRecords` / `getQuestionRecords` 三个包装
+// 从未有调用方——作答统一走"会话制"（`POST /banks/{id}/sessions` + `finish` 一次性交卷），
+// 所以这里只留界面真正在用的接口，避免后来者以为存在"逐题提交"这条路径。
 
 // 主观题自评（自由给分 0~满分） → { recordId, selfGrade, earnedScore }
 export const selfGradeRecord = (recordId, earnedScore) =>
   http.put(`/study-records/${recordId}/self-grade`, { earnedScore })
-
-// 题库刷题记录（分页）
-export const getBankRecords = (bankId, params) => http.get(`/banks/${bankId}/records`, { params })
-
-// 单题作答历史
-export const getQuestionRecords = (questionId, params) =>
-  http.get(`/questions/${questionId}/records`, { params })
 
 // 错题列表（含选项/最近作答/错误次数）
 export const getWrongQuestions = (bankId, params) =>

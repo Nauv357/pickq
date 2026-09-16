@@ -5,9 +5,9 @@
    ============================================================ */
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-
-export const isDesktop = () =>
-  typeof window !== 'undefined' && Boolean(window.__TAURI_INTERNALS__)
+// 是否桌面壳：统一用 external.js 的实现（同一判断不要两处写，见那里的注释）
+export { isDesktop } from './external'
+import { isDesktop } from './external'
 
 /** 当前应用版本号（桌面版；浏览器返回 null） */
 export async function getAppVersion() {

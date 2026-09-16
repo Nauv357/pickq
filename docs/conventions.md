@@ -28,6 +28,20 @@
 技术栈：Spring Boot 3.4.4 / Java 21 / MyBatis-Plus 3.5.10 / H2（文件模式 `MODE=MySQL`）/ Flyway。
 包结构固定为 `config` / `controller` / `service` / `mapper` / `model` / `dto` / `util`。
 
+### 1.0 **业务口径只允许一处实现**（2026-09-16 审计立下的规矩）
+
+**规则**：任何"这句话到底算对还是错"的判断（错题口径、有效判定、掌握度、难度、熟练度…）**只能有一处实现**，
+其余位置一律调用它；跨模块共用时把它做成 `public static`（如 `StudyRecordService.isWrong / isCorrect / effectiveGrade`），
+并**用同一批数据把所有出口一起断言**（见 `WrongAnswerRuleConsistencyTest`）。
+
+**理由**：审计发现「最近一次作答算不算错」被写成 5 份，其中统计页与错题本的口径**恰好相反**，
+"未判定"的题在成绩报告里不判对错、在会话列表里却被算成答错——同一份数据给出两个答案，
+而每一个单点看都"没问题"。复制粘贴是这类 bug 唯一的来源，而它极难靠人肉比对发现。
+
+**反面例子**（都已在 2026-09-16 合并）：`StatsService.isWrongDecide`、`StatsService.decide`、
+`TutorService.isWrongAttempt`、`TutorService.buildQuestionContext` 里各自的 `correct` 判断、
+`AdaptiveService.abilityOnQuestionNodes` 里只看 `correct` 列的统计。
+
 ### 1.1 所有接口返回统一包装 `ApiResponse`
 
 **规则**：controller 的返回值一律是 `ApiResponse<T>`，成功用 `ApiResponse.success(data)`，
@@ -260,7 +274,7 @@ public record StatsSummaryResponse( ... ) {
 
 **规则**
 
-- 文件放 `src/main/resources/db/migration/`，命名 `V<序号>__<下划线描述>.sql`（当前到 `V14`）；
+- 文件放 `src/main/resources/db/migration/`，命名 `V<序号>__<下划线描述>.sql`（当前到 `V21`）；
 - 序号连续递增，**永不修改、永不删除已发布的迁移**；要改结构就新增一个迁移；
 - SQL 里带注释说明「这一版为什么加这些列/表」；
 - 迁移文件里的 SQL 必须**在 H2（`MODE=MySQL`）上真实可执行**：`ADD COLUMN` 与

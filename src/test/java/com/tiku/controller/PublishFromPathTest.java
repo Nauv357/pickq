@@ -14,7 +14,6 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.servlet.View;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -217,17 +216,6 @@ class PublishFromPathTest {
     @Test
     void publishFromPathHttpContract() throws Exception {
         Path file = writePackage("http.tiku", "3.0.0");
-        View errorView = new View() {
-            @Override
-            public String getContentType() {
-                return "application/json";
-            }
-
-            @Override
-            public void render(Map<String, ?> model, HttpServletRequest req, HttpServletResponse resp) {
-                // 测试不渲染错误页
-            }
-        };
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("filePath", file.toString());
         body.put("storageKind", "HOSTED");
@@ -235,7 +223,7 @@ class PublishFromPathTest {
         String json = new ObjectMapper().writeValueAsString(body);
 
         MockMvc loggedIn = MockMvcBuilders.standaloneSetup(controller())
-                .setControllerAdvice(new GlobalExceptionHandler(errorView))
+                .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
         loggedIn.perform(post("/api/center/publish-from-path").param("center", center)
                         .contentType(MediaType.APPLICATION_JSON).content(json))
@@ -246,7 +234,7 @@ class PublishFromPathTest {
 
         // 未登录：500 + 可读文案（前端据此引导登录），且不发远程请求
         MockMvc loggedOut = MockMvcBuilders.standaloneSetup(loggedOutController())
-                .setControllerAdvice(new GlobalExceptionHandler(errorView))
+                .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
         loggedOut.perform(post("/api/center/publish-from-path").param("center", center)
                         .contentType(MediaType.APPLICATION_JSON).content(json))

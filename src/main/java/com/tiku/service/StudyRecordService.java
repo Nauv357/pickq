@@ -196,8 +196,20 @@ public class StudyRecordService {
         };
     }
 
-    /** 最近一次作答是否算"错"：客观题判错；主观题自评 PARTIAL/WRONG 算错；未自评待判定不算错 */
-    private static boolean isWrong(StudyRecord record) {
+    /**
+     * 最近一次作答是否算"错"——**全库唯一口径**（错题本 / 会话 WRONG / 题目列表 scope=wrong /
+     * 导出范围 wrong / 统计的错题治愈 / 讲解口吻判定 / 能力分都调它）。
+     *
+     * 规则：主观题自评优先（PARTIAL/WRONG 算错、CORRECT 不算错），否则看客观题判题结果；
+     * `correct == null`（未配答案 / 主观未自评）**不算错也不算对**。
+     *
+     * 为什么必须是 static 且公开：2026-09-16 审计发现这段口径曾被复制成 4 份且互不相等
+     * （优先级相反、漏 PARTIAL、只看 correct），导致"同一道题在错题本里是错的、在统计里是对的"。
+     */
+    public static boolean isWrong(StudyRecord record) {
+        if (record == null) {
+            return false;
+        }
         if (record.getSelfGrade() != null) {
             return !"CORRECT".equals(record.getSelfGrade());
         }
@@ -205,6 +217,35 @@ public class StudyRecordService {
             return !Boolean.TRUE.equals(record.getCorrect());
         }
         return false;
+    }
+
+    /** 是否算"对"（与 {@link #isWrong} 互补；`correct == null` 且未自评时为 false） */
+    public static boolean isCorrect(StudyRecord record) {
+        if (record == null) {
+            return false;
+        }
+        if (record.getSelfGrade() != null) {
+            return "CORRECT".equals(record.getSelfGrade());
+        }
+        return Boolean.TRUE.equals(record.getCorrect());
+    }
+
+    /**
+     * 会话里的"有效判定"：主观看自评、客观看判题结果；**未判定（未配答案 / 主观未自评）返回 null 不加猜测**。
+     * 会话详情、成绩报告、会话列表三处共用同一份（此前详情与列表把 null 落成 WRONG，
+     * 于是"未作答/未判定的题"在会话列表里被算成答错）。
+     */
+    public static String effectiveGrade(StudyRecord record) {
+        if (record == null) {
+            return null;
+        }
+        if (record.getSelfGrade() != null) {
+            return record.getSelfGrade();
+        }
+        if (record.getCorrect() == null) {
+            return null;
+        }
+        return Boolean.TRUE.equals(record.getCorrect()) ? "CORRECT" : "WRONG";
     }
 
     /**

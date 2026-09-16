@@ -5,6 +5,11 @@
    ============================================================ */
 import { invoke } from '@tauri-apps/api/core'
 
+/**
+ * 是否运行在桌面壳里（Tauri 注入 `__TAURI_INTERNALS__`）。
+ * **全仓唯一实现**：`utils/updater.js` 里曾有一份同名副本，两处判断一旦漂移就会出现
+ * "更新走桌面路径、打开链接走浏览器路径"这类诡异行为（2026-09-16 审计合并）。
+ */
 const isDesktop = () =>
   typeof window !== 'undefined' && Boolean(window.__TAURI_INTERNALS__)
 

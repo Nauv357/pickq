@@ -143,11 +143,6 @@ export function richTextToHtml(text, bankId) {
   return html
 }
 
-/** 判断文本是否包含图片标记 */
-export function hasImageMarker(text) {
-  return /\[图片:([^\]]+)\]/.test(text || '')
-}
-
 /**
  * 纯文本 → HTML：转义 + LaTeX 公式渲染（$...$ 定界 + MinerU 无定界片段），不处理图片/表格。
  * 供需要自定义图片渲染的场合使用（如 AI 导入预览页：图片标记是 [图片N] 任务临时图）。
@@ -155,9 +150,4 @@ export function hasImageMarker(text) {
 export function latexOnlyHtml(text) {
   if (!text) return ''
   return renderLatex(escapeHtml(String(text))).replace(/\n/g, '<br>')
-}
-
-/** 判断文本是否包含 LaTeX 命令片段 */
-export function hasLatex(text) {
-  return /\\[a-zA-Z]+/.test(text || '')
 }
