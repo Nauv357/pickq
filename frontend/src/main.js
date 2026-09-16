@@ -12,12 +12,15 @@ import router from './router'
 import i18n from './i18n'
 import { initLang } from './i18n/lang'
 import { initTheme } from './utils/theme'
+import { initReadingScale } from './utils/reading'
 import './styles/main.css'
 
 // 双主题初始化(存储偏好 > 系统偏好);dark class 由 utils/theme.js 控制,
 // Element Plus 暗色变量随 html.dark 自动生效(设计系统见 styles/main.css)
 initTheme()
 initLang()
+// 阅读字号：读回用户档位并写到 :root 的 --content-font（正文类样式统一引用它）
+initReadingScale()
 
 const app = createApp(App)
 app.use(ElementPlus, { locale: zhCn })

@@ -41,6 +41,12 @@
   --warning: #b45309;
   --warning-soft: rgba(180, 83, 9, 0.1);
 
+  /* ---- 笔记标注色（纸面上的荧光笔：黄/绿/蓝/粉；与 note.color 的取值一一对应） ---- */
+  --hl-y: #f2d675;
+  --hl-g: #a9d6a0;
+  --hl-b: #9dc3e6;
+  --hl-p: #f0a8b8;
+
   /* ---- 白天主题 · 阴影（克制中性，去彩色） ---- */
   --shadow-btn: none;
   --shadow-card: 0 1px 3px rgba(60, 54, 40, 0.06), 0 6px 18px rgba(60, 54, 40, 0.05);
@@ -101,6 +107,12 @@ html.dark {
   --success-soft: rgba(61, 214, 168, 0.13);
   --warning: #ffc46b;
   --warning-soft: rgba(251, 191, 36, 0.13);
+
+  /* 笔记标注色：暗底上用低饱和（荧光笔在黑底会刺眼） */
+  --hl-y: #7a6a2c;
+  --hl-g: #2f6b45;
+  --hl-b: #2c5077;
+  --hl-p: #7a3a4c;
 
   --shadow-btn: none;
   --shadow-card: 0 0 0 1px var(--border), 0 12px 32px rgba(0, 0, 0, 0.35);
@@ -475,8 +487,29 @@ html.dark {
 .tiku-skeleton { animation: tiku-pulse 1.4s ease-in-out infinite; }
 
 /* ============================================================
-   富文本渲染:图片 + 表格(MinerU 表格 HTML 白名单渲染)
+   富文本渲染:图片 + 表格(MinerU 表格 HTML 白名单渲染) + 轻量标注(高亮/加粗/下划线)
    ============================================================ */
+
+/* 正文类内容的字号：由 utils/reading.js 写在 :root 上（设置里可调），
+   这里给默认值兜底（万一脚本没跑起来也不至于没字号）。 */
+:root {
+  --content-font: 15.5px;
+  --content-lh: 1.8;
+}
+/* 笔记/解析里的行内标注：颜色来自 --hl-*（明暗主题各一套） */
+mark.rt-hl {
+  background: var(--hl-y);
+  color: inherit;
+  padding: 0 2px;
+  border-radius: 3px;
+  box-decoration-break: clone;
+}
+mark.rt-hl-g { background: var(--hl-g); }
+mark.rt-hl-b { background: var(--hl-b); }
+mark.rt-hl-p { background: var(--hl-p); }
+b.rt-b { font-weight: 700; color: var(--text-primary); }
+u.rt-u { text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: 2px; }
+
 .rich-img {
   max-width: 100%;
   height: auto;

@@ -62,14 +62,21 @@ public class NoteService {
         this.questionBankMapper = questionBankMapper;
     }
 
+    /** 不带关键词的常用形态（题库内的笔记列表、每题的笔记列表） */
+    public PageResult<NoteResponse> list(Long bankId, Long questionId, boolean unlinked, int page, int size) {
+        return list(bankId, questionId, unlinked, null, page, size);
+    }
+
     /**
      * 笔记列表（按最近更新排序）。
      *
      * @param bankId     只看"这个题库的笔记" = 挂在库上的 + 挂在这个库题目上的（可空）
      * @param questionId 只看关联到该题的笔记（可空）
      * @param unlinked   true = 只看"未归类"（一条关联都没有）
+     * @param keyword    正文关键词（可空；用于"我记过什么"的查找）
      */
-    public PageResult<NoteResponse> list(Long bankId, Long questionId, boolean unlinked, int page, int size) {
+    public PageResult<NoteResponse> list(Long bankId, Long questionId, boolean unlinked, String keyword,
+                                        int page, int size) {
         LambdaQueryWrapper<Note> w = new LambdaQueryWrapper<Note>()
                 .orderByDesc(Note::getUpdatedAt)
                 .orderByDesc(Note::getId);
@@ -80,6 +87,10 @@ public class NoteService {
         }
         if (unlinked) {
             w = w.notInSql(Note::getId, "SELECT note_id FROM note_link");
+        }
+        String kw = keyword == null ? "" : keyword.trim();
+        if (!kw.isEmpty()) {
+            w = w.like(Note::getContent, kw);
         }
         IPage<Note> result = noteMapper.selectPage(
                 new Page<>(com.tiku.util.Paging.page(page), com.tiku.util.Paging.size(size)), w);
@@ -102,6 +113,7 @@ public class NoteService {
         String content = normalize(request == null ? null : request.content());
         Note note = new Note();
         note.setContent(content);
+        note.setColor(Note.normalizeColor(request == null ? null : request.color()));
         note.setSource(Note.SOURCE_AI.equalsIgnoreCase(request == null ? null : request.source())
                 ? Note.SOURCE_AI : Note.SOURCE_USER);
         note.setCreatedAt(LocalDateTime.now());
@@ -128,6 +140,21 @@ public class NoteService {
         note.setUpdatedAt(LocalDateTime.now());
         noteMapper.updateById(note);
         return toResponse(note, linksOf(note.getId()));
+    }
+
+    /**
+     * 只改标记色（不动正文，也不动更新时间之外的任何东西）。
+     * 传 null / 空串即"取消标色"；非法颜色同样按取消处理（不引入第三种状态）。
+     */
+    @Transactional
+    public NoteResponse updateColor(Long id, String color) {
+        Note note = require(id);
+        note.setColor(Note.normalizeColor(color));
+        // 用 wrapper 显式 set：实体字段为 null 时 MyBatis-Plus 默认不更新，取消标色会失效
+        noteMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<Note>()
+                .eq(Note::getId, id)
+                .set(Note::getColor, note.getColor()));
+        return toResponse(note, linksOf(id));
     }
 
     /** 删除笔记（连同它的关联行） */
@@ -354,7 +381,7 @@ public class NoteService {
                         q.getBankId(), q.getQuestionNumber()));
             }
         }
-        return new NoteResponse(n.getId(), n.getContent(), n.getSource(), views,
+        return new NoteResponse(n.getId(), n.getContent(), n.getSource(), n.getColor(), views,
                 n.getCreatedAt(), n.getUpdatedAt());
     }
 }

@@ -522,10 +522,12 @@ function onDockSelect(questionId) {
 }
 .review-content {
   margin: 12px 0 14px;
-  font-size: 14px;
-  line-height: 1.7;
+  /* 题干是回顾时最该看清的正文：跟着"阅读字号"档位（设置 / 笔记页可调） */
+  font-size: var(--content-font);
+  line-height: var(--content-lh);
   white-space: pre-wrap;
   word-break: break-word;
+  max-width: 72ch;
 }
 .review-content :deep(.rich-img) {
   max-width: 100%;
@@ -590,8 +592,8 @@ function onDockSelect(questionId) {
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 14px 16px;
-  font-size: 13px;
-  line-height: 1.8;
+  font-size: var(--content-font);
+  line-height: var(--content-lh);
   color: var(--text-primary);
   white-space: pre-wrap;
   word-break: break-word;
@@ -614,7 +616,8 @@ function onDockSelect(questionId) {
   margin-top: 10px;
 }
 .sub-answer {
-  font-size: 13px;
+  font-size: var(--content-font);
+  line-height: var(--content-lh);
   color: var(--text-primary);
   white-space: pre-wrap;
   word-break: break-word;
@@ -669,8 +672,8 @@ function onDockSelect(questionId) {
   margin-top: 6px;
 }
 .sub-ref-body {
-  font-size: 13px;
-  line-height: 1.7;
+  font-size: var(--content-font);
+  line-height: var(--content-lh);
   color: var(--text-primary);
   white-space: pre-wrap;
   word-break: break-word;
@@ -690,7 +693,7 @@ function onDockSelect(questionId) {
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 9px;
-  font-size: 13px;
+  font-size: var(--content-font);
   color: var(--text-primary);
 }
 .opt-key {
@@ -763,8 +766,8 @@ function onDockSelect(questionId) {
 }
 .review-text {
   margin: 8px 0 0;
-  font-size: 13px;
-  line-height: 1.7;
+  font-size: var(--content-font);
+  line-height: var(--content-lh);
   color: var(--text-primary);
   white-space: pre-wrap;
   word-break: break-word;

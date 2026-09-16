@@ -15,48 +15,44 @@
           <button class="qn-act danger" :title="t('delete')" @click="remove(n)">{{ t('delete') }}</button>
         </div>
         <div v-if="editingId !== n.id" class="qn-text" v-html="richHtml(n.content)"></div>
-        <div v-else class="qn-edit">
-          <textarea
-            ref="editBox"
-            v-model="draft"
-            class="qn-input"
-            :rows="1"
-            @input="autoGrow($event)"
-            @keydown.enter.exact.prevent="saveEdit(n)"
-          ></textarea>
-          <div v-if="needsPreview(draft)" class="qn-preview">
-            <span class="text-muted qn-preview-label">{{ t('preview') }}</span>
-            <div class="qn-text" v-html="richHtml(draft)"></div>
-          </div>
-          <div class="qn-edit-btns">
-            <button class="btn btn-secondary btn-sm" @click="editingId = null">{{ t('cancel') }}</button>
-            <button class="btn btn-primary btn-sm" :disabled="saving || !draft.trim()" @click="saveEdit(n)">{{ t('save') }}</button>
-          </div>
-        </div>
+        <NoteComposer
+          v-else
+          v-model="draft"
+          compact
+          cancelable
+          :bank-id="bankId"
+          :saving="saving"
+          :placeholder="t('placeholder')"
+          @save="saveEdit(n)"
+          @cancel="editingId = null"
+        >
+          <template #footer>
+            <div class="qn-edit-btns">
+              <button class="btn btn-secondary btn-sm" @click="editingId = null">{{ t('cancel') }}</button>
+              <button class="btn btn-primary btn-sm" :disabled="saving || !draft.trim()" @click="saveEdit(n)">{{ t('save') }}</button>
+            </div>
+          </template>
+        </NoteComposer>
       </div>
 
       <div class="qn-new">
-        <textarea
-          ref="newBox"
+        <NoteComposer
           v-model="draft"
-          class="qn-input"
-          :rows="1"
+          :bank-id="bankId"
+          :saving="saving"
           :placeholder="t('placeholder')"
-          @input="autoGrow($event)"
-          @keydown.enter.exact.prevent="create"
-        ></textarea>
-        <!-- 公式与图片在纯文本里看不出效果：只在内容确实需要时给一块实时预览 -->
-        <div v-if="needsPreview(draft)" class="qn-preview">
-          <span class="text-muted qn-preview-label">{{ t('preview') }}</span>
-          <div class="qn-text" v-html="richHtml(draft)"></div>
-        </div>
-        <div class="qn-new-btns">
-          <span class="text-muted qn-hint">{{ t('hint') }}</span>
-          <button class="btn btn-ghost btn-sm" @click="open = false">{{ t('collapse') }}</button>
-          <button class="btn btn-primary btn-sm" :disabled="saving || !draft.trim()" @click="create">
-            {{ saving ? t('saving') : t('save') }}
-          </button>
-        </div>
+          @save="create"
+        >
+          <template #footer>
+            <div class="qn-new-btns">
+              <span class="text-muted qn-hint">{{ t('hint') }}</span>
+              <button class="btn btn-ghost btn-sm" @click="open = false">{{ t('collapse') }}</button>
+              <button class="btn btn-primary btn-sm" :disabled="saving || !draft.trim()" @click="create">
+                {{ saving ? t('saving') : t('save') }}
+              </button>
+            </div>
+          </template>
+        </NoteComposer>
       </div>
       <p v-if="error" class="qn-error">{{ error }}</p>
     </div>
@@ -71,11 +67,14 @@
  * 解析是题库的（会随包导出、给别人看），笔记只在本机。这个边界写进 docs/features.md。
  *
  * 折叠态只占一个小按钮，展开才显示内容与输入框——做题页里不抢注意力。
+ * 输入框、标注工具条与"效果预览"统一由 `NoteComposer` 提供（笔记页用的是同一个组件），
+ * 这里只负责"这一题有哪些笔记"和增删改。
  */
-import { nextTick, onMounted, ref, watch } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import TikuIcon from './TikuIcon.vue'
+import NoteComposer from './NoteComposer.vue'
 import { useConfirm } from '../composables/useConfirm'
 import { createNote, deleteNote, listNotes, listQuestionNotes, updateNote } from '../api/notes'
 import { richTextToHtml } from '../utils/richText'
@@ -147,27 +146,8 @@ const editingId = ref(null)
 
 const richHtml = (s) => richTextToHtml(s || '', props.bankId)
 
-/**
- * 内容带公式（$...$）、图片标记或表格时，纯文本看不出效果——这时才给一块实时预览。
- * 不做成常驻分屏：绝大多数笔记是纯文本，常驻预览只会占地方。
- */
-const needsPreview = (text) => /\$[^$]+\$|\[图片:|<table[\s>]/i.test(String(text || ''))
-
-/** 输入框跟着内容长高（此前固定 rows，写长了要在小框里来回滚） */
-function autoGrow(e) {
-  const el = e?.target
-  if (!el) return
-  el.style.height = 'auto'
-  el.style.height = `${Math.min(el.scrollHeight, 400)}px`
-}
-
 onMounted(async () => {
   if (open.value) await load()
-  await nextTick()
-  document.querySelectorAll('.qn-input').forEach((el) => {
-    el.style.height = 'auto'
-    el.style.height = `${Math.min(el.scrollHeight, 400)}px`
-  })
 })
 
 const formatTime = (iso) => {
@@ -336,8 +316,8 @@ defineExpose({ reload: load, openUp: () => { open.value = true; load() } })
   color: var(--danger);
 }
 .qn-text {
-  font-size: 13px;
-  line-height: 1.8;
+  font-size: var(--content-font);
+  line-height: var(--content-lh);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -351,33 +331,6 @@ defineExpose({ reload: load, openUp: () => { open.value = true; load() } })
 .qn-hint {
   flex: 1;
   font-size: 11.5px;
-}
-.qn-input {
-  width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px 8px;
-  font-size: 13px;
-  font-family: inherit;
-  line-height: 1.7;
-  background: var(--bg-elev);
-  color: var(--text-primary);
-  /* 高度由内容撑开（autoGrow），不需要拖拽把手；超过 400px 才内部滚动 */
-  resize: none;
-  overflow-y: auto;
-}
-/* 只在内容含公式/图片时出现：输入框下方一块实时渲染结果 */
-.qn-preview {
-  margin-top: 6px;
-  border-left: 2px solid var(--accent);
-  padding: 4px 0 4px 8px;
-  background: var(--bg-elev);
-  border-radius: 0 8px 8px 0;
-}
-.qn-preview-label {
-  display: block;
-  font-size: 11px;
-  margin-bottom: 2px;
 }
 .qn-new {
   margin-top: 8px;

@@ -121,9 +121,30 @@ function renderImages(escaped, bankId) {
 }
 
 /**
- * 富文本 → HTML：文本（转义）+ LaTeX（KaTeX）+ 图片（[图片:name] → img）+ 表格（<table> → 白名单真实表格）混排。
+ * 轻量标注 → HTML（笔记里用，见 utils/noteMarkup.js）：
+ *   ==文字== → 黄底高亮；==g:文字== / ==b: / ==p: → 绿/蓝/粉
+ *   **文字** → 加粗；__文字__ → 下划线
+ *
+ * ⚠️ 必须在 LaTeX/图片渲染**之后**执行：公式已经被 KaTeX 换成 HTML，
+ * 标记符号只剩在公式两侧，所以"高亮一整段带公式的话"也能正确包住公式。
+ * 不跨行匹配（防止一个漏写的 == 把后面整段都吃掉）。
+ */
+const HIGHLIGHT_RE = /==(?:([ygbp]):)?([^=\n]+?)==/g
+const BOLD_RE = /\*\*([^*\n]+?)\*\*/g
+const UNDERLINE_RE = /__([^_\n]+?)__/g
+
+function renderMarks(html) {
+  return String(html)
+    .replace(HIGHLIGHT_RE, (m, color, text) => `<mark class="rt-hl rt-hl-${color || 'y'}">${text}</mark>`)
+    .replace(BOLD_RE, '<b class="rt-b">$1</b>')
+    .replace(UNDERLINE_RE, '<u class="rt-u">$1</u>')
+}
+
+/**
+ * 富文本 → HTML：文本（转义）+ LaTeX（KaTeX）+ 图片（[图片:name] → img）+ 表格（<table> → 白名单真实表格）
+ * + 轻量标注（高亮/加粗/下划线）混排。
  * 表格块包 `.rich-table-wrap`（横向滚动容器，样式在 main.css 全局定义）。
- * 渲染顺序：文本块 = 转义 → LaTeX 公式 → 图片 → 换行（公式片段含图片标记时由 KaTeX 容错回退）。
+ * 渲染顺序：文本块 = 转义 → LaTeX 公式 → 图片 → 标注 → 换行。
  */
 export function richTextToHtml(text, bankId) {
   if (!text) return ''
@@ -136,8 +157,8 @@ export function richTextToHtml(text, bankId) {
       const cleaned = sanitizeTableHtml(seg)
       html += `<div class="rich-table-wrap">${renderImages(cleaned, bankId)}</div>`
     } else {
-      // 普通文本：转义 → LaTeX 公式 → 图片 → 换行
-      html += renderImages(renderLatex(escapeHtml(seg)), bankId).replace(/\n/g, '<br>')
+      // 普通文本：转义 → LaTeX 公式 → 图片 → 标注 → 换行
+      html += renderMarks(renderImages(renderLatex(escapeHtml(seg)), bankId)).replace(/\n/g, '<br>')
     }
   }
   return html

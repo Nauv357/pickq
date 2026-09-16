@@ -172,16 +172,17 @@
 | `GET /api/tutor/sessions?questionId=` | 某题的历史会话（接着上次聊；**界面用它做"回看上次讲解"**） |
 | `GET /api/tutor/sessions/{sessionId}/messages` | `{messages[],maxHintLevel}` |
 
-### 1.3.5.2 `NoteController` — 我的笔记（7 个端点；只存本机，不进内容包）
+### 1.3.5.2 `NoteController` — 我的笔记（8 个端点；只存本机，不进内容包）
 
 笔记**不隶属于任何题库/题目**：挂在哪里由 `note_link` 关联表达（0..N 个题库、0..N 道题，未归类也合法）。
 
 | 方法 + 路径 | 请求 | 响应 `data` | 常见错误 |
 | --- | --- | --- | --- |
-| `GET /api/notes` | query `bankId`（可选）/ `questionId`（可选）/ `unlinked`（可选）/ `page` / `size` | `PageResult<NoteResponse{id,content,source(user/ai),links[{type,targetId,label,bankId,questionNumber}],createdAt,updatedAt}>` | — |
+| `GET /api/notes` | query `bankId`（可选）/ `questionId`（可选）/ `unlinked`（可选）/ `keyword`（可选，正文关键词）/ `page` / `size` | `PageResult<NoteResponse{id,content,source(user/ai),color(y/g/b/p,null),links[{type,targetId,label,bankId,questionNumber}],createdAt,updatedAt}>` | — |
 | `GET /api/questions/{questionId}/notes` | — | `List<NoteResponse>`（做题页/回顾页就地显示，不分页） | — |
-| `POST /api/notes` | `{bankId?, questionId?, content, source?}`（关联都可省略 = 未归类随手记） | `NoteResponse` | 400 `笔记内容不能为空`；404 `题库不存在：{id}` |
+| `POST /api/notes` | `{bankId?, questionId?, content, source?, color?}`（关联都可省略 = 未归类随手记） | `NoteResponse` | 400 `笔记内容不能为空`；404 `题库不存在：{id}` |
 | `PUT /api/notes/{id}` | `{content}` | `NoteResponse` | 400 `笔记内容不能为空`；404 `笔记不存在：{id}` |
+| `PUT /api/notes/{id}/color` | `{color}`（`y`/`g`/`b`/`p`；传 null 或空 = 取消标色） | `NoteResponse` | 404 `笔记不存在：{id}` |
 | `DELETE /api/notes/{id}` | — | `null` | 404 `笔记不存在：{id}` |
 | `POST /api/notes/{id}/links` | `{type(bank/question), targetId}` | `NoteResponse`（幂等：已挂过不重复插） | 400 `关联类型只能是 bank 或 question`；404 题库/题目/笔记不存在 |
 | `DELETE /api/notes/{id}/links` | query `type`、`targetId` | `NoteResponse`（笔记内容保留） | 同上 |

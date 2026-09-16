@@ -507,8 +507,9 @@ defineExpose({ explain, loadHistory, explainLabel })
   color: var(--success);
 }
 .qx-sec-text {
-  font-size: 13px;
-  line-height: 1.8;
+  /* 讲解正文：跟着"阅读字号"档位 */
+  font-size: var(--content-font);
+  line-height: var(--content-lh);
   word-break: break-word;
 }
 .qx-lead {
@@ -560,7 +561,7 @@ defineExpose({ explain, loadHistory, explainLabel })
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 5px 8px;
-  font-size: 13px;
+  font-size: var(--content-font);
   font-family: inherit;
   background: var(--bg-card);
   color: var(--text-primary);

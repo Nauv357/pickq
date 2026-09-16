@@ -26,6 +26,7 @@ import java.util.NoSuchElementException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -134,9 +135,43 @@ class NoteServiceTest {
         assertEquals(1, noteService.list(BANK_ID, questionId, false, 1, 20).total());
     }
 
+    /** 标记色：列表里靠它分类；非法值一律按"不标色"处理，且只改色不动正文 */
     @Test
-    void oneNoteCanBeLinkedToManyBanksAndQuestions() {
-        NoteResponse note = noteService.create(new NoteRequest(null, null, "增长率题都要先看年份", null));
+    void notesCanCarryAColorMark() {
+        NoteResponse colored = noteService.create(
+                new NoteRequest(BANK_ID, null, "这条要背下来", null, "y"));
+        assertEquals("y", colored.color(), "建笔记时可以顺手标色");
+
+        NoteResponse cleared = noteService.updateColor(colored.id(), "  ");
+        assertNull(cleared.color(), "空值 = 取消标色（不是报错）");
+        assertEquals("这条要背下来", cleared.content(), "只改色，不动正文");
+
+        NoteResponse back = noteService.updateColor(colored.id(), "P");
+        assertEquals("p", back.color(), "大小写归一化");
+        assertNull(noteService.create(new NoteRequest(BANK_ID, null, "随便", null, "rainbow")).color(),
+                "非法颜色按不标色处理（不引入第三种状态）");
+        assertEquals("改正文后色还在", noteService.update(colored.id(), "改正文后色还在").content());
+        assertEquals("p", noteService.list(BANK_ID, null, false, 1, 20).records().stream()
+                .filter(n -> n.id().equals(colored.id())).findFirst().orElseThrow().color(),
+                "改正文不该把颜色改掉");
+    }
+
+    /** 关键词搜索：按正文找"我记过什么"（笔记页顶部的搜索框） */
+    @Test
+    void notesCanBeSearchedByKeyword() {
+        noteService.create(new NoteRequest(BANK_ID, null, "增长率先看年份", null));
+        noteService.create(new NoteRequest(BANK_ID, null, "图形推理先数笔画", null));
+
+        assertEquals(1, noteService.list(null, null, false, "增长率", 1, 20).total());
+        assertEquals(1, noteService.list(null, null, false, "笔画", 1, 20).total());
+        assertEquals(2, noteService.list(null, null, false, "先", 1, 20).total(), "关键词可以命中多条");
+        assertEquals(0, noteService.list(null, null, false, "不存在的词", 1, 20).total());
+        assertEquals(2, noteService.list(null, null, false, "   ", 1, 20).total(), "空白关键词 = 不过滤");
+        assertEquals(1, noteService.list(BANK_ID, null, false, "增长率", 1, 20).total(), "可与题库过滤叠加");
+    }
+
+    @Test
+    void oneNoteCanBeLinkedToManyBanksAndQuestions() {        NoteResponse note = noteService.create(new NoteRequest(null, null, "增长率题都要先看年份", null));
 
         noteService.addLink(note.id(), new NoteLinkRequest(NoteLink.TYPE_QUESTION, questionId));
         noteService.addLink(note.id(), new NoteLinkRequest(NoteLink.TYPE_QUESTION, otherQuestionId));

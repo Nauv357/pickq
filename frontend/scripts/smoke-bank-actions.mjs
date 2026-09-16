@@ -65,16 +65,27 @@ if (/^\/api\/banks\/\d+\/sessions$/.test(pathname)) return { sessionId: 77, tota
 // 我的笔记：列表 + 新建（只存本机，不随题库导出）
 // 笔记不隶属于题库/题目：挂在哪里由 links 表达（一条笔记可以挂多处，也可以一个都不挂）
 if (pathname === '/api/notes') {
+  const today = new Date()
+  const iso = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 19)
+  const longText = '这段是长笔记，用来看列表里的折叠与展开：'.repeat(8)
   return {
-    records: [{
-      id: 1, content: '先看年份再动笔', source: 'ai',
-      links: [{ type: 'question', targetId: 101, label: '冒烟题库 A · 第 101 题', bankId: 1, questionNumber: 101 }],
-      createdAt: '2026-01-01T10:00:00', updatedAt: '2026-01-01T10:00:00'
-    }],
-    total: 1, page: 1, size: 20, pages: 1
+    records: [
+      {
+        id: 1, content: '先看年份再动笔', source: 'ai', color: 'y',
+        links: [{ type: 'question', targetId: 101, label: '冒烟题库 A · 第 101 题', bankId: 1, questionNumber: 101 }],
+        createdAt: iso(today), updatedAt: iso(today)
+      },
+      {
+        id: 2, content: longText, source: 'user', color: null,
+        links: [{ type: 'bank', targetId: 1, label: '冒烟题库 A', bankId: 1, questionNumber: null }],
+        createdAt: iso(new Date(today.getTime() - 40 * 86400000)), updatedAt: iso(new Date(today.getTime() - 40 * 86400000))
+      }
+    ],
+    total: 2, page: 1, size: 20, pages: 1
   }
 }
-if (/^\/api\/notes\/\d+\/links$/.test(pathname)) return { id: 1, content: '先看年份再动笔', source: 'ai', links: [] }
+if (/^\/api\/notes\/\d+\/links$/.test(pathname)) return { id: 1, content: '先看年份再动笔', source: 'ai', color: null, links: [] }
+if (/^\/api\/notes\/\d+\/color$/.test(pathname)) return { id: 1, content: '先看年份再动笔', source: 'user', color: 'g', links: [] }
 if (/^\/api\/notes\/\d+$/.test(pathname)) return { id: 1 }
 if (/^\/api\/questions\/\d+\/notes$/.test(pathname)) return []
 if (pathname === '/api/sessions/77') {
@@ -368,13 +379,74 @@ check('「更多」里有「我的笔记」', (await page.locator('.action-menu 
   (await page.locator('.action-menu .action-menu-item').allInnerTexts()).join(' | '))
 await page.locator('.action-menu .action-menu-item', { hasText: '我的笔记' }).click()
 await page.waitForURL(/\/notes\?bankId=1$/, { timeout: 10000 })
-await page.waitForSelector('.note-item', { timeout: 10000 })
+await page.waitForSelector('.note-card', { timeout: 10000 })
 const notesListReq = calls.find((c) => c.path === '/api/notes')
 check('笔记列表按题库过滤（GET /notes?bankId=1）', !!notesListReq && /bankId=1/.test(notesListReq.search || ''), notesListReq?.search || '(无请求)')
-const noteText = (await page.locator('.note-item').first().innerText()).replace(/\s+/g, ' ')
-check('笔记显示内容 / 关联（库名 + 题号）/ 来源（AI 讲解）', /先看年份再动笔/.test(noteText) && /第 101 题/.test(noteText) && /AI/.test(noteText), noteText)
+const noteText = (await page.locator('.note-card').first().innerText()).replace(/\s+/g, ' ')
+check('笔记显示内容 / 关联（题号）/ 来源（AI 讲解）', /先看年份再动笔/.test(noteText) && /第 101 题/.test(noteText) && /AI/.test(noteText), noteText)
 check('页面写明"只存本机"', /只存本机/.test((await page.locator('.note-new').innerText()).replace(/\s+/g, ' ')), await page.locator('.note-new').innerText())
 check('侧边栏有「笔记」入口', (await page.locator('.nav-item', { hasText: '笔记' }).count()) > 0)
+
+console.log('\n[15a] 条理：时间分组 / 长文折叠 / 类别色')
+const groupHeads = await page.locator('.note-group-name').allInnerTexts()
+check('按时间分组（今天 / 更早 都有小标题）', groupHeads.includes('今天') && groupHeads.includes('更早'), JSON.stringify(groupHeads))
+const clamped = await page.locator('.note-card .note-text.clamped').count()
+check('长笔记默认折叠（列表能一眼扫过）', clamped >= 1, `clamped=${clamped}`)
+await page.locator('.note-more').first().click()
+await page.waitForTimeout(200)
+check('点「展开全文」后不再折叠', (await page.locator('.note-card .note-text.clamped').count()) === clamped - 1)
+const rail = await page.evaluate(() => {
+  const el = document.querySelector('.note-card[style*="--rail"]')
+  return el ? getComputedStyle(el).getPropertyValue('--rail').trim() : ''
+})
+check('标了色的笔记有左侧色条（--rail 解析成具体颜色）', /^#|rgb/.test(rail), rail)
+
+console.log('\n[15b] 关联的题目就地展开（不跳走）')
+calls.length = 0
+await page.locator('.note-link-main', { hasText: '第 101 题' }).first().click()
+await page.waitForSelector('.qp-stem', { timeout: 10000 })
+const qpStem = (await page.locator('.qp-stem').first().innerText()).replace(/\s+/g, ' ')
+const qpReq = calls.find((c) => /^\/api\/questions\/101$/.test(c.path))
+check('展开就取这道题（GET /questions/101）', !!qpReq, JSON.stringify(calls.map((c) => c.path)))
+check('就地显示题干与选项（不用跳题库）', qpStem.length > 4 && (await page.locator('.qp-opt').count()) >= 2, qpStem.slice(0, 60))
+check('正确答案在预览里高亮', (await page.locator('.qp-opt.correct').count()) >= 1)
+await page.locator('.qp-act', { hasText: '收起' }).first().click()
+await page.waitForTimeout(300)
+check('可以就地收起', (await page.locator('.qp-stem').count()) === 0)
+
+console.log('\n[15c] 标注（高亮/加粗/下划线）与阅读字号')
+await page.locator('.note-new textarea').fill('资料分析先看年份')
+await page.locator('.note-new textarea').first().evaluate((el) => {
+  el.focus()
+  el.setSelectionRange(0, el.value.length)
+})
+await page.locator('.note-new .nc-dot').first().click()
+await page.waitForTimeout(300)
+const markedText = await page.locator('.note-new textarea').inputValue()
+check('选中文字点黄色 → 正文写入高亮标记 ==…==', markedText === '==资料分析先看年份==', markedText)
+check('有标记时出现"效果预览"', (await page.locator('.note-new .nc-preview-body mark.rt-hl').count()) >= 1)
+await page.locator('.note-new .nc-tool', { hasText: '清除标记' }).click()
+await page.waitForTimeout(200)
+check('「清除标记」还原成纯文本', (await page.locator('.note-new textarea').inputValue()) === '资料分析先看年份')
+const fontBefore = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--content-font').trim())
+await page.locator('.size-btn', { hasText: 'A+' }).click()
+await page.waitForTimeout(200)
+const fontAfter = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--content-font').trim())
+check('笔记页 A+ 真的放大正文（--content-font 变化）', fontBefore !== fontAfter, `${fontBefore} → ${fontAfter}`)
+const noteFont = await page.evaluate(() => getComputedStyle(document.querySelector('.note-text')).fontSize)
+check('笔记正文用的是这一档字号', noteFont === fontAfter, `${noteFont} vs ${fontAfter}`)
+await page.locator('.size-btn', { hasText: 'A−' }).click()
+await page.waitForTimeout(200)
+
+console.log('\n[15d] 搜索与随手记')
+calls.length = 0
+await page.locator('.note-search-input').fill('笔画')
+await page.locator('.note-search-input').press('Enter')
+await page.waitForTimeout(600)
+const searchReq = calls.filter((c) => c.path === '/api/notes').pop()
+check('搜索走服务端（GET /notes?keyword=…）', !!searchReq && /keyword/.test(decodeURIComponent(searchReq.search || '')), searchReq?.search || '(无请求)')
+await page.locator('.note-search-clear').click()
+await page.waitForTimeout(400)
 await page.locator('.note-new textarea').fill('资料分析先看年份')
 await page.locator('.note-new button', { hasText: '保存' }).click()
 await page.waitForTimeout(600)
@@ -383,12 +455,14 @@ check('随手记发 POST /notes，并带上当前题库关联',
   !!quickPost && /"content":"资料分析先看年份"/.test(quickPost.body || '') && /"bankId":1/.test((quickPost.body || '').replace(/\s/g, '')),
   quickPost?.body || '(无请求)')
 
-console.log('\n[15b] 关联标签可跳转 / 可解除')
+console.log('\n[15e] 题库关联仍可跳转 / 可解除')
 calls.length = 0
-await page.locator('.note-link-jump').first().click()
+await page.locator('.note-link-main', { hasText: '第 101 题' }).first().click()
+await page.waitForSelector('.qp-act', { timeout: 10000 })
+await page.locator('.qp-act', { hasText: '去题库' }).first().click()
 await page.waitForSelector('.q-row[data-qid="101"]', { timeout: 15000 })
 await page.waitForTimeout(400)
-check('点关联标签回到那道题（/banks/1?q=101 → 定位第 101 题，q 参数随即被消费）',
+check('「去题库」回到那道题（/banks/1?q=101 → 定位第 101 题，q 参数随即被消费）',
   /\/banks\/1$/.test(page.url()), page.url())
 await page.goBack({ waitUntil: 'domcontentloaded' })
 await page.waitForSelector('.note-link-x', { timeout: 10000 })

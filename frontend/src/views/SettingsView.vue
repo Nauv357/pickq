@@ -39,6 +39,13 @@
         <el-radio-button value="zh-CN">{{ t('appearance.langZh') }}</el-radio-button>
         <el-radio-button value="en-US">{{ t('appearance.langEn') }}</el-radio-button>
       </el-radio-group>
+      <p class="panel-desc text-secondary lang-desc">{{ t('appearance.fontLead') }}</p>
+      <el-radio-group :model-value="readingScale" @change="onReadingScaleChange">
+        <el-radio-button v-for="s in READING_SCALES" :key="s.key" :value="s.key">
+          {{ currentLang === 'en-US' ? s.labelEn : s.label }}
+        </el-radio-button>
+      </el-radio-group>
+      <p class="panel-desc text-secondary">{{ t('appearance.fontHint') }}</p>
     </section>
 
     <section class="panel">
@@ -331,6 +338,7 @@ import PageHeader from '../components/PageHeader.vue'
 import { useConfirm } from '../composables/useConfirm'
 import { getTheme, setTheme, currentTheme } from '../utils/theme'
 import { setLang, getLangPref, currentLang } from '../i18n/lang'
+import { READING_SCALES, readingScale, setReadingScale } from '../utils/reading'
 import { isDesktop, getAppVersion, checkForUpdate, downloadUpdate, installUpdate } from '../utils/updater'
 import { openExternal } from '../utils/external'
 import { useI18n } from 'vue-i18n'
@@ -374,7 +382,9 @@ const { t } = useI18n({
         langZh: '中文',
         langEn: 'English',
         langSwitched: '已切换为中文',
-        langFollowSystem: '已跟随系统语言'
+        langFollowSystem: '已跟随系统语言',
+        fontLead: '正文大小：',
+        fontHint: '题目、选项、解析与笔记正文一起变；标题与按钮不受影响。笔记页右上角也能直接调。'
       },
       records: {
         title: '刷题记录',
@@ -528,7 +538,9 @@ const { t } = useI18n({
         langZh: '中文',
         langEn: 'English',
         langSwitched: 'Language switched to English',
-        langFollowSystem: 'Now following the system language'
+        langFollowSystem: 'Now following the system language',
+        fontLead: 'Content size: ',
+        fontHint: 'Applies to questions, options, analysis and notes together; headings and buttons stay put. Also adjustable from the notes page header.'
       },
       records: {
         title: 'Practice Records',
@@ -810,6 +822,11 @@ function onLangChange(v) {
   setLang(v)
   langPref.value = getLangPref()
   ElMessage.success(v === 'system' ? t('appearance.langFollowSystem') : t('appearance.langSwitched'))
+}
+
+/* ---------- 正文大小（阅读字号；与笔记页右上角的 A−/A+ 是同一个真相） ---------- */
+function onReadingScaleChange(v) {
+  setReadingScale(v)
 }
 
 /* ---------- 作者信息（默认作者名，本地记忆；导出弹窗默认带入） ---------- */

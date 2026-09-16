@@ -49,6 +49,7 @@
 | `V20__learning_path_mastery_loop.sql` | 建 `card`（闪卡，已从界面下线）、`question_difficulty`（85% 规则用） | `card`、`question_difficulty` |
 | `V21__note.sql` | 建 `note`（我的笔记；只存本机，不进内容包） | `note` |
 | `V22__note_links.sql` | 建 `note_link`（笔记 ↔ 题库/题目 多对多），把旧 `note.bank_id`/`question_id` 平移成关联后删列 | `note`、`note_link` |
+| `V23__note_color.sql` | `note` 加 `color`（整条笔记的类别色：黄/绿/蓝/粉，可空） | `note` |
 
 > `V15` 的动机：发布侧按契约允许 `description` 2000 / `packageKey` 100 / `version` 40 / `questionKey` 100，
 > 而本地列原本只有 500 / 64 / 20 / 64 —— 会出现「合法内容包能发布成功、下载后导入本地却因列超长落库失败」。
@@ -260,7 +261,8 @@
 | 字段 | 类型 | 约束 | 含义 | 关联/来源 |
 | --- | --- | --- | --- | --- |
 | `id` | BIGINT | PK，AUTO_INCREMENT | 笔记主键 | — |
-| `content` | TEXT | NOT NULL | 正文（纯文本，上限 2000 字，超长截断） | `NoteService.normalize` |
+| `content` | TEXT | NOT NULL | 正文（纯文本 + 轻量标注 `==高亮==`/`**粗**`/`__下划线__`，上限 2000 字，超长截断） | `NoteService.normalize`；渲染见 `utils/richText.js` |
+| `color` | VARCHAR(8) | 可空 | 整条笔记的类别色：`y`/`g`/`b`/`p`（空 = 不标色） | `Note.normalizeColor`；非法值按空处理 |
 | `source` | VARCHAR(16) | NOT NULL DEFAULT `user` | `user` 自己写的 / `ai` 从讲解一键存进来的 | `Note.SOURCE_USER/SOURCE_AI` |
 | `created_at` | TIMESTAMP | NOT NULL，DEFAULT `CURRENT_TIMESTAMP` | 创建时间 | — |
 | `updated_at` | TIMESTAMP | NOT NULL，DEFAULT `CURRENT_TIMESTAMP` | 更新时间（应用层写入，不依赖 `ON UPDATE`） | 列表按它倒序 |

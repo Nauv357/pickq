@@ -29,16 +29,17 @@ public class NoteController {
     }
 
     /**
-     * 笔记列表（按最近更新排序）。三种过滤可单用：
-     * `bankId` 该题库下的、`questionId` 该题的、`unlinked=true` 未归类的；都不给 = 全部。
+     * 笔记列表（按最近更新排序）。过滤可组合：
+     * `bankId` 该题库下的、`questionId` 该题的、`unlinked=true` 未归类的、`keyword` 正文关键词；都不给 = 全部。
      */
     @GetMapping("/notes")
     public ApiResponse<PageResult<NoteResponse>> list(@RequestParam(required = false) Long bankId,
                                                      @RequestParam(required = false) Long questionId,
                                                      @RequestParam(defaultValue = "false") boolean unlinked,
+                                                     @RequestParam(required = false) String keyword,
                                                      @RequestParam(defaultValue = "1") int page,
                                                      @RequestParam(defaultValue = "20") int size) {
-        return ApiResponse.success(noteService.list(bankId, questionId, unlinked, page, size));
+        return ApiResponse.success(noteService.list(bankId, questionId, unlinked, keyword, page, size));
     }
 
     /** 某道题的笔记（做题页/回顾页就地显示，不分页） */
@@ -56,6 +57,12 @@ public class NoteController {
     @PutMapping("/notes/{id}")
     public ApiResponse<NoteResponse> update(@PathVariable Long id, @RequestBody NoteRequest request) {
         return ApiResponse.success(noteService.update(id, request == null ? null : request.content()));
+    }
+
+    /** 只改标记色（不动正文）；`color` 传 null/空 = 取消标色 */
+    @PutMapping("/notes/{id}/color")
+    public ApiResponse<NoteResponse> updateColor(@PathVariable Long id, @RequestBody NoteRequest request) {
+        return ApiResponse.success(noteService.updateColor(id, request == null ? null : request.color()));
     }
 
     @DeleteMapping("/notes/{id}")

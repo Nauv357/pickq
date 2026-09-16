@@ -2932,7 +2932,8 @@ loadTopicOptions() // 分类筛选选项（与 TOPIC 会话共用，幂等）
 .q-content {
   flex: 1;
   min-width: 0;
-  font-size: 14px;
+  /* 题干是列表里最该看清的内容：跟着"阅读字号"档位（设置 / 笔记页可调） */
+  font-size: var(--content-font);
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;

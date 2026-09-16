@@ -29,6 +29,12 @@ public class Note {
 
     private String content;
 
+    /**
+     * 标记色（可空 = 不标色）：y 黄 / g 绿 / b 蓝 / p 粉。
+     * 让用户在列表里一眼分出类别，不用读文字；正文里的行内高亮（==文字==）是另一件事。
+     */
+    private String color;
+
     /** user 自己写的 / ai 从讲解存进来的（界面上要能一眼看出来） */
     private String source;
 
@@ -40,4 +46,16 @@ public class Note {
 
     public static final String SOURCE_USER = "user";
     public static final String SOURCE_AI = "ai";
+
+    /** 允许的标记色（与前端 utils/noteMarkup.js 的调色板一致） */
+    public static final java.util.List<String> COLORS = java.util.List.of("y", "g", "b", "p");
+
+    /** 归一化标记色：非法值一律当成"不标色"（不引入第三种状态） */
+    public static String normalizeColor(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String c = raw.trim().toLowerCase();
+        return COLORS.contains(c) ? c : null;
+    }
 }

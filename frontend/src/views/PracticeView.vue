@@ -1188,8 +1188,9 @@ loadAll()
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 14px 16px;
-  font-size: 14px;
-  line-height: 1.8;
+  /* 正文类内容统一跟着"阅读字号"档位（设置 / 笔记页可调） */
+  font-size: var(--content-font);
+  line-height: var(--content-lh);
   color: var(--text-primary);
   white-space: pre-wrap;
   word-break: break-word;
@@ -1292,8 +1293,9 @@ loadAll()
 }
 .q-content {
   margin: 0 0 18px;
-  font-size: 15px;
-  line-height: 1.7;
+  /* 题干是做题时最该看清的正文：跟着"阅读字号"档位 */
+  font-size: var(--content-font);
+  line-height: var(--content-lh);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -1358,6 +1360,8 @@ loadAll()
 .opt-text {
   flex: 1;
   min-width: 0;
+  font-size: var(--content-font);
+  line-height: var(--content-lh);
   white-space: pre-wrap;
   word-break: break-word;
 }

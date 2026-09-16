@@ -10,16 +10,19 @@ import http from './http'
  * 笔记不隶属于任何题库/题目：挂在哪里由**关联**决定（0..N 个题库、0..N 道题，未归类也合法）。
  */
 
-/** 笔记列表：params = { bankId?, questionId?, unlinked?, page, size }（都不给 = 全部） */
+/** 笔记列表：params = { bankId?, questionId?, unlinked?, keyword?, page, size }（都不给 = 全部） */
 export const listNotes = (params) => http.get('/notes', { params })
 
 /** 某道题的笔记（做题页/回顾页就地显示，不分页） */
 export const listQuestionNotes = (questionId) => http.get(`/questions/${questionId}/notes`)
 
-/** 新建笔记：{bankId?, questionId?, content, source?}（关联都可省略 = 未归类随手记） */
+/** 新建笔记：{bankId?, questionId?, content, source?, color?}（关联都可省略 = 未归类随手记） */
 export const createNote = (data) => http.post('/notes', data)
 
 export const updateNote = (id, content) => http.put(`/notes/${id}`, { content })
+
+/** 只改标记色（不动正文）；color 传 null = 取消标色 */
+export const setNoteColor = (id, color) => http.put(`/notes/${id}/color`, { color })
 
 export const deleteNote = (id) => http.delete(`/notes/${id}`)
 

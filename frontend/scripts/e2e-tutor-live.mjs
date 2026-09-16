@@ -334,6 +334,21 @@ try {
   check('笔记按题库可列出（挂在这个库题目上的也算）',
     bankNotes.total >= 1 && (bankNotes.records[0].links || []).length >= 1,
     JSON.stringify(bankNotes).slice(0, 200))
+
+  // 笔记页（真数据）：按时间分组，关联的题目就地展开
+  await page.goto(`${UI}/notes`, { waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('.note-card', { timeout: 15000 })
+  const noteGroups = await page.locator('.note-group-name').allInnerTexts()
+  check('笔记页按时间分组（刚写的落在「今天」）', noteGroups.includes('今天'), JSON.stringify(noteGroups))
+  const firstNoteText = flat(await page.locator('.note-card').first().innerText())
+  check('笔记卡显示来源与相对时间（AI 讲解 / 时分）',
+    /AI/.test(firstNoteText) && /\d{2}:\d{2}|昨天|天前|月/.test(firstNoteText), firstNoteText.slice(0, 80))
+  await page.locator('.note-link-main', { hasText: '第' }).first().click()
+  await page.waitForSelector('.qp-stem', { timeout: 15000 })
+  const previewStem = flat(await page.locator('.qp-stem').first().innerText())
+  check('笔记里关联的题目就地展开（题干 + 选项，不跳题库）',
+    previewStem.length > 4 && (await page.locator('.qp-opt').count()) >= 1, previewStem.slice(0, 60))
+  await page.screenshot({ path: `${SHOTS}/4-笔记页.png` })
   await page.screenshot({ path: `${SHOTS}/3-错题讲解.png` })
 
   /* ---------------- ③b 统一解析：三处入口同一个组件 + 上次讲过的自动回看 ---------------- */

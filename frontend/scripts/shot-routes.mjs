@@ -59,7 +59,61 @@ function stub(pathname) {
   if (pathname === '/api/ai/presets' || pathname === '/api/ai/models') return []
   if (pathname.startsWith('/api/ai-import/jobs')) return []
   if (pathname.endsWith('/wrong-questions') || pathname.endsWith('/records') || pathname.endsWith('/review/due')) return { records: [], total: 0 }
+  if (pathname === '/api/notes' || pathname.startsWith('/api/notes?')) return NOTES
+  if (pathname === '/api/questions/101/notes') return []
   return { records: [], total: 0 }
+}
+
+/* 我的笔记（贴近真实使用：今天/昨天/更早都有，长短不一，含公式与关联多处的笔记） */
+const now = new Date()
+const daysAgo = (d, hh = 20, mm = 15) => {
+  const t = new Date(now.getTime() - d * 86400000)
+  t.setHours(hh, mm, 0, 0)
+  return t.toISOString().slice(0, 19)
+}
+const noteLink = (q, bankId, label, num) => ({ type: 'question', targetId: q, label: `${label} · 第 ${num} 题`, bankId, questionNumber: num })
+const bankLink = (id, label) => ({ type: 'bank', targetId: id, label, bankId: id, questionNumber: null })
+const NOTES = {
+  records: [
+    {
+      id: 11, content: '增长率题先认年份：题干里「比 2023 年」说明 2023 是基期，别把现期当基期。\n公式：$\\frac{现期}{基期}-1$，==这类题最容易在"基期"上栽跟头==，**每次先圈年份**。',
+      source: 'user', color: 'y', createdAt: daysAgo(0, 21, 12), updatedAt: daysAgo(0, 21, 12),
+      links: [noteLink(101, 2, '2026年安徽省考行测（第三套）', 18), bankLink(2, '2026年安徽省考行测（第三套）')]
+    },
+    {
+      id: 18, content: '这一段故意写长，用来看列表里的"展开全文"：资料分析的题干往往很长，先扫一遍问的是什么，再回去找数据；遇到同比/环比要看清比较对象，遇到"增长了"和"增长到"要分清是增长率还是具体量。'.repeat(3),
+      source: 'user', color: 'b', createdAt: daysAgo(0, 9, 5), updatedAt: daysAgo(0, 9, 5), links: []
+    },
+    {
+      id: 12, content: '图形推理先数笔画，再数封闭区域；两条路都走不通再看对称轴。',
+      source: 'user', color: '', createdAt: daysAgo(0, 15, 40), updatedAt: daysAgo(0, 15, 40),
+      links: [bankLink(3, '专项智能练习（判断推理）(3)')]
+    },
+    {
+      id: 13, content: '【错在哪】把基期当成了现期，所以算出来的是增长量。\n【这类题怎么做】看到「增长率」先认出现期与基期，再套 现期 ÷ 基期 − 1。\n【下次防错】先圈出题干里的年份，再动笔。',
+      source: 'ai', color: '', createdAt: daysAgo(1, 22, 5), updatedAt: daysAgo(1, 22, 5),
+      links: [noteLink(102, 2, '2026年安徽省考行测（第三套）', 24)]
+    },
+    {
+      id: 14, content: '逻辑填空别只看搭配，先看上下文的转折关系：「然而」「但是」后面才是重点。',
+      source: 'user', color: 'g', createdAt: daysAgo(1, 9, 30), updatedAt: daysAgo(1, 9, 30), links: []
+    },
+    {
+      id: 15, content: '物理大题读题时先画受力分析图，别急着套公式；题干给的角度很多时候是干扰项。',
+      source: 'user', color: '', createdAt: daysAgo(3, 16, 20), updatedAt: daysAgo(3, 16, 20),
+      links: [bankLink(5, '2024安徽高考真题物理（教师版·含解析）')]
+    },
+    {
+      id: 16, content: '这几次模考的共同问题：资料分析做完最后两道就超时。下次先扫一遍全卷，把资料分析放中间做。',
+      source: 'user', color: 'p', createdAt: daysAgo(6, 11, 0), updatedAt: daysAgo(6, 11, 0),
+      links: [bankLink(11, '2026年安徽省考行测（模考一）'), bankLink(12, '2026年安徽省考行测（模考二）')]
+    },
+    {
+      id: 17, content: '申论开头用「背景 + 观点」两句话就够，不要铺陈三段再点题。',
+      source: 'user', color: '', createdAt: daysAgo(12, 20, 45), updatedAt: daysAgo(12, 20, 45), links: []
+    }
+  ],
+  total: 7, page: 1, size: 20, pages: 1
 }
 
 const browser = await chromium.launch({ executablePath: CHROME, headless: true })
