@@ -335,20 +335,41 @@ try {
     bankNotes.total >= 1 && (bankNotes.records[0].links || []).length >= 1,
     JSON.stringify(bankNotes).slice(0, 200))
 
-  // 笔记页（真数据）：按时间分组，关联的题目就地展开
+  // 笔记页（真数据）：列表 + 右侧详情；点一条就能打开，改完保存不会新增
   await page.goto(`${UI}/notes`, { waitUntil: 'domcontentloaded' })
-  await page.waitForSelector('.note-card', { timeout: 15000 })
+  await page.waitForSelector('.note-row', { timeout: 15000 })
   const noteGroups = await page.locator('.note-group-name').allInnerTexts()
   check('笔记页按时间分组（刚写的落在「今天」）', noteGroups.includes('今天'), JSON.stringify(noteGroups))
-  const firstNoteText = flat(await page.locator('.note-card').first().innerText())
-  check('笔记卡显示来源与相对时间（AI 讲解 / 时分）',
-    /AI/.test(firstNoteText) && /\d{2}:\d{2}|昨天|天前|月/.test(firstNoteText), firstNoteText.slice(0, 80))
+  const firstRowText = flat(await page.locator('.note-row-text').first().innerText())
+  const firstRowMeta = flat(await page.locator('.note-row-meta').first().innerText())
+  check('列表一行 = 摘要 + 时间 + 来源/关联',
+    firstRowText.length > 4 && /今天|昨天|天前|月|\d{2}:\d{2}/.test(firstRowMeta) && /第 \d+ 题|未归类|来自讲解/.test(firstRowMeta),
+    `text=${firstRowText.slice(0, 40)} | meta=${firstRowMeta}`)
+  await page.locator('.note-row').first().click()
+  await page.waitForSelector('.detail-text', { timeout: 10000 })
+  const detailText = flat(await page.locator('.detail-text').innerText())
+  check('点这一条本身就能打开（右侧显示正文，不是只有右侧小按钮能点）',
+    detailText.length > 4 && /【错在哪】/.test(detailText), detailText.slice(0, 60))
   await page.locator('.note-link-main', { hasText: '第' }).first().click()
   await page.waitForSelector('.qp-stem', { timeout: 15000 })
   const previewStem = flat(await page.locator('.qp-stem').first().innerText())
   check('笔记里关联的题目就地展开（题干 + 选项，不跳题库）',
     previewStem.length > 4 && (await page.locator('.qp-opt').count()) >= 1, previewStem.slice(0, 60))
   await page.screenshot({ path: `${SHOTS}/4-笔记页.png` })
+
+  // 回归用户报的 bug：改一条"来自讲解"的笔记，必须只更新那一条（曾经因为共用草稿变成了新建）
+  await page.locator('.note-act', { hasText: '改' }).first().click()
+  await page.waitForTimeout(400)
+  check('同时只有一个编辑框', (await page.locator('.nc-input').count()) === 1,
+    `nc-input=${await page.locator('.nc-input').count()}`)
+  await page.locator('.nc-input').fill('改过的笔记：先圈年份再看增长率')
+  await page.locator('.detail-foot .btn-primary', { hasText: '保存' }).click()
+  await page.waitForTimeout(1500)
+  const afterEdit = await api(`/notes?bankId=${bankId}&page=1&size=20`)
+  const edited = (afterEdit.records || []).find((n) => n.content === '改过的笔记：先圈年份再看增长率')
+  check('改完保存 = 更新那一条（条数没变、来源仍是 AI 讲解）',
+    afterEdit.total === bankNotes.total && !!edited && edited.source === 'ai',
+    `total ${bankNotes.total} → ${afterEdit.total}；edited=${JSON.stringify(edited)?.slice(0, 120)}`)
   await page.screenshot({ path: `${SHOTS}/3-错题讲解.png` })
 
   /* ---------------- ③b 统一解析：三处入口同一个组件 + 上次讲过的自动回看 ---------------- */

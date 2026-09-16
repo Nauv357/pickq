@@ -178,7 +178,7 @@
 
 | 方法 + 路径 | 请求 | 响应 `data` | 常见错误 |
 | --- | --- | --- | --- |
-| `GET /api/notes` | query `bankId`（可选）/ `questionId`（可选）/ `unlinked`（可选）/ `keyword`（可选，正文关键词）/ `page` / `size` | `PageResult<NoteResponse{id,content,source(user/ai),color(y/g/b/p,null),links[{type,targetId,label,bankId,questionNumber}],createdAt,updatedAt}>` | — |
+| `GET /api/notes` | query `bankId`（可选）/ `questionId`（可选）/ `unlinked`（可选）/ `keyword`（可选，正文关键词）/ `source`（可选，`user`/`ai`）/ `page` / `size` | `PageResult<NoteResponse{id,content,source(user/ai),color(y/g/b/p,null),links[{type,targetId,label,bankId,questionNumber}],createdAt,updatedAt}>` | — |
 | `GET /api/questions/{questionId}/notes` | — | `List<NoteResponse>`（做题页/回顾页就地显示，不分页） | — |
 | `POST /api/notes` | `{bankId?, questionId?, content, source?, color?}`（关联都可省略 = 未归类随手记） | `NoteResponse` | 400 `笔记内容不能为空`；404 `题库不存在：{id}` |
 | `PUT /api/notes/{id}` | `{content}` | `NoteResponse` | 400 `笔记内容不能为空`；404 `笔记不存在：{id}` |

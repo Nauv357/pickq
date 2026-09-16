@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.tiku.dto.NoteLinkRequest;
 import com.tiku.dto.NoteLinkResponse;
+import com.tiku.dto.NoteQuery;
 import com.tiku.dto.NoteRequest;
 import com.tiku.dto.NoteResponse;
 import com.tiku.dto.PageResult;
@@ -62,35 +63,42 @@ public class NoteService {
         this.questionBankMapper = questionBankMapper;
     }
 
-    /** 不带关键词的常用形态（题库内的笔记列表、每题的笔记列表） */
+    /** 不带关键词与来源的常用形态（每题的笔记列表） */
     public PageResult<NoteResponse> list(Long bankId, Long questionId, boolean unlinked, int page, int size) {
-        return list(bankId, questionId, unlinked, null, page, size);
+        return list(new NoteQuery(bankId, questionId, unlinked, null, null), page, size);
+    }
+
+    /** 带关键词、不带来源的形态（测试与题库内列表用） */
+    public PageResult<NoteResponse> list(Long bankId, Long questionId, boolean unlinked, String keyword,
+                                        int page, int size) {
+        return list(new NoteQuery(bankId, questionId, unlinked, keyword, null), page, size);
     }
 
     /**
      * 笔记列表（按最近更新排序）。
      *
-     * @param bankId     只看"这个题库的笔记" = 挂在库上的 + 挂在这个库题目上的（可空）
-     * @param questionId 只看关联到该题的笔记（可空）
-     * @param unlinked   true = 只看"未归类"（一条关联都没有）
-     * @param keyword    正文关键词（可空；用于"我记过什么"的查找）
+     * @param query 过滤条件（题库 / 题目 / 未归类 / 关键词 / 来源），见 {@link NoteQuery}
      */
-    public PageResult<NoteResponse> list(Long bankId, Long questionId, boolean unlinked, String keyword,
-                                        int page, int size) {
+    public PageResult<NoteResponse> list(NoteQuery query, int page, int size) {
+        NoteQuery q = query == null ? NoteQuery.all() : query;
         LambdaQueryWrapper<Note> w = new LambdaQueryWrapper<Note>()
                 .orderByDesc(Note::getUpdatedAt)
                 .orderByDesc(Note::getId);
-        if (questionId != null) {
-            w = w.inSql(Note::getId, linkIdsSql(NoteLink.TYPE_QUESTION, questionId));
-        } else if (bankId != null) {
-            w = w.inSql(Note::getId, bankNoteIdsSql(bankId));
+        if (q.questionId() != null) {
+            w = w.inSql(Note::getId, linkIdsSql(NoteLink.TYPE_QUESTION, q.questionId()));
+        } else if (q.bankId() != null) {
+            w = w.inSql(Note::getId, bankNoteIdsSql(q.bankId()));
         }
-        if (unlinked) {
+        if (q.unlinked()) {
             w = w.notInSql(Note::getId, "SELECT note_id FROM note_link");
         }
-        String kw = keyword == null ? "" : keyword.trim();
+        String kw = q.keyword() == null ? "" : q.keyword().trim();
         if (!kw.isEmpty()) {
             w = w.like(Note::getContent, kw);
+        }
+        String source = q.normalizedSource();
+        if (source != null) {
+            w = w.eq(Note::getSource, source);
         }
         IPage<Note> result = noteMapper.selectPage(
                 new Page<>(com.tiku.util.Paging.page(page), com.tiku.util.Paging.size(size)), w);

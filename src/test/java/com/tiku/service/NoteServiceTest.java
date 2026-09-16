@@ -3,6 +3,7 @@ package com.tiku.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.tiku.dto.NoteLinkRequest;
 import com.tiku.dto.NoteLinkResponse;
+import com.tiku.dto.NoteQuery;
 import com.tiku.dto.NoteRequest;
 import com.tiku.dto.NoteResponse;
 import com.tiku.dto.PageResult;
@@ -168,6 +169,21 @@ class NoteServiceTest {
         assertEquals(0, noteService.list(null, null, false, "不存在的词", 1, 20).total());
         assertEquals(2, noteService.list(null, null, false, "   ", 1, 20).total(), "空白关键词 = 不过滤");
         assertEquals(1, noteService.list(BANK_ID, null, false, "增长率", 1, 20).total(), "可与题库过滤叠加");
+    }
+
+    /** 来源筛选：我写的 / 从讲解存的（界面上的"来源"筛选，不是分类） */
+    @Test
+    void notesCanBeFilteredBySource() {
+        noteService.create(new NoteRequest(BANK_ID, null, "我自己想的", null));
+        noteService.create(new NoteRequest(BANK_ID, null, "【错在哪】讲解存进来的", "ai"));
+
+        assertEquals(1, noteService.list(new NoteQuery(null, null, false, null, "ai"), 1, 20).total());
+        assertEquals(1, noteService.list(new NoteQuery(null, null, false, null, "user"), 1, 20).total());
+        assertEquals(2, noteService.list(new NoteQuery(null, null, false, null, null), 1, 20).total(), "不筛来源 = 全部");
+        assertEquals(2, noteService.list(new NoteQuery(null, null, false, null, "system"), 1, 20).total(),
+                "非法来源值按不筛处理（不引入第三种状态）");
+        assertEquals(1, noteService.list(new NoteQuery(BANK_ID, null, false, "错在哪", "ai"), 1, 20).total(),
+                "可与关键词叠加");
     }
 
     @Test

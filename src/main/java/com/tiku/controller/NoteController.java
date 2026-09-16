@@ -2,6 +2,7 @@ package com.tiku.controller;
 
 import com.tiku.dto.ApiResponse;
 import com.tiku.dto.NoteLinkRequest;
+import com.tiku.dto.NoteQuery;
 import com.tiku.dto.NoteRequest;
 import com.tiku.dto.NoteResponse;
 import com.tiku.dto.PageResult;
@@ -30,16 +31,18 @@ public class NoteController {
 
     /**
      * 笔记列表（按最近更新排序）。过滤可组合：
-     * `bankId` 该题库下的、`questionId` 该题的、`unlinked=true` 未归类的、`keyword` 正文关键词；都不给 = 全部。
+     * `bankId` 该题库下的、`questionId` 该题的、`unlinked=true` 未归类的、
+     * `keyword` 正文关键词、`source` 来源（`user`/`ai`）；都不给 = 全部。
      */
     @GetMapping("/notes")
     public ApiResponse<PageResult<NoteResponse>> list(@RequestParam(required = false) Long bankId,
                                                      @RequestParam(required = false) Long questionId,
                                                      @RequestParam(defaultValue = "false") boolean unlinked,
                                                      @RequestParam(required = false) String keyword,
+                                                     @RequestParam(required = false) String source,
                                                      @RequestParam(defaultValue = "1") int page,
                                                      @RequestParam(defaultValue = "20") int size) {
-        return ApiResponse.success(noteService.list(bankId, questionId, unlinked, keyword, page, size));
+        return ApiResponse.success(noteService.list(new NoteQuery(bankId, questionId, unlinked, keyword, source), page, size));
     }
 
     /** 某道题的笔记（做题页/回顾页就地显示，不分页） */
