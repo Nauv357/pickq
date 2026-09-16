@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tiku.dto.DeleteBankResult;
 import com.tiku.mapper.AiImportJobMapper;
 import com.tiku.mapper.MaterialMapper;
-import com.tiku.mapper.NoteMapper;
+import com.tiku.mapper.NoteLinkMapper;
 import com.tiku.mapper.PracticeSessionMapper;
 import com.tiku.mapper.PracticeSessionQuestionMapper;
 import com.tiku.mapper.QuestionBankMapper;
@@ -55,7 +55,7 @@ class QuestionBankCascadeDeleteTest {
         PracticeSessionQuestionMapper sessionQuestionMapper = mock(PracticeSessionQuestionMapper.class);
         MaterialMapper materialMapper = mock(MaterialMapper.class);
         AiImportJobMapper jobMapper = mock(AiImportJobMapper.class);
-        NoteMapper noteMapper = mock(NoteMapper.class);
+        NoteLinkMapper noteLinkMapper = mock(NoteLinkMapper.class);
 
         QuestionBank bank = new QuestionBank();
         bank.setId(9L);
@@ -65,7 +65,7 @@ class QuestionBankCascadeDeleteTest {
         when(studyRecordMapper.delete(any())).thenReturn(7);
 
         QuestionBankService service = new QuestionBankService(bankMapper, questionMapper, studyRecordMapper,
-                reviewStateMapper, sessionMapper, sessionQuestionMapper, materialMapper, jobMapper, noteMapper);
+                reviewStateMapper, sessionMapper, sessionQuestionMapper, materialMapper, jobMapper, noteLinkMapper);
 
         DeleteBankResult result = service.deleteQuestionBank(9L);
 
@@ -77,8 +77,8 @@ class QuestionBankCascadeDeleteTest {
         // 级联清理照旧
         verify(sessionQuestionMapper).deleteByBankId(9L);
         verify(materialMapper).delete(any());
-        // 笔记（我的想法）属于这个题库，也一起清掉（不留指向已删题库的孤儿行）
-        verify(noteMapper).delete(any());
+        // 笔记的关联行跟着清掉（题库关联 + 该库题目的题目关联）——但笔记内容本身保留
+        verify(noteLinkMapper, times(2)).delete(any());
         verify(bankMapper).deleteById(9L);
         // 返回给前端的计数不变
         assertEquals(4L, result.deletedQuestions());

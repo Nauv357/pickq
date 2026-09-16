@@ -63,15 +63,18 @@ if (/^\/api\/banks\/\d+\/practice-plan$/.test(pathname)) {
 }
 if (/^\/api\/banks\/\d+\/sessions$/.test(pathname)) return { sessionId: 77, total: 2, questions: [SESSION_Q(101), SESSION_Q(102)] }
 // 我的笔记：列表 + 新建（只存本机，不随题库导出）
-if (/^\/api\/banks\/\d+\/notes$/.test(pathname)) {
+// 笔记不隶属于题库/题目：挂在哪里由 links 表达（一条笔记可以挂多处，也可以一个都不挂）
+if (pathname === '/api/notes') {
   return {
     records: [{
-      id: 1, bankId: 1, questionId: 101, questionNumber: 101, content: '先看年份再动笔',
-      source: 'ai', createdAt: '2026-01-01T10:00:00', updatedAt: '2026-01-01T10:00:00'
+      id: 1, content: '先看年份再动笔', source: 'ai',
+      links: [{ type: 'question', targetId: 101, label: '冒烟题库 A · 第 101 题', bankId: 1, questionNumber: 101 }],
+      createdAt: '2026-01-01T10:00:00', updatedAt: '2026-01-01T10:00:00'
     }],
     total: 1, page: 1, size: 20, pages: 1
   }
 }
+if (/^\/api\/notes\/\d+\/links$/.test(pathname)) return { id: 1, content: '先看年份再动笔', source: 'ai', links: [] }
 if (/^\/api\/notes\/\d+$/.test(pathname)) return { id: 1 }
 if (/^\/api\/questions\/\d+\/notes$/.test(pathname)) return []
 if (pathname === '/api/sessions/77') {
@@ -355,7 +358,7 @@ check('卡片菜单也按配题结果建会话（mode=PLAN）', !!listPlanPost &
 await page.waitForTimeout(1200)
 check('直接落到做题页并带上配题说明', /这 2 题/.test(await page.locator('.plan-banner').innerText().catch(() => '')))
 
-console.log('\n[15] 我的笔记（更多 → 我的笔记：随手记 + 列表）')
+console.log('\n[15] 我的笔记（更多 → 我的笔记；顶层页 + 只看这个题库）')
 calls.length = 0
 await page.goto(`${BASE}/banks/1`, { waitUntil: 'domcontentloaded' })
 await page.waitForSelector('.header-actions', { timeout: 15000 })
@@ -364,18 +367,37 @@ await page.waitForSelector('.action-menu', { timeout: 5000 })
 check('「更多」里有「我的笔记」', (await page.locator('.action-menu .action-menu-item', { hasText: '我的笔记' }).count()) > 0,
   (await page.locator('.action-menu .action-menu-item').allInnerTexts()).join(' | '))
 await page.locator('.action-menu .action-menu-item', { hasText: '我的笔记' }).click()
-await page.waitForURL(/\/notes$/, { timeout: 10000 })
+await page.waitForURL(/\/notes\?bankId=1$/, { timeout: 10000 })
 await page.waitForSelector('.note-item', { timeout: 10000 })
+const notesListReq = calls.find((c) => c.path === '/api/notes')
+check('笔记列表按题库过滤（GET /notes?bankId=1）', !!notesListReq && /bankId=1/.test(notesListReq.search || ''), notesListReq?.search || '(无请求)')
 const noteText = (await page.locator('.note-item').first().innerText()).replace(/\s+/g, ' ')
-check('笔记列表显示内容 / 归属（题号）/ 来源（AI 讲解）', /先看年份再动笔/.test(noteText) && /第 101 题/.test(noteText) && /AI/.test(noteText), noteText)
-check('页面写明"只存本机、不随题库导出"', /只存本机/.test((await page.locator('.note-new').innerText()).replace(/\s+/g, ' ')), await page.locator('.note-new').innerText())
+check('笔记显示内容 / 关联（库名 + 题号）/ 来源（AI 讲解）', /先看年份再动笔/.test(noteText) && /第 101 题/.test(noteText) && /AI/.test(noteText), noteText)
+check('页面写明"只存本机"', /只存本机/.test((await page.locator('.note-new').innerText()).replace(/\s+/g, ' ')), await page.locator('.note-new').innerText())
+check('侧边栏有「笔记」入口', (await page.locator('.nav-item', { hasText: '笔记' }).count()) > 0)
 await page.locator('.note-new textarea').fill('资料分析先看年份')
 await page.locator('.note-new button', { hasText: '保存' }).click()
 await page.waitForTimeout(600)
-const quickPost = calls.find((c) => c.method === 'POST' && /\/api\/banks\/1\/notes$/.test(c.path))
-check('随手记发 POST /banks/1/notes（题库级：questionId 为 null）',
-  !!quickPost && /"content":"资料分析先看年份"/.test(quickPost.body || '') && /"questionId":null/.test((quickPost.body || '').replace(/\s/g, '')),
+const quickPost = calls.find((c) => c.method === 'POST' && c.path === '/api/notes')
+check('随手记发 POST /notes，并带上当前题库关联',
+  !!quickPost && /"content":"资料分析先看年份"/.test(quickPost.body || '') && /"bankId":1/.test((quickPost.body || '').replace(/\s/g, '')),
   quickPost?.body || '(无请求)')
+
+console.log('\n[15b] 关联标签可跳转 / 可解除')
+calls.length = 0
+await page.locator('.note-link-jump').first().click()
+await page.waitForSelector('.q-row[data-qid="101"]', { timeout: 15000 })
+await page.waitForTimeout(400)
+check('点关联标签回到那道题（/banks/1?q=101 → 定位第 101 题，q 参数随即被消费）',
+  /\/banks\/1$/.test(page.url()), page.url())
+await page.goBack({ waitUntil: 'domcontentloaded' })
+await page.waitForSelector('.note-link-x', { timeout: 10000 })
+await page.locator('.note-link-x').first().click()
+await page.waitForTimeout(600)
+const unlinkCall = calls.find((c) => c.method === 'DELETE' && /\/api\/notes\/1\/links$/.test(c.path))
+check('点标签上的 ✕ 解除关联（DELETE /notes/1/links）',
+  !!unlinkCall && /type=question/.test(unlinkCall.search || '') && /targetId=101/.test(unlinkCall.search || ''),
+  unlinkCall ? `${unlinkCall.path}${unlinkCall.search}` : '(无请求)')
 
 console.log('\n[16] 运行时错误')
 check('无未捕获的 JS 错误', pageErrors.length === 0, pageErrors.join(' | ').slice(0, 300))

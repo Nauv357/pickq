@@ -602,27 +602,26 @@
         </template>
       </el-dialog>
 
-      <!-- 粘贴 JSON 建题弹窗 -->
+      <!-- 从题库包追加题目：选一个题库文件（.zip / .tiku / .json），或直接粘贴 JSON -->
       <el-dialog v-model="batchVisible" :title="t('batchPaste')" width="min(92vw, 560px)" align-center>
         <div class="batch-head">
-          <p class="text-secondary batch-desc">
-            粘贴 AI 整理或结构化的题目 JSON（数组，或 <code>{ "questions": [...] }</code>），也可以选择 .json 文件
-          </p>
-          <button class="btn btn-secondary btn-sm" @click="pickBatchFile">
+          <p class="text-secondary batch-desc">{{ t('batchDesc') }}</p>
+          <button class="btn btn-secondary btn-sm" :disabled="batchSubmitting" @click="pickBatchFile">
             <TikuIcon name="file" :size="13" />
-            选择文件
+            {{ t('batchPickFile') }}
           </button>
         </div>
+        <p v-if="batchFileName" class="batch-file text-muted">{{ t('batchPicked', { name: batchFileName }) }}</p>
         <el-input
           v-model="batchText"
           type="textarea"
-          :rows="10"
-          placeholder='[{"questionType":"SINGLE","content":"题干","options":[{"key":"A","text":"选项A"},{"key":"B","text":"选项B"}],"answerKeys":["A"],"score":1}, ...]'
+          :rows="8"
+          :placeholder="batchPh"
         />
         <template #footer>
-          <button class="btn btn-ghost" @click="batchVisible = false">取消</button>
+          <button class="btn btn-ghost" @click="batchVisible = false">{{ t('common.cancel') }}</button>
           <button class="btn btn-primary" :disabled="batchSubmitting" @click="submitBatch">
-            {{ batchSubmitting ? '导入中…' : '导入题目' }}
+            {{ batchSubmitting ? t('batchSubmitting') : t('batchSubmit') }}
           </button>
         </template>
       </el-dialog>
@@ -839,9 +838,14 @@ const { t } = useI18n({
       noRecordHint: '还没有做题记录，点击「{act}」刷第一轮', favStartTip: '一键开刷全部收藏题（收藏模式）', noFavTip: '还没有收藏题',
       reviewPlan: '复习计划', dueTodayN: '今日待复习 {n} 题', reviewOffTip: '关闭时进度照记、错题照收，只是不提醒到期复习；重新开启后到期题会回到队列',
       wrongTab0: '错题', favTab0: '收藏',
-      questions: '题目', materials: '共用材料', aiImportDoc: 'AI 导入文档…', batchPaste: '粘贴 JSON 建题…', aiFillAnswers: 'AI 补答案',
+      questions: '题目', materials: '共用材料', aiImportDoc: 'AI 追加', batchPaste: '从题库包追加…', aiFillAnswers: 'AI 补答案',
+      batchDesc: '选择另一个题库文件（.zip / .tiku / .json）把里面的题目追加到本题库；也可以直接粘贴题目 JSON。',
+      batchPickFile: '选择题库文件',
+      batchPicked: '已选择：{name}',
+      batchSubmit: '追加进来',
+      batchSubmitting: '追加中…',
       sectionMoreTip: '更多题目操作',
-      materialsHint: '资料分析等大题干',
+      materialsHint: '多题共用的一段材料',
       aiFillHint: '给无答案的题批量回填',
       selectModeHint: '勾选后另存 / 并入',
       noteCount: '{n} 条',
@@ -853,7 +857,7 @@ const { t } = useI18n({
       legacyCategoryDone: '已把 {n} 题的「分类」并入「试卷 / 章节」（原有内容没被覆盖）',
       filterResultN: '筛选结果 {n} 题', noMatch: '没有匹配的题目，试试调整筛选条件', noQuestions: '题库还没有题目', addFirstQuestion: '录入第一题',
       clickEditHint: '点击编辑该题（右侧「…」里还有：讲解这道题 / 从这题开始做题 / 复制题干 / 删除）',
-      noMaterialsTip: '还没有共用材料。共用材料是多道题共用的一段文字或图片（阅读材料、图表、案例背景等），创建后可在这里或录题时关联到题目。',
+      noMaterialsTip: '还没有共用材料。共用材料是多道题共用的一段材料（文字或图片），创建后可关联到题目。',
       dupNumberTitle: '该题号在当前列表中重复，可能是重复导入的题目，请删除或修改题号',
       noAnswerTitle: '未配置答案：做题时无法判对错，点击编辑补配',
       authorNamePh: '导出时写入文件的展示名',
@@ -969,9 +973,14 @@ const { t } = useI18n({
       noRecordHint: 'No practice records yet — click “{act}” for your first round', favStartTip: 'Practice all favorites in one go (favorites mode)', noFavTip: 'No favorites yet',
       reviewPlan: 'Review plan', dueTodayN: '{n} due today', reviewOffTip: 'Progress and mistakes are still recorded while off — only due reminders stop; due questions return when re-enabled',
       wrongTab0: 'Mistakes', favTab0: 'Favorites',
-      questions: 'Questions', materials: 'Shared material', aiImportDoc: 'Import documents with AI…', batchPaste: 'Paste JSON…', aiFillAnswers: 'AI Fill answers',
+      questions: 'Questions', materials: 'Shared material', aiImportDoc: 'AI append', batchPaste: 'Append a bank file…', aiFillAnswers: 'AI Fill answers',
+      batchDesc: 'Pick another bank file (.zip / .tiku / .json) to append its questions into this bank; pasting question JSON works too.',
+      batchPickFile: 'Pick a bank file',
+      batchPicked: 'Selected: {name}',
+      batchSubmit: 'Append',
+      batchSubmitting: 'Appending…',
       sectionMoreTip: 'More question actions',
-      materialsHint: 'Shared passage for a question group',
+      materialsHint: 'One passage shared by several questions',
       aiFillHint: 'Batch-fill missing answers',
       selectModeHint: 'Pick questions to copy or merge',
       noteCount: '{n}',
@@ -982,7 +991,7 @@ const { t } = useI18n({
       legacyCategoryDone: 'Merged “category” into “paper / chapter” for {n} questions (existing values untouched)',
       filterResultN: '{n} results', noMatch: 'No matching questions — try adjusting filters', noQuestions: 'No questions in this bank yet', addFirstQuestion: 'Add your first question',
       clickEditHint: 'Click to edit (the “…” menu also has: explain / practice from here / copy / delete)',
-      noMaterialsTip: 'No shared material yet. Shared material is one text/image used by several questions (reading passage, chart, case background…). Create it here or link it while editing a question.',
+      noMaterialsTip: 'No shared material yet. Shared material is one text/image shared by several questions; link it to a question after creating it.',
       dupNumberTitle: 'This number appears more than once in the list — likely a duplicate import; delete it or change the number',
       noAnswerTitle: 'No answer configured — practice cannot grade it; click to edit and fill it in',
       authorNamePh: 'Display name written into the exported file',
@@ -1081,7 +1090,7 @@ const { t } = useI18n({
 })
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { batchCreateQuestions, aiFillAnswers, copyQuestionSelection, deleteBank, exportBank, exportTikuBank, getBank, getBankQuestionNav, getBankQuestions, getBanks, mergeCategoryIntoTopic, setReviewEnabled, updateBank } from '../api/banks'
+import { batchCreateQuestions, appendBankPackage, aiFillAnswers, copyQuestionSelection, deleteBank, exportBank, exportTikuBank, getBank, getBankQuestionNav, getBankQuestions, getBanks, mergeCategoryIntoTopic, setReviewEnabled, updateBank } from '../api/banks'
 import { deleteQuestion, getQuestion, setFavorite } from '../api/questions'
 import { getBankProgress, getReviewDue, getReviewSummary, getWrongQuestions, resetReviewStates } from '../api/studyRecords'
 import { createSession, getBankCategories, getPracticePlan } from '../api/sessions'
@@ -1090,7 +1099,7 @@ import { richTextToHtml } from '../utils/richText'
 import { isModelError, offerModelRecovery } from '../utils/aiModelHelp'
 import { createMaterial, deleteMaterial, listMaterials, updateMaterial, uploadImage } from '../api/materials'
 import { listNotes } from '../api/notes'
-import { pickFile, readTextFile, saveBlob, saveJsonFile } from '../utils/files'
+import { pickFile, readArrayBuffer, readTextFile, saveBlob, saveJsonFile } from '../utils/files'
 import TikuIcon from '../components/TikuIcon.vue'
 import QuestionFormPanel from '../components/QuestionFormPanel.vue'
 import QuestionNavDock from '../components/QuestionNavDock.vue'
@@ -1637,7 +1646,7 @@ function openMoreMenu(e) {
 const noteCount = ref(0)
 async function loadNoteCount() {
   try {
-    const data = await listNotes(id, { page: 1, size: 1 })
+    const data = await listNotes({ bankId: id, page: 1, size: 1 })
     noteCount.value = Number(data?.total || 0)
   } catch (e) {
     noteCount.value = 0
@@ -1650,7 +1659,8 @@ function onBankMenuSelect(key) {
       router.push(`/banks/${id}/sessions`)
       return
     case 'notes':
-      router.push(`/banks/${id}/notes`)
+      // 笔记是顶层页（可挂多个题库），从题库进来就只看这个题库的
+      router.push({ path: '/notes', query: { bankId: id } })
       return
     case 'skillTags':
       openSkillTags()
@@ -2369,45 +2379,66 @@ async function deleteSelectedQuestions() {
   }
 }
 
-/* ---------- 粘贴 JSON 建题 ---------- */
+/* ---------- 从题库包追加题目（.zip / .tiku / .json，或直接粘贴 JSON） ---------- */
 const batchVisible = ref(false)
 const batchText = ref('')
+const batchFile = ref(null)
+const batchFileName = ref('')
 const batchSubmitting = ref(false)
+const batchPh = '[{"questionType":"SINGLE","content":"题干","options":[{"key":"A","text":"选项A"}],"answerKeys":["A"],"score":1}]'
 
 function openBatch() {
   batchText.value = ''
+  batchFile.value = null
+  batchFileName.value = ''
   batchVisible.value = true
 }
 
+/** 选题库文件：.zip/.tiku 走压缩包接口，.json 读成文本走 JSON 接口（都由后端解析校验） */
 async function pickBatchFile() {
   let file
   try {
-    file = await pickFile('.json,application/json')
+    file = await pickFile('.zip,.tiku,.json,application/zip,application/json')
   } catch (e) {
+    return
+  }
+  if (/\.(zip|tiku)$/i.test(file.name || '')) {
+    batchFile.value = file
+    batchFileName.value = file.name || ''
+    batchText.value = ''
     return
   }
   try {
     batchText.value = await readTextFile(file)
+    batchFile.value = null
+    batchFileName.value = file.name || ''
   } catch (e) {
     ElMessage.error(t('msgReadFileFailed'))
   }
 }
 
 async function submitBatch() {
-  let questions
-  try {
-    const parsed = JSON.parse(batchText.value)
-    questions = Array.isArray(parsed) ? parsed : parsed?.questions
-    if (!Array.isArray(questions) || questions.length === 0) {
-      throw new Error('empty')
-    }
-  } catch (e) {
-    ElMessage.warning(t('msgJsonInvalid'))
-    return
-  }
   batchSubmitting.value = true
   try {
-    const inserted = await batchCreateQuestions(id, questions)
+    let inserted
+    if (batchFile.value) {
+      // 压缩包：字节流交给后端（图片/材料一并跟随）
+      const bytes = await readArrayBuffer(batchFile.value)
+      inserted = await appendBankPackage(id, bytes)
+    } else {
+      let questions
+      try {
+        const parsed = JSON.parse(batchText.value)
+        questions = Array.isArray(parsed) ? parsed : parsed?.questions
+        if (!Array.isArray(questions) || questions.length === 0) {
+          throw new Error('empty')
+        }
+      } catch (e) {
+        ElMessage.warning(t('msgJsonInvalid'))
+        return
+      }
+      inserted = await batchCreateQuestions(id, questions)
+    }
     ElMessage.success(t('msgBatchOk', { n: inserted }))
     batchVisible.value = false
     loadQuestions()

@@ -31,6 +31,11 @@ export const importBank = (jsonText) =>
 export const importTikuBank = (bytes) =>
   http.post('/banks/import-tiku', bytes, { headers: { 'Content-Type': 'application/octet-stream' }, timeout: 0 })
 
+// 把**另一个题库文件**（.zip / .tiku）里的题目追加到本库 → data = { inserted }
+// 与上面两个的区别：不新建题库，题目并进当前这个（题库身份、导出范围都不变）。
+export const appendBankPackage = (id, bytes) =>
+  http.post(`/banks/${id}/import-append`, bytes, { headers: { 'Content-Type': 'application/octet-stream' }, timeout: 0 })
+
 // 导出内容包 JSON（v1，兼容格式）→ data = 内容包 JSON
 export const exportBank = (id, data) => http.post(`/banks/${id}/export`, data)
 

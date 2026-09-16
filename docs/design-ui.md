@@ -185,7 +185,7 @@ cd frontend
 npm run check:ui      # 伪插值 + i18n 重复键 + 未定义 key（纯静态，秒级）
 npm run check:i18n    # 模板里未走 t() 的硬编码中文（当前 240 行，迁移中逐页消除）
 npm run smoke:editor  # 编辑大弹窗冒烟（28 项断言，需先起 dev server）
-npm run smoke:bank    # 右键菜单 / 批量管理 / 导出所选 / 卡片分层冒烟（49 项断言，需先起 dev server）
+npm run smoke:bank    # 右键菜单 / 批量管理 / 导出所选 / 一键配题 / 笔记关联冒烟（80 项断言，需先起 dev server）
 ```
 
 | 脚本 | 抓什么缺陷 | 实例 |
@@ -195,7 +195,7 @@ npm run smoke:bank    # 右键菜单 / 批量管理 / 导出所选 / 卡片分�
 | `check-i18n-keys.mjs` | `t('x')` 用了但词典没定义 → 界面显示裸 key | `SessionHistoryView` 的 `historyTitle`/`sessionsTotal` 等 14 个 |
 | `check-hardcoded-zh.mjs` | 模板里未走 i18n 的中文（英文界面直接显示中文） | 当前 240 行 / 10 个文件，属迁移清单 |
 | `smoke-editor-dialog.mjs` | 弹窗层级、滚动容器、脏数据确认、题号盘位置等**只能靠跑**才能确认的行为 | 28 项断言（1440×900 / 1920×1080 两档） |
-| `smoke-bank-actions.mjs` | 右键是否被屏蔽（含输入框放行）、菜单项、Shift 连选、批量删除/导出真的发了请求、导出范围默认值 | 49 项断言；**靠它抓出两个真 bug**（卡片箭头挡住「…」按钮、菜单 items 计算时序导致菜单不出现） |
+| `smoke-bank-actions.mjs` | 右键是否被屏蔽（含输入框放行）、菜单项、Shift 连选、批量删除/导出真的发了请求、导出范围默认值、笔记的关联/解除关联真的发了请求 | 80 项断言；**靠它抓出两个真 bug**（卡片箭头挡住「…」按钮、菜单 items 计算时序导致菜单不出现） |
 | `shot-routes.mjs` | 给若干路由拍图，人工核对骨架（假数据，不需要后端） | `<out>/<route>.png` |
 | `smoke-practice-keys.mjs` | 做题页键盘快捷键回归（A~H 选答案 / ←→ 切题 / 数字直达 / 弹层守卫不误伤）；`npm run smoke:keys` | 12 项断言 |
 

@@ -5,9 +5,9 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.tiku.config.AiSettings;
 import com.tiku.dto.*;
 import com.tiku.mapper.MaterialMapper;
-import com.tiku.mapper.NoteMapper;
+import com.tiku.mapper.NoteLinkMapper;
 import com.tiku.mapper.QuestionMapper;
-import com.tiku.model.Note;
+import com.tiku.model.NoteLink;
 import com.tiku.model.OptionItem;
 import com.tiku.model.Question;
 import com.tiku.model.enums.QuestionType;
@@ -27,19 +27,19 @@ public class QuestionService {
     private final AiConfigService aiConfigService;
     private final AiClientService aiClientService;
     private final ImageStorageService imageStorageService;
-    private final NoteMapper noteMapper;
+    private final NoteLinkMapper noteLinkMapper;
 
     public QuestionService(QuestionMapper questionMapper, QuestionBankService questionBankService,
                            MaterialMapper materialMapper, AiConfigService aiConfigService,
                            AiClientService aiClientService, ImageStorageService imageStorageService,
-                           NoteMapper noteMapper) {
+                           NoteLinkMapper noteLinkMapper) {
         this.questionMapper = questionMapper;
         this.questionBankService = questionBankService;
         this.materialMapper = materialMapper;
         this.aiConfigService = aiConfigService;
         this.aiClientService = aiClientService;
         this.imageStorageService = imageStorageService;
-        this.noteMapper = noteMapper;
+        this.noteLinkMapper = noteLinkMapper;
     }
 
     /** 题目 content/选项/材料内的图片引用 [图片:name] */
@@ -366,13 +366,15 @@ public class QuestionService {
     }
 
     /**
-     * 删除题目。笔记挂在题上，题没了就没有挂靠对象，所以一起清掉
-     * （题库级随手记 question_id 为空，不受影响）。
+     * 删除题目。题目上的关联跟着删掉（笔记内容保留：挂在别的题/题库上照旧，
+     * 全都不挂了就在笔记列表里显示为"未归类"）。
      */
     @org.springframework.transaction.annotation.Transactional
     public void deleteQuestion(Long id){
         Question question = findByIdOrThrow(id);
-        noteMapper.delete(new LambdaQueryWrapper<Note>().eq(Note::getQuestionId, id));
+        noteLinkMapper.delete(new LambdaQueryWrapper<NoteLink>()
+                .eq(NoteLink::getTargetType, NoteLink.TYPE_QUESTION)
+                .eq(NoteLink::getTargetId, id));
         questionMapper.deleteById(id);
     }
 

@@ -28,7 +28,7 @@ Tiku/
 ├── mvnw / mvnw.cmd / .mvn/      Maven Wrapper
 ├── src/                        后端（Spring Boot + MyBatis-Plus + H2 + Flyway）
 │   ├── main/java/com/tiku/**   195 个 .java（config 5 / controller 19 / dto 68 / mapper 16 / model 21 / service 56 / util 3 + TikuApplication；2026-09-16 审计实测）
-│   ├── main/resources/         application.yml + db/migration/V1..V21__*.sql
+│   ├── main/resources/         application.yml + db/migration/V1..V22__*.sql
 │   └── test/java/com/tiku/**   50 个测试与工具类（含依赖私有样例的 GenerateSampleFiles / GraphPositionProbeTest）
 ├── frontend/                   桌面端 Vue 3 SPA（Vite 6 + Element Plus 2 + vue-router 4 + vue-i18n 9 + ECharts 6）
 │   ├── index.html              防闪屏内联脚本（先按 localStorage['tiku:theme'] 给 <html> 加 dark）
@@ -185,7 +185,7 @@ web/
 | **刷题会话（八模式）** | `PracticeSessionController.java` 55 | `PracticeSessionService.java` 605 | 模式 `PLAN/ALL/SEQUENCE/TOPIC/SKILL/REVIEW/WRONG/FAVORITE`；`PracticeSessionMapper`（`FOR UPDATE` 行锁防重复交卷）、`PracticeSessionQuestionMapper`；`dto/Session*`（`questionIds` 仅 PLAN 用，顺序即优先级） |
 | **练习配题（"开始练习"一键）** | `PracticeSessionController` `/{bankId}/practice-plan` | `PracticePlanService.java` 430 | 错题 30% → 到期 30% → 薄弱知识点 30% → 新题补满（去重；短练习按优先级保底 1 题）；掌握度公式 `nodeStates`；`dto` 用 record `Plan/PlanItem`；**接口名带 plan 但界面不出现"计划"二字**（收口见 `features.md` §4.8） |
 | **AI 私教（讲解/提示/追问/复盘）** | `TutorController.java` 154（`/tutor/{explain,hint,ask,review}` SSE + `review/{id}/summary`） | `TutorService.java` 802 | `model/TutorSession`、`TutorMessage`；`AiClientService.chatStream`；讲解三段标题常量 `EXPLAIN_HEAD_*`（**两种口吻共用**：有作答讲错在哪、没作答讲这道题怎么做）；`mode` 可指定，缺省按"最近一次作答对不对"自动判定；会话按"同题 + 同场练习"复用（前端据此**回看上次讲解**，不重复花额度） |
-| **我的笔记（只存本机）** | `NoteController.java` 56 | `NoteService.java` 165 | `model/Note`、`mapper/NoteMapper`、`V21__note.sql`；挂题或挂题库（随手记）；题删/库删**级联清理**；与解析的边界：解析进题库（随包导出），笔记只在本机 |
+| **我的笔记（只存本机）** | `NoteController.java` 73 | `NoteService.java` 348 | `model/Note`+`NoteLink`、`mapper/NoteMapper`+`NoteLinkMapper`、`V21__note.sql`+`V22__note_links.sql`；笔记不隶属于题库/题目，靠 `note_link` 挂到 0..N 个题库/题目（未归类也合法）；题删/库删**只删关联、保留笔记**；与解析的边界：解析进题库（随包导出），笔记只在本机 |
 | **知识点标签（技能图 + 用户可编辑词表）** | `SkillController.java` 269 | `QuestionTaggingService.java`、`SkillGraphService.java` 639 | `model/QuestionSkill`、`V17__learning_path_skill_tags.sql`；自定义节点与停用记录落 `{dataDir}/skill-custom-nodes.json`；**官方原图与生效图分离**（`builtIns` vs `templates`，停用时连前置引用一起摘掉）；`ReviewPage.orphan` 统计失效标签 |
 | **提交作答（判题 + 记录 + 复习联动）** | `StudyRecordController.java` 105 | `StudyRecordService.java` 611 | `dto/StudyRecordSubmit{Request,Response}`；`model/StudyRecord` |
 | **主观题自评** | `StudyRecordController` `/study-records/{id}/self-grade` | `StudyRecordService.selfGrade` / `earnedScore` | `dto/SelfGrade{Request,Response}` |
@@ -260,9 +260,10 @@ web/
 | --- | --- | --- | --- | --- | --- |
 | `/` | `bank-list` | `BankListView.vue` | **1774** | 首页：概览卡带（最近练习 / 今日待复习）、题库分页 + 名称筛选、新建题库、合并题库、三种导入入口（AI / JSON / .tiku）、首次使用引导；**卡片操作菜单**（右键 /「…」：打开 / 做题 / 历史 / 打印 / 重命名 / 导出 / 批量管理 / 删除）、**批量管理模式**（勾选 + Shift 连选 + 底部批量条：导出所选 / 合并 / 删除所选）、卡片显示「共 N 题 · 已做 M」 | `TikuIcon`、`AiImportDialog`、`ActionMenu` |
 | `/banks/:id` | `bank-detail` | `BankDetailView.vue` | **3185** | 题库详情与**题库级全部操作**：头部只有「开始练习」（一键配题 → 建 PLAN 会话，右侧小箭头选题量/自定义范围）+「更多」（练习历史/我的笔记/知识点/打印试卷/导出题库文件/编辑题库/删除题库）、信息编辑、导出（含**导出范围**：全部/收藏/错题/未做/**已勾选 N 题**）、删除、复习计划开关、复习队列/重置、进度与错题、题目检索分页与收藏、题号盘、**题目行菜单**（右键 /「…」，含**「讲解这道题」**）、批量选择（导出所选 / 另存为新题库 / 并入现有题库 / **删除所选**）、批量建题、AI 补答案、材料 CRUD、图片上传、打印入口 | `TikuIcon`、`QuestionFormPanel`、`QuestionNavDock`、`AiImportDialog`、`SkillTagDialog`、`QuestionExplain`、`ActionMenu` |
-| `/banks/:id/practice` | `practice` | `PracticeView.vue` | **2039** | 做题页（会话制）：顶部**配题说明横幅**（一句可核对的事实，可关）、计时、逐题作答、收藏、暂停复习、交卷 → 成绩报告、报告内主观题自评、**每题「讲解」（三段流式 + 追问 + 存为解析 / 存进笔记）+「记一笔」**、复盘诊断 | `TikuIcon`、`QuestionExplain`、`QuestionNotes`、`TutorPanel` |
-| `/banks/:id/notes` | `bank-notes` | `NotesView.vue` | **334** | 我的笔记：题库级随手记、全部笔记列表（题号/来源/时间）、就地编辑与删除；**只存本机、不随题库导出** | `PageHeader`、`EmptyState`、`Pager` |
-| `/banks/:id/sessions` | `session-history` | `SessionHistoryView.vue` | **941** | 双视图：历史列表（继续练习）/ 会话回顾（每题对错、答案、解析、材料折叠、自评、题号状态盘、**每题「讲解」+「记一笔」**） | `TikuIcon`、`QuestionExplain`、`QuestionNotes`、`QuestionNavDock` |
+| `/banks/:id/practice` | `practice` | `PracticeView.vue` | **1750** | 做题页（会话制）：顶部**配题说明横幅**（一句可核对的事实，可关）、计时、逐题作答、收藏、暂停复习、交卷 → 成绩报告（抬头 + **本场复盘诊断** + `SessionReview` 逐题回顾）、**每题「讲解」（三段流式 + 追问 + 存为解析 / 存进笔记）+「记一笔」** | `TikuIcon`、`SessionReview`、`TutorPanel` |
+| `/notes` | `notes` | `NotesView.vue` | **722** | 我的笔记（**顶层页**）：随手记（可顺手挂到某个题库）、全部/未归类筛选、`?bankId=` 只看某个题库、关联标签可跳转/解除、就地编辑与删除；**只存本机、不随题库导出** | `PageHeader`、`EmptyState`、`Pager` |
+| `/banks/:id/notes` | — | 重定向 | — | 老地址（题库子页笔记）→ `/notes?bankId=:id` | — |
+| `/banks/:id/sessions` | `session-history` | `SessionHistoryView.vue` | **282** | 双视图：历史列表（继续练习）/ 会话回顾 → 回顾部分交给 `SessionReview`（与刚交卷的成绩页**同一个组件**） | `TikuIcon`、`SessionReview` |
 | `/banks/:id/print` | `print-paper` | `PrintPaperView.vue` | 528 | **独立页面（无侧栏）**：按范围（全部/错题/收藏/未做）+ 分类本地过滤渲染，切换`仅题目/含答案解析`，`window.print()` | `TikuIcon` |
 | `/ai-import/jobs` | `ai-import-jobs` | `AiImportJobsView.vue` | 414 | AI 导入任务列表：5s 轮询、状态/耗时展示、进入预览、两阶段取消/删除 | `TikuIcon` |
 | `/ai-import/:jobId` | `ai-import-preview` | `AiImportPreviewView.vue` | **2341** | 预览与确认：进度（轮询兜底）、题目/材料卡片就地编辑、拖拽排序、图片素材拖入/删除标记、确认入库或取消 | `TikuIcon`、`FieldImages`、`QuestionNavDock` |
@@ -304,7 +305,8 @@ web/
 | `QuestionNavDock.vue` | 427 | 可拖动题号盘：题号按钮 + 状态色（对/错/部分/未答）、跳转输入、三档尺寸、位置与尺寸持久化到 localStorage | props `title`/`items`/`activeId`/`showLegend`/`hint`/`draggable`/`storageKey`/`activeFill`；emits `select` |
 | `StatsHeatmap.vue` | 285 | 每日做题量热力图：30 天/90 天/全年三视图、分级上色、点击展开当日题量与正确率 | props `daily` |
 | `QuestionExplain.vue` | **557** | **讲解（做题后唯一的解析入口）**：流式三段（两种口吻的标题在同一张映射表里，按出现位置分块）+ 可选错因三选 + 就地追问 + 存为解析 + 存进笔记；**挂载时回看上次讲解**（不重复花额度，并把之后的追问带回来） | props `bankId`/`questionId`/`practiceSessionId`/`templateId`/`mode`/`autoStart`；emits `saved`/`noted`；`defineExpose({ explain, loadHistory, explainLabel })` |
-| `QuestionNotes.vue` | **327** | 每题的「记一笔」：折叠成一个小按钮，展开显示我的笔记（就地编辑/删除）与输入框；只存本机 | props `bankId`/`questionId`/`bankLevel`/`startOpen`；emits `changed`；`defineExpose({ reload, openUp })` |
+| `QuestionNotes.vue` | **384** | 每题的「记一笔」：折叠成一个小按钮，展开显示我的笔记（就地编辑/删除）与输入框；输入框跟着内容长高，含公式/图片时给一块实时预览；只存本机 | props `bankId`/`questionId`/`bankLevel`/`startOpen`；emits `changed`；`defineExpose({ reload, openUp })` |
+| `SessionReview.vue` | **777** | **一场练习的逐题回顾（刚交卷的成绩页与练习历史共用同一个组件）**：成绩三项、每题题干/共用材料折叠/选项对错高亮/我的作答/答案与解析、主观题自由给分、每题「讲解」+「记一笔」、右侧答题卡 | props `session`（`GET /sessions/{id}`）/`bankId`/`showStats`/`showDock`/`templateId`；emits `changed`（自评后请父级重拉） |
 | `SkillNodeManager.vue` | **445** | 管理知识点（用户自己编辑词表）：自定义节点新增/改名/换阶段/删除、官方节点停用/恢复、恢复官方模板；每行显示"本库 N 题"影响面 | props `modelValue`/`templateId`/`templateName`/`bankId`；emits `update:modelValue`/`changed` |
 | `TutorPanel.vue` | 404 | AI 私教抽屉：提示楼梯（L1→L3，落库后回填"已给到第 N 级"）+ 错因三选 + 自由追问 + 复盘诊断；历史消息随题拉回 | props `bankId`/`questionId`/`practiceSessionId`/`templateId`/`kind`/`sessionId`/`selfReason`/`selfNote`/`showReasons`；emits `close`/`session`；`defineExpose({ diagnose, run })` |
 | `SkillTagDialog.vue` | 1054 | 知识点审阅弹窗：逐题一行（题号/题型/状态/题干 + 行内标签下拉 + 来源）、状态计数筛选、知识点筛选、全选/选中全部、批量设为知识点/确认/丢弃、失效标签一键清理、**「管理知识点」入口** | props `bankId`；emits `close`/`open-question` |
@@ -537,13 +539,13 @@ web/
 | 1 | `views/BankDetailView.vue` | **2848** | 题库详情 + 题库级**全部**操作（编辑、导出、删除、复习、错题、进度、题目检索与分页、题号盘、批量选择、批量建题、AI 补答案、材料 CRUD、图片上传、开会话、打印） | **强烈建议拆分**。这是前端最大的单文件，混了「列表/编辑面板/复习面板/材料面板/批量操作」多条业务线。建议按面板拆子组件（`BankInfoPanel` / `ReviewPanel` / `WrongPanel` / `MaterialPanel` / `BatchActions`），或把「复习」与「错题」独立成路由页 |
 | 2 | `views/MyWorksView.vue` | **2574** | 本地题库 / 已导出文件 / 已发布作品三区 + 导出到目录 + 发布三入口 + 作品编辑/补传/下架 | 建议按「三区」拆子组件，把「发布流程」抽成 composable（现在发布编排与 UI 混在一个文件的 ~900 行里） |
 | 3 | `views/AiImportPreviewView.vue` | **2341** | 预览与确认：进度、题目卡就地编辑、材料卡、拖拽排序、图片素材拖入/删除 | 建议把「题目卡片」「材料卡片」「素材区」「拖拽逻辑」拆出；拖拽排序可抽 composable |
-| 4 | `views/PracticeView.vue` | 1822 | 做题、计时、交卷、成绩报告、主观题自评、回顾 | 建议把「成绩报告 + 自评」拆成独立组件（与 `SessionHistoryView` 的回顾逻辑有重叠） |
+| 4 | `views/PracticeView.vue` | 1751 | 做题、计时、交卷、成绩报告抬头 + 本场复盘诊断卡 | ✅ 2026-09-16 已把「逐题回顾 + 主观题自评」抽成 `SessionReview`（与练习历史共用同一个组件） |
 | 5 | `views/DiscoverView.vue` | 1730 | 广场三视图 + 账号体系（登录/注册/GitHub/Turnstile）+ 评论点赞收藏 | 建议拆「广场列表/详情/作者」三个组件 + 把账号流程抽 composable；同时把 13 处直连 `http` 收进 `api/center.js` |
 | 6 | `views/SettingsView.vue` | 1659 | 6 个设置 panel（备份恢复、外观语言、记录、AI 配置、作者、关于更新） | 天然的 6 个 panel 可各自成组件；AI 配置 panel 尤其重（预设/模型列表/自愈/本地免 Key 判定） |
 | 7 | `components/QuestionFormPanel.vue` | 1360 | 录题/编辑面板（字段、选项、材料、图片、预览、AI 草稿、导航、离开确认） | 建议拆「字段区 / 预览区 / 导航区」，把 AI 草稿与富文本预览抽 composable |
 | 8 | `views/BankListView.vue` | 1347 | 首页：概览卡带 + 题库列表 + 新建/合并/三种导入 | 建议把「导入三入口 + 合并对话框」拆出组件 |
 | 9 | `views/StatsView.vue` | 1213 | 统计 KPI、热力图、趋势（ECharts）、深度分析 | 建议把三个 ECharts 渲染函数抽到 `utils/charts.js`（现为文件内三段 `render*`） |
-| 10 | `views/SessionHistoryView.vue` | 1016 | 历史列表 + 会话回顾 | 建议把「回顾」拆组件，与 `PracticeView` 的报告区共用 |
+| 10 | `views/SessionHistoryView.vue` | 282 | 历史列表 + 回顾入口 | ✅ 2026-09-16 回顾已交给 `SessionReview`（1000 → 282 行） |
 
 > 紧随其后：`components/AiImportDialog.vue` 849、`layouts/AppLayout.vue` 660、`views/PrintPaperView.vue` 528、
 > `App.vue` 519、`components/QuestionNavDock.vue` 427、`views/AiImportJobsView.vue` 414。
@@ -579,7 +581,7 @@ web/
 | --- | --- | --- |
 | 内容包读写（最关键，需逐字节对齐） | `util/PackageContainer.java`、`service/ContentPackageService.java`、`service/ContentPackageInspector.java` | Kotlin `.tiku` 解析/生成器（zip 魔数、4096/10MB/512MB 上限、`media/` 命名、打包排序） |
 | 业务规则 | `service/*.java`（27 个） | Repository / UseCase（判分、错题、复习、自评、会话模式、版本自增） |
-| 数据模型 | `src/main/resources/db/migration/V1..V21*.sql` + `model/*.java` | Room 实体 + 手写迁移（映射建议见 `data-model.md` §1.7） |
+| 数据模型 | `src/main/resources/db/migration/V1..V22*.sql` + `model/*.java` | Room 实体 + 手写迁移（映射建议见 `data-model.md` §1.7） |
 | 页面 | `frontend/src/views/*.vue`（11 个）+ `components/*.vue`（7 个） | Compose Screen（交互按手机重做，不做平移） |
 | 接口封装 | `frontend/src/api/*.js`（10 个） | Retrofit Service（本地后端那部分**不要移植**，改为直连或本地 Repository） |
 | 广场直连 | `controller/Center*.java`（转发层） | Retrofit + OkHttp 直连 `https://pickq.cn`，Bearer 鉴权；**不移植转发层** |

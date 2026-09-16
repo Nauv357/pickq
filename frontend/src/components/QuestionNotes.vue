@@ -14,9 +14,20 @@
           <button class="qn-act" :title="t('edit')" @click="startEdit(n)">{{ t('edit') }}</button>
           <button class="qn-act danger" :title="t('delete')" @click="remove(n)">{{ t('delete') }}</button>
         </div>
-        <div v-if="editingId !== n.id" class="qn-text">{{ n.content }}</div>
+        <div v-if="editingId !== n.id" class="qn-text" v-html="richHtml(n.content)"></div>
         <div v-else class="qn-edit">
-          <textarea v-model="draft" class="qn-input" rows="3" @keydown.enter.exact.prevent="saveEdit(n)"></textarea>
+          <textarea
+            ref="editBox"
+            v-model="draft"
+            class="qn-input"
+            :rows="1"
+            @input="autoGrow($event)"
+            @keydown.enter.exact.prevent="saveEdit(n)"
+          ></textarea>
+          <div v-if="needsPreview(draft)" class="qn-preview">
+            <span class="text-muted qn-preview-label">{{ t('preview') }}</span>
+            <div class="qn-text" v-html="richHtml(draft)"></div>
+          </div>
           <div class="qn-edit-btns">
             <button class="btn btn-secondary btn-sm" @click="editingId = null">{{ t('cancel') }}</button>
             <button class="btn btn-primary btn-sm" :disabled="saving || !draft.trim()" @click="saveEdit(n)">{{ t('save') }}</button>
@@ -26,12 +37,19 @@
 
       <div class="qn-new">
         <textarea
+          ref="newBox"
           v-model="draft"
           class="qn-input"
-          rows="2"
+          :rows="1"
           :placeholder="t('placeholder')"
+          @input="autoGrow($event)"
           @keydown.enter.exact.prevent="create"
         ></textarea>
+        <!-- 公式与图片在纯文本里看不出效果：只在内容确实需要时给一块实时预览 -->
+        <div v-if="needsPreview(draft)" class="qn-preview">
+          <span class="text-muted qn-preview-label">{{ t('preview') }}</span>
+          <div class="qn-text" v-html="richHtml(draft)"></div>
+        </div>
         <div class="qn-new-btns">
           <span class="text-muted qn-hint">{{ t('hint') }}</span>
           <button class="btn btn-ghost btn-sm" @click="open = false">{{ t('collapse') }}</button>
@@ -54,12 +72,13 @@
  *
  * 折叠态只占一个小按钮，展开才显示内容与输入框——做题页里不抢注意力。
  */
-import { onMounted, ref, watch } from 'vue'
+import { nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import TikuIcon from './TikuIcon.vue'
 import { useConfirm } from '../composables/useConfirm'
 import { createNote, deleteNote, listNotes, listQuestionNotes, updateNote } from '../api/notes'
+import { richTextToHtml } from '../utils/richText'
 
 const props = defineProps({
   bankId: { type: [Number, String], required: true },
@@ -85,7 +104,8 @@ const { t } = useI18n({
       save: '保存',
       saving: '保存中…',
       placeholder: '写下你的想法、记忆钩子、老师提醒…（Enter 保存，Shift+Enter 换行）',
-      hint: '只存本机，不会随题库文件分享给别人',
+      hint: '只存本机',
+      preview: '效果预览',
       collapse: '收起',
       saved: '已记下',
       removed: '已删除',
@@ -104,7 +124,8 @@ const { t } = useI18n({
       save: 'Save',
       saving: 'Saving…',
       placeholder: 'Your takeaway, memory hook, or the tutor’s tip… (Enter to save, Shift+Enter for newline)',
-      hint: 'Stored on this machine only — never shared inside bank files',
+      hint: 'Local only',
+      preview: 'Preview',
       collapse: 'Collapse',
       saved: 'Note saved',
       removed: 'Note deleted',
@@ -124,6 +145,31 @@ const error = ref('')
 const draft = ref('')
 const editingId = ref(null)
 
+const richHtml = (s) => richTextToHtml(s || '', props.bankId)
+
+/**
+ * 内容带公式（$...$）、图片标记或表格时，纯文本看不出效果——这时才给一块实时预览。
+ * 不做成常驻分屏：绝大多数笔记是纯文本，常驻预览只会占地方。
+ */
+const needsPreview = (text) => /\$[^$]+\$|\[图片:|<table[\s>]/i.test(String(text || ''))
+
+/** 输入框跟着内容长高（此前固定 rows，写长了要在小框里来回滚） */
+function autoGrow(e) {
+  const el = e?.target
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = `${Math.min(el.scrollHeight, 400)}px`
+}
+
+onMounted(async () => {
+  if (open.value) await load()
+  await nextTick()
+  document.querySelectorAll('.qn-input').forEach((el) => {
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 400)}px`
+  })
+})
+
 const formatTime = (iso) => {
   if (!iso) return ''
   const d = new Date(iso)
@@ -137,17 +183,14 @@ async function load() {
     if (props.questionId) {
       notes.value = (await listQuestionNotes(Number(props.questionId))) || []
     } else {
-      const data = await listNotes(props.bankId, { page: 1, size: 50 })
+      // 题库级随手记：只看挂在这个题库上的（与笔记页同一个口径）
+      const data = await listNotes({ bankId: props.bankId, page: 1, size: 50 })
       notes.value = data?.records || []
     }
   } catch (e) {
     notes.value = []
   }
 }
-
-onMounted(() => {
-  if (open.value) load()
-})
 
 function toggle() {
   open.value = !open.value
@@ -170,7 +213,8 @@ async function create() {
   saving.value = true
   error.value = ''
   try {
-    await createNote(props.bankId, {
+    await createNote({
+      bankId: Number(props.bankId),
       questionId: props.questionId ? Number(props.questionId) : null,
       content,
       source: 'user'
@@ -318,7 +362,22 @@ defineExpose({ reload: load, openUp: () => { open.value = true; load() } })
   line-height: 1.7;
   background: var(--bg-elev);
   color: var(--text-primary);
-  resize: vertical;
+  /* 高度由内容撑开（autoGrow），不需要拖拽把手；超过 400px 才内部滚动 */
+  resize: none;
+  overflow-y: auto;
+}
+/* 只在内容含公式/图片时出现：输入框下方一块实时渲染结果 */
+.qn-preview {
+  margin-top: 6px;
+  border-left: 2px solid var(--accent);
+  padding: 4px 0 4px 8px;
+  background: var(--bg-elev);
+  border-radius: 0 8px 8px 0;
+}
+.qn-preview-label {
+  display: block;
+  font-size: 11px;
+  margin-bottom: 2px;
 }
 .qn-new {
   margin-top: 8px;

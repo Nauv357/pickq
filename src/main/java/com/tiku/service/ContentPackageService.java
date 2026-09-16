@@ -122,6 +122,63 @@ public class ContentPackageService {
         return importContentPackage(file);
     }
 
+    /**
+     * 把**另一个题库文件**里的题目追加到已有题库（2026-09-16 用户反馈："用其它题库包新增"这条路以前不存在——
+     * 只能"导入成一个新题库再合并"）。
+     *
+     * 与 {@link #importContentPackage} 的区别：**不碰题库身份**（不比对 packageKey/checksum、不生成新题库、
+     * 不写 sources 血缘），只把包里的图片、材料、题目落进目标题库；题号按现有最大题号往后排；
+     * 同一题库内已存在同 questionKey 的题会被跳过（幂等，重复追加同一份文件不会翻倍）。
+     *
+     * @return 实际新增的题目数（跳过的重复题不计入）
+     */
+    @Transactional
+    public int appendContentPackage(Long bankId, byte[] container) {
+        requireBank(bankId);
+        PackageContainer.Unpacked unpacked;
+        try {
+            unpacked = PackageContainer.unpack(container);
+        } catch (IOException e) {
+            throw new IllegalArgumentException("题库压缩包读取失败：" + e.getMessage());
+        }
+        return appendParsedPackage(bankId, parseAndValidate(unpacked.packageText()), unpacked);
+    }
+
+    /** 追加 v1 纯 JSON 形式的内容包 */
+    @Transactional
+    public int appendContentPackage(Long bankId, String json) {
+        requireBank(bankId);
+        return appendParsedPackage(bankId, parseAndValidate(json), null);
+    }
+
+    /** 追加前先确认题库存在（错误信息与其它端点一致：404 题库不存在） */
+    private void requireBank(Long bankId) {
+        if (questionBankMapper.selectById(bankId) == null) {
+            throw new java.util.NoSuchElementException("题库不存在：" + bankId);
+        }
+    }
+
+    private int appendParsedPackage(Long bankId, ContentPackageFile file, PackageContainer.Unpacked unpacked) {
+        if (file.getQuestions() == null || file.getQuestions().isEmpty()) {
+            throw new IllegalArgumentException("这个题库文件里没有题目");
+        }
+        // v2 压缩包：图片在 media/ 里，重建 base64 后与 v1 走同一条落盘路径
+        if (unpacked != null && unpacked.media() != null && !unpacked.media().isEmpty()) {
+            Map<String, String> images = new LinkedHashMap<>();
+            for (Map.Entry<String, byte[]> e : unpacked.media().entrySet()) {
+                if (e.getValue() != null && e.getValue().length > 0) {
+                    images.put(e.getKey(), java.util.Base64.getEncoder().encodeToString(e.getValue()));
+                }
+            }
+            file.setImages(images);
+        }
+        imageStorageService.saveBase64(bankId, file.getImages());
+        Map<String, Long> materialIdByKey = insertMaterials(bankId, file.getMaterials());
+        int inserted = importQuestionsToBank(bankId, file.getQuestions(), materialIdByKey);
+        log.info("追加题库文件到题库 {}：包里 {} 题，实际新增 {} 题", bankId, file.getQuestions().size(), inserted);
+        return inserted;
+    }
+
     /** 导入核心：解析后的内容包 → 题库 + 题目（冲突检测：全新 / 已导入 / 版本并存 / 分支导入） */
     @Transactional
     public ImportResultResponse importContentPackage(ContentPackageFile file) {

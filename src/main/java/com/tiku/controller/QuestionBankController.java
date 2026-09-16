@@ -131,6 +131,23 @@ public class QuestionBankController {
         return ApiResponse.success(contentPackageService.importTikuPackage(container));
     }
 
+    /**
+     * 把另一个题库文件（.zip/.tiku）里的题目**追加**到本题库（不新建题库、不改题库身份）。
+     * 题号排在现有题之后；同一题库内已存在的题（同 questionKey）跳过，重复追加同一份文件不会翻倍。
+     */
+    @PostMapping(value = "/{id}/import-append", consumes = "application/octet-stream")
+    public ApiResponse<java.util.Map<String, Object>> appendPackage(@PathVariable Long id,
+                                                                   @RequestBody byte[] container) {
+        return ApiResponse.success(java.util.Map.of("inserted", contentPackageService.appendContentPackage(id, container)));
+    }
+
+    /** 同上，但 body 是 v1 内容包 JSON 原文（粘贴文本 / 老的 .json 文件） */
+    @PostMapping(value = "/{id}/import-append-json", consumes = "text/plain;charset=UTF-8")
+    public ApiResponse<java.util.Map<String, Object>> appendPackageJson(@PathVariable Long id,
+                                                                       @RequestBody String json) {
+        return ApiResponse.success(java.util.Map.of("inserted", contentPackageService.appendContentPackage(id, json)));
+    }
+
     //导出内容包（body 可选：version / authorName），返回内容包 JSON 对象，前端保存为文件
     @PostMapping("/{id}/export")
     public ApiResponse<ContentPackageFile> exportContentPackage(

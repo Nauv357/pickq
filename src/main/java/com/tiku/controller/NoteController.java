@@ -1,6 +1,7 @@
 package com.tiku.controller;
 
 import com.tiku.dto.ApiResponse;
+import com.tiku.dto.NoteLinkRequest;
 import com.tiku.dto.NoteRequest;
 import com.tiku.dto.NoteResponse;
 import com.tiku.dto.PageResult;
@@ -12,7 +13,7 @@ import java.util.List;
 /**
  * 笔记（我的，不是题库的）：
  * - 只存本机（`note` 表），**不进内容包、不随题库导出**；
- * - 挂题（questionId）或只挂题库（随手记）都行；
+ * - 笔记不隶属于任何题库/题目，挂在哪里由关联决定（0..N 个题库、0..N 道题，未归类也合法）；
  * - 做题/回顾时随手记，也可以把 AI 讲解一键存进来（source=ai，界面上能一眼看出）。
  *
  * 与"解析"的分工见 {@link NoteService} 的类注释；解析走 `PUT /api/questions/{id}/analysis`。
@@ -27,13 +28,17 @@ public class NoteController {
         this.noteService = noteService;
     }
 
-    /** 题库内的笔记：给 questionId 就只看这道题的，否则是"我的笔记"列表（按最近更新排序） */
-    @GetMapping("/banks/{bankId}/notes")
-    public ApiResponse<PageResult<NoteResponse>> list(@PathVariable Long bankId,
+    /**
+     * 笔记列表（按最近更新排序）。三种过滤可单用：
+     * `bankId` 该题库下的、`questionId` 该题的、`unlinked=true` 未归类的；都不给 = 全部。
+     */
+    @GetMapping("/notes")
+    public ApiResponse<PageResult<NoteResponse>> list(@RequestParam(required = false) Long bankId,
                                                      @RequestParam(required = false) Long questionId,
+                                                     @RequestParam(defaultValue = "false") boolean unlinked,
                                                      @RequestParam(defaultValue = "1") int page,
                                                      @RequestParam(defaultValue = "20") int size) {
-        return ApiResponse.success(noteService.list(bankId, questionId, page, size));
+        return ApiResponse.success(noteService.list(bankId, questionId, unlinked, page, size));
     }
 
     /** 某道题的笔记（做题页/回顾页就地显示，不分页） */
@@ -42,9 +47,10 @@ public class NoteController {
         return ApiResponse.success(noteService.listOfQuestion(questionId));
     }
 
-    @PostMapping("/banks/{bankId}/notes")
-    public ApiResponse<NoteResponse> create(@PathVariable Long bankId, @RequestBody NoteRequest request) {
-        return ApiResponse.success(noteService.create(bankId, request));
+    /** 新建笔记：`bankId`/`questionId` 都可省略（什么都不挂的随手记） */
+    @PostMapping("/notes")
+    public ApiResponse<NoteResponse> create(@RequestBody NoteRequest request) {
+        return ApiResponse.success(noteService.create(request));
     }
 
     @PutMapping("/notes/{id}")
@@ -56,5 +62,19 @@ public class NoteController {
     public ApiResponse<Void> delete(@PathVariable Long id) {
         noteService.delete(id);
         return ApiResponse.success(null);
+    }
+
+    /** 给笔记加一条关联（幂等） */
+    @PostMapping("/notes/{id}/links")
+    public ApiResponse<NoteResponse> addLink(@PathVariable Long id, @RequestBody NoteLinkRequest request) {
+        return ApiResponse.success(noteService.addLink(id, request));
+    }
+
+    /** 去掉一条关联（笔记内容保留） */
+    @DeleteMapping("/notes/{id}/links")
+    public ApiResponse<NoteResponse> removeLink(@PathVariable Long id,
+                                               @RequestParam String type,
+                                               @RequestParam Long targetId) {
+        return ApiResponse.success(noteService.removeLink(id, type, targetId));
     }
 }

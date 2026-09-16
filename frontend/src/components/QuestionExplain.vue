@@ -397,7 +397,8 @@ async function saveToNote() {
   noting.value = true
   error.value = ''
   try {
-    await createNote(props.bankId, {
+    await createNote({
+      bankId: Number(props.bankId),
       questionId: Number(props.questionId),
       content: text.value,
       source: 'ai'

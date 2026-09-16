@@ -172,18 +172,24 @@
 | `GET /api/tutor/sessions?questionId=` | 某题的历史会话（接着上次聊；**界面用它做"回看上次讲解"**） |
 | `GET /api/tutor/sessions/{sessionId}/messages` | `{messages[],maxHintLevel}` |
 
-### 1.3.5.2 `NoteController` — 我的笔记（5 个端点；只存本机，不进内容包）
+### 1.3.5.2 `NoteController` — 我的笔记（7 个端点；只存本机，不进内容包）
+
+笔记**不隶属于任何题库/题目**：挂在哪里由 `note_link` 关联表达（0..N 个题库、0..N 道题，未归类也合法）。
 
 | 方法 + 路径 | 请求 | 响应 `data` | 常见错误 |
 | --- | --- | --- | --- |
-| `GET /api/banks/{bankId}/notes` | query `questionId`（可选）、`page`、`size` | `PageResult<NoteResponse{id,bankId,questionId,questionNumber,content,source(user/ai),createdAt,updatedAt}>` | 404 `题库不存在` |
+| `GET /api/notes` | query `bankId`（可选）/ `questionId`（可选）/ `unlinked`（可选）/ `page` / `size` | `PageResult<NoteResponse{id,content,source(user/ai),links[{type,targetId,label,bankId,questionNumber}],createdAt,updatedAt}>` | — |
 | `GET /api/questions/{questionId}/notes` | — | `List<NoteResponse>`（做题页/回顾页就地显示，不分页） | — |
-| `POST /api/banks/{bankId}/notes` | `{questionId?, content, source?}`（`questionId` 省略 = 题库级随手记） | `NoteResponse` | 400 `笔记内容不能为空` / `题目不属于该题库` |
+| `POST /api/notes` | `{bankId?, questionId?, content, source?}`（关联都可省略 = 未归类随手记） | `NoteResponse` | 400 `笔记内容不能为空`；404 `题库不存在：{id}` |
 | `PUT /api/notes/{id}` | `{content}` | `NoteResponse` | 400 `笔记内容不能为空`；404 `笔记不存在：{id}` |
 | `DELETE /api/notes/{id}` | — | `null` | 404 `笔记不存在：{id}` |
+| `POST /api/notes/{id}/links` | `{type(bank/question), targetId}` | `NoteResponse`（幂等：已挂过不重复插） | 400 `关联类型只能是 bank 或 question`；404 题库/题目/笔记不存在 |
+| `DELETE /api/notes/{id}/links` | query `type`、`targetId` | `NoteResponse`（笔记内容保留） | 同上 |
 
+> `GET /api/notes?bankId=` 的口径是"**这个题库的笔记**"：挂在库上的 **或** 挂在这个库某道题上的。
+>
 > 与解析的边界：解析走 `PUT /api/questions/{id}/analysis` 并**随题库文件导出**；笔记只在本机
-> （题删/库删时级联清理）。详见 `docs/features.md` §4.9。
+> （题/库被删时只删关联行，笔记内容保留 → 变成"未归类"）。详见 `docs/features.md` §4.9。
 
 ### 1.3.5.3 `SkillController` — 技能图与知识点标签（15 个端点，路径前缀 `/api`）
 

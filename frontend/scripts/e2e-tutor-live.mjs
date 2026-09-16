@@ -196,25 +196,25 @@ try {
 
   /* ---------------- ① 复盘：公式统计 + 流式诊断 ---------------- */
   await page.goto(`${UI}/banks/${bankId}/practice?sessionId=${sessionId}`, { waitUntil: 'domcontentloaded' })
-  await page.waitForSelector('.review-card', { timeout: 15000 })
+  await page.waitForSelector('.diag-card', { timeout: 15000 })
   await page.waitForTimeout(1500)
-  const reviewStat = await textOf(page.locator('.review-stat'))
+  const reviewStat = await textOf(page.locator('.diag-stat'))
   check('报告页出现复盘卡且统计正确（6 题 · 对 4 · 错 2）', /6/.test(reviewStat) && /4/.test(reviewStat) && /2/.test(reviewStat), reviewStat)
-  const nodeText = await textOf(page.locator('.review-nodes'))
+  const nodeText = await textOf(page.locator('.diag-nodes'))
   check('薄弱知识点由公式算出（不依赖模型）', /增长/.test(nodeText), nodeText.slice(0, 120))
 
-  await page.locator('.review-card button', { hasText: '生成复盘诊断' }).click()
+  await page.locator('.diag-card button', { hasText: '生成复盘诊断' }).click()
   // 流式：先出现第一段，再逐步变长（证明不是一次性返回）
   await page.waitForFunction(() => {
-    const el = document.querySelector('.review-text')
+    const el = document.querySelector('.diag-text')
     return el && el.innerText.trim().length > 0
   }, null, { timeout: 20000 })
-  const firstChunk = (await textOf(page.locator('.review-text'))).length
+  const firstChunk = (await textOf(page.locator('.diag-text'))).length
   await page.waitForTimeout(400)
-  const laterChunk = (await textOf(page.locator('.review-text'))).length
-  await page.waitForSelector('.review-card button:not([disabled])', { timeout: 20000 })
+  const laterChunk = (await textOf(page.locator('.diag-text'))).length
+  await page.waitForSelector('.diag-card button:not([disabled])', { timeout: 20000 })
   await page.waitForTimeout(800)
-  const finalText = await textOf(page.locator('.review-text'))
+  const finalText = await textOf(page.locator('.diag-text'))
   check('复盘诊断是流式出现的（先短后长）', laterChunk > firstChunk, `${firstChunk} → ${laterChunk}`)
   check('复盘诊断内容落到了界面上', /增长类|增长率/.test(finalText), finalText.slice(0, 120))
   await page.screenshot({ path: `${SHOTS}/1-复盘诊断.png` })
@@ -247,10 +247,18 @@ try {
 
   /* ---------------- ③ 错题讲解：三段结构分块流式 + 可选错因 + 追问 + 存为解析 ---------------- */
   await page.goto(`${UI}/banks/${bankId}/practice?sessionId=${sessionId}`, { waitUntil: 'domcontentloaded' })
-  await page.waitForSelector('.report-item', { timeout: 15000 })
-  const firstWrong = page.locator('.report-item').first()
-  await firstWrong.locator('.report-row').click()
+  // 逐题回顾与「练习历史」是同一个组件（SessionReview）：卡片直接展开，不需要再点一下
+  await page.waitForSelector('.review-card[data-qid]', { timeout: 15000 })
+  const firstWrong = page.locator(`.review-card[data-qid="${wrongQids[0]}"]`)
+  await firstWrong.scrollIntoViewIfNeeded()
   await page.waitForTimeout(600)
+  // 记下"刚交卷那一屏"的逐题渲染，稍后与练习历史对比（两处必须是同一个组件的同一份渲染）
+  const cardsOnReport = await page.locator('.review-card[data-qid]').count()
+  const firstCardOnReport = page.locator('.review-card[data-qid]').first()
+  const stemOnReport = await textOf(firstCardOnReport.locator('.review-content'))
+  const optsOnReport = await firstCardOnReport.locator('.review-opt').count()
+  check('刚交卷那一屏每题都带题干与选项（不是只给答案）',
+    stemOnReport.trim().length > 4 && optsOnReport >= 2, `stem=${stemOnReport.slice(0, 40)} opts=${optsOnReport}`)
   const coachTrigger = firstWrong.locator('.qx-trigger')
   const coachText = await textOf(coachTrigger)
   check('错题里有「讲给我听」+ 可选错因三选（不选也能讲）',
@@ -317,9 +325,14 @@ try {
   check('「存进笔记」把讲解存进我的笔记（source=ai）',
     notesOfQuestion.length === 1 && notesOfQuestion[0].source === 'ai' && /【错在哪】/.test(notesOfQuestion[0].content),
     JSON.stringify(notesOfQuestion).slice(0, 200))
-  const bankNotes = await api(`/banks/${bankId}/notes?page=1&size=20`)
-  check('笔记按题库可列出（带题号，便于回到那道题）',
-    bankNotes.total >= 1 && bankNotes.records[0].questionNumber != null,
+  // 笔记挂在题目上（links 里有 question 关联），同时带上所属题库：按题库能列出、能回到那道题
+  const questionLink = (notesOfQuestion[0]?.links || []).find((l) => l.type === 'question')
+  check('笔记带上题目关联（含题号，便于回到那道题）',
+    questionLink?.targetId === wrongQids[0] && questionLink?.questionNumber != null,
+    JSON.stringify(notesOfQuestion[0]?.links || []))
+  const bankNotes = await api(`/notes?bankId=${bankId}&page=1&size=20`)
+  check('笔记按题库可列出（挂在这个库题目上的也算）',
+    bankNotes.total >= 1 && (bankNotes.records[0].links || []).length >= 1,
     JSON.stringify(bankNotes).slice(0, 200))
   await page.screenshot({ path: `${SHOTS}/3-错题讲解.png` })
 
@@ -357,6 +370,14 @@ try {
   check('练习历史里显示的是讲过的三段（回看，不重复花额度）',
     histTitles.length >= 3 && histTitles.includes('这类题怎么做'),
     JSON.stringify(histTitles))
+  // 与"刚交卷那一屏"对照：同一个组件、同一份数据 → 卡片数一致、首题题干与选项一致
+  const cardsInHistory = await histCards.count()
+  const firstCardInHistory = histCards.first()
+  const stemInHistory = await textOf(firstCardInHistory.locator('.review-content'))
+  const optsInHistory = await firstCardInHistory.locator('.review-opt').count()
+  check('刚交卷那一屏与练习历史是同一套逐题回顾（卡片数 / 题干 / 选项都一致）',
+    cardsInHistory === cardsOnReport && stemInHistory === stemOnReport && optsInHistory === optsOnReport,
+    `报告 ${cardsOnReport} 卡 / ${optsOnReport} 选项 vs 历史 ${cardsInHistory} 卡 / ${optsInHistory} 选项`)
 
   // 没作答的题：讲"这道题怎么做"，不能讲"你错在哪"（新题，确保从未作答）
   const freshQid = await api('/questions', 'POST', {

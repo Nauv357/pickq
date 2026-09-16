@@ -8,7 +8,9 @@
       <button class="btn btn-secondary" @click="$router.push('/')">{{ t('backToBanks') }}</button>
     </div>
 
-    <!-- ============ 成绩报告（交卷后） ============ -->
+    <!-- ============ 成绩报告（交卷后） ============
+         逐题回顾由 SessionReview 渲染（与「练习历史」里点开同一次练习是**同一个组件**），
+         这里只多两块刚交卷才有意义的东西：成绩抬头 + 本场复盘诊断。 -->
     <template v-else-if="report">
       <header class="report-header">
         <div class="report-title-line">
@@ -21,97 +23,24 @@
         </div>
         <div class="report-score">
           <span class="score-num">{{ formatScore(report.totalScore) }} / {{ formatScore(report.maxScore) }}</span>
-          <span class="score-label">{{ t('scoreFull') }} · {{ formatDuration(report.totalSeconds) }}</span>
-          <button class="btn btn-secondary btn-sm" @click="goReview">
-            <TikuIcon name="list" :size="13" />
-            {{ t('viewReview') }}
+          <span class="score-label">{{ t('scoreFull') }}</span>
+          <button class="btn btn-secondary btn-sm" @click="goHistory">
+            <TikuIcon name="clock" :size="13" />
+            {{ t('viewHistory') }}
           </button>
         </div>
       </header>
 
       <div class="report-body">
-        <!-- 待自评主观题（交卷后当场赋分，赋完总分实时更新） -->
-        <div v-if="pendingSubjective.length" class="pending-banner">
-          <TikuIcon name="sparkle" :size="14" />
-          <span>{{ t('pendingSubjective', { n: pendingSubjective.length }) }}</span>
-        </div>
-        <div v-if="pendingSubjective.length" class="pending-grade">
-          <div class="section-title"><h2>{{ t('subjectiveGrade') }}</h2></div>
-          <div v-for="q in pendingSubjective" :key="q.questionId" class="pending-item">
-            <div class="pending-q">
-              <span class="mono">#{{ q.questionNumber ?? '—' }}</span>
-              <span class="q-type type-subjective">{{ t('subjectiveType') }}</span>
-              <span class="text-muted">{{ formatScore(q.score) }} {{ t('unitPoint') }}</span>
-            </div>
-            <div class="pending-content" v-html="richHtml(q.content)"></div>
-            <div class="pending-row">
-              <span class="text-muted">{{ t('myAnswer') }}：</span>
-              <span class="pending-answer" v-html="richHtml(q.userAnswer)"></span>
-            </div>
-            <div class="pending-row">
-              <span class="text-muted">{{ t('referenceAnswer') }}：</span>
-              <span class="pending-answer" v-html="richHtml(q.referenceAnswer || t('none'))"></span>
-            </div>
-            <div class="pending-btns">
-              <span class="text-muted">{{ t('selfScorePrompt', { s: formatScore(q.score) }) }}：</span>
-              <el-slider
-                :model-value="gradeVal(q)"
-                :min="0"
-                :max="q.score"
-                :step="0.5"
-                :disabled="gradingQid === q.questionId"
-                style="width: 190px; margin: 0 4px"
-                @update:model-value="(v) => setDraft(q, v)"
-              />
-              <el-input-number
-                :model-value="gradeVal(q)"
-                :min="0"
-                :max="q.score"
-                :step="0.5"
-                :precision="1"
-                size="small"
-                controls-position="right"
-                style="width: 92px"
-                :disabled="gradingQid === q.questionId"
-                @update:model-value="(v) => setDraft(q, v)"
-              />
-              <span class="text-muted mono">/ {{ formatScore(q.score) }}</span>
-              <button class="btn btn-secondary btn-sm" :disabled="gradingQid === q.questionId" @click="quickGrade(q, q.score)">
-                {{ t('fullMarks') }}
-              </button>
-              <button class="btn btn-primary btn-sm" :disabled="gradingQid === q.questionId" @click="gradePending(q)">
-                {{ gradingQid === q.questionId ? t('saving') : t('saveScore') }}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div class="report-card">
-          <div class="report-stats">
-            <div class="stat">
-              <span class="stat-num mono">{{ report.correctCount }} / {{ report.totalQuestions }}</span>
-              <span class="stat-label">{{ t('statCorrect') }}</span>
-            </div>
-            <div class="stat">
-              <span class="stat-num mono">{{ report.totalQuestions ? Math.round((report.correctCount / report.totalQuestions) * 100) : 0 }}%</span>
-              <span class="stat-label">{{ t('statAccuracy') }}</span>
-            </div>
-            <div class="stat">
-              <span class="stat-num mono">{{ formatDuration(report.totalSeconds) }}</span>
-              <span class="stat-label">{{ t('statTime') }}</span>
-            </div>
-          </div>
-        </div>
-
         <div class="report-questions">
-          <!-- 复盘（阶段 1）：公式统计 + AI 诊断（流式）；模型只负责把结论讲成人话 -->
-          <div class="review-card">
-            <div class="review-head">
-              <span class="review-title">
+          <!-- 复盘：公式统计 + AI 诊断（流式）；模型只负责把结论讲成人话 -->
+          <div class="diag-card">
+            <div class="diag-head">
+              <span class="diag-title">
                 <TikuIcon name="sparkle" :size="14" />
                 {{ t('reviewTitle') }}
               </span>
-              <span v-if="reviewSummary" class="text-muted review-stat">
+              <span v-if="reviewSummary" class="text-muted diag-stat">
                 {{ t('reviewStat', { total: reviewSummary.total, correct: reviewSummary.correct, wrong: reviewSummary.wrong }) }}
               </span>
               <span class="bar-grow"></span>
@@ -119,67 +48,22 @@
                 {{ tutorBusy ? t('reviewGenerating') : t('reviewBtn') }}
               </button>
             </div>
-            <!-- 公式算出来的薄弱点（不依赖模型，永远给得出来） -->
-            <div v-if="reviewSummary && reviewSummary.byNode.length" class="review-nodes">
+            <!-- 本场错得最多的知识点（按作答统计） -->
+            <div v-if="reviewSummary && reviewSummary.byNode.length" class="diag-nodes">
               <span class="text-muted">{{ t('weakNodes') }}</span>
-              <span v-for="n in reviewSummary.byNode.slice(0, 5)" :key="n.nodeId" class="review-node">
+              <span v-for="n in reviewSummary.byNode.slice(0, 5)" :key="n.nodeId" class="diag-node">
                 {{ n.name }} · {{ t('wrongN', { n: n.wrong }) }}
                 <span v-if="n.answered >= 3" class="text-muted">（{{ t('histRate', { r: n.correctRate }) }}）</span>
                 <span v-else class="text-muted">（{{ t('noHistory') }}）</span>
               </span>
             </div>
-            <div v-if="diagnosis" class="review-text" v-html="richHtml(diagnosis)"></div>
-            <p v-else-if="!tutorBusy" class="text-muted review-tip">{{ t('reviewTip') }}</p>
-            <p v-if="tutorError" class="review-err">{{ tutorError }}</p>
+            <div v-if="diagnosis" class="diag-text" v-html="richHtml(diagnosis)"></div>
+            <p v-else-if="!tutorBusy" class="text-muted diag-tip">{{ t('reviewTip') }}</p>
+            <p v-if="tutorError" class="diag-err">{{ tutorError }}</p>
           </div>
 
           <div class="section-title"><h2>{{ t('detailTitle') }}</h2></div>
-          <div v-for="(q, i) in report.questions" :key="q.questionId" class="report-item">
-            <div class="report-row" @click="toggleReportOpen(q.questionId)">
-              <span class="q-number mono">#{{ q.questionNumber ?? i + 1 }}</span>
-              <span class="report-badge" :class="badgeClass(q)">{{ badgeText(q) }}</span>
-              <span class="report-content">{{ q.content }}</span>
-              <span class="report-meta text-muted mono">
-                {{ formatScore(q.earnedScore ?? 0) }}/{{ formatScore(q.score) }} {{ t('unitPoint') }}
-                <span v-if="q.seconds != null"> · {{ q.seconds }}s</span>
-                <TikuIcon :name="reportOpen[q.questionId] ? 'chevron-up' : 'chevron-down'" :size="12" />
-              </span>
-            </div>
-            <div v-if="reportOpen[q.questionId]" class="report-detail">
-              <div v-if="q.questionType === 'SUBJECTIVE' && q.userAnswer" class="rd-row">
-                <b>{{ t('myAnswer') }}：</b><span v-html="richHtml(q.userAnswer)"></span>
-              </div>
-              <div v-else-if="q.selectedKeys && q.selectedKeys.length" class="rd-row">
-                <b>{{ t('myAnswer') }}：</b>{{ formatKeys(q.selectedKeys) }}
-              </div>
-              <div v-if="q.selfGrade" class="rd-row"><b>{{ t('selfGradeLbl') }}：</b>{{ t('earnedScore') }} {{ formatScore(q.earnedScore ?? 0) }} / {{ formatScore(q.score) }}</div>
-              <div v-if="q.answerKeys && q.answerKeys.length" class="rd-row">
-                <b>{{ t('correctAnswer') }}：</b>{{ formatKeys(q.answerKeys) }}
-              </div>
-              <div v-if="q.answerText" class="rd-row"><b>{{ t('answerLbl') }}：</b>{{ q.answerText }}</div>
-              <div v-if="q.questionType === 'SUBJECTIVE' && q.referenceAnswer" class="rd-row">
-                <b>{{ t('referenceAnswer') }}：</b><span v-html="richHtml(q.referenceAnswer)"></span>
-              </div>
-              <div v-if="q.analysis" class="rd-row"><b>{{ t('analysisLbl') }}：</b><span v-html="richHtml(q.analysis)"></span></div>
-              <p
-                v-if="!q.analysis && !q.answerText && !(q.answerKeys && q.answerKeys.length) && !q.referenceAnswer"
-                class="text-muted"
-              >{{ t('noAnalysis') }}</p>
-              <!-- 讲解（做题后唯一的解析入口）：有作答讲「错在哪/这类题怎么做/下次防错」，
-                   没作答讲「这道题怎么做/这类题怎么做/易错点」；讲完可追问、可「存为解析」。
-                   上次讲过的内容会在这里自动回看（不重复花额度） -->
-              <QuestionExplain
-                :bank-id="Number(id)"
-                :question-id="q.questionId"
-                :practice-session-id="report?.sessionId || sessionId"
-                :template-id="skillTemplateId"
-                :mode="isWrongQuestion(q) ? 'WRONG' : 'NEUTRAL'"
-                @saved="onReportAnalysisSaved(q)"
-              />
-              <!-- 我的笔记（与解析分开：解析是题库的，笔记只在本机） -->
-              <QuestionNotes :bank-id="Number(id)" :question-id="q.questionId" />
-            </div>
-          </div>
+          <SessionReview :session="report" :bank-id="id" :template-id="skillTemplateId" @changed="refreshReport" />
         </div>
       </div>
     </template>
@@ -425,58 +309,41 @@ const { t } = useI18n({
   messages: {
     'zh-CN': {
       notFoundDesc: '题库可能已被删除，或地址有误', backToBanks: '返回题库列表', backToBank: '返回题库', back: '返回',
-      reportTitle: '成绩报告', scoreFull: '得分 / 满分', viewReview: '查看详细回顾',
-      pendingSubjective: '有 {n} 道主观题待自评赋分，自评后总分自动更新',
-      subjectiveGrade: '主观题自评', subjectiveType: '主观题', myAnswer: '我的作答', referenceAnswer: '参考答案',
-      none: '（无）', selfScorePrompt: '自评得分（0 ~ {s} 分）', fullMarks: '全对', saving: '保存中…', saveScore: '保存得分',
+      reportTitle: '成绩报告', scoreFull: '得分 / 满分', viewHistory: '练习历史',
+      msgPendingSelfGrade: '还有 {n} 道主观题待自评赋分（在下面那一题里给分）',
       unitPoint: '分', sessionModeTip: '做题采用会话制：抽一组题全部作答后，交卷统一判分', allAnsweredTip: '全部作答完成 · 可返回检查修改，点击右上角「交卷」统一判分', multiTip: '可多选 · 作答后交卷统一判分', subjTip: '输入后交卷统一判分，可随时修改',
-      statCorrect: '答对 / 总题数', statAccuracy: '正确率', statTime: '总用时', detailTitle: '每题明细（点击展开答案与解析）',
-      selfGradeLbl: '自评', earnedScore: '实得', correctAnswer: '正确答案', answerLbl: '答案', analysisLbl: '解析',
-      noAnalysis: '本题没有附加答案文字与解析',
-      msgUnansweredConfirm: '还有 {n} 道题未作答，交卷后未答题按 0 分计且无法再作答。确定交卷吗？',
-      msgSubmitTitle: '交卷确认',
-      msgSubmitted: '已交卷',
-      msgPendingSelfGrade: '还有 {n} 道主观题待自评，可在成绩页赋分',
-      msgSelfGradeSaved: '自评已保存（{earned} / {total} 分），成绩已更新',
-      msgAllSelfGraded: '全部主观题已自评，本次成绩完整',
+      detailTitle: '每题明细',
       msgFavorited: '已收藏',
       msgUnfavorited: '已取消收藏',
       msgReviewSuspended: '已暂停此题复习',
       msgReviewResumed: '已恢复此题复习',
       msgNoQuestionN: '会话中没有第 {n} 题',
       hintBtn: '提示',
-      hintBtnTip: '不会做？让老师给一级提示（指方向 → 关键一步 → 完整解析，不会一上来就给答案）',
+      hintBtnTip: '不会做？要一级提示',
       reviewTitle: '这场复盘',
       reviewStat: '共 {total} 题 · 对 {correct} · 错 {wrong}',
       reviewBtn: '生成复盘诊断',
       reviewGenerating: '正在写…',
-      reviewTip: '上面是公式统计出来的薄弱点；点「生成复盘诊断」让 AI 把这场错题按知识点讲一遍（只依据本场错题，不编造）。',
+      reviewTip: '点「生成复盘诊断」看这场错在哪。',
       weakNodes: '本场错得最多的知识点：',
       wrongN: '错 {n} 题',
       histRate: '历史正确率 {r}%',
       noHistory: '题量还不够',
       planHide: '收起这次的配题说明',
-      kbHint: '{sel} · ←/→ 切题 · 数字直达题号（1 秒内连按可跳多位数）· Enter 交卷',
+      kbHint: '{sel} · ←/→ 切题 · 数字直达题号 · Enter 交卷',
       kbJudge: 'A/B 选 正确/错误',
       kbMulti: '选项字母勾选（可多选）',
       kbSingle: '选项字母选择答案'
     },
     'en-US': {
       notFoundDesc: 'This bank may have been deleted, or the link is wrong', backToBanks: 'Back to banks', back: 'Back', backToBank: 'Back to bank',
-      reportTitle: 'Score Report', scoreFull: 'Score / Full', viewReview: 'View detailed review',
-      pendingSubjective: '{n} subjective question(s) await self-grading — the total updates automatically',
-      subjectiveGrade: 'Grade subjective questions', subjectiveType: 'Subjective', myAnswer: 'My answer', referenceAnswer: 'Reference answer',
-      none: '(none)', selfScorePrompt: 'Self score (0 ~ {s})', fullMarks: 'Full marks', saving: 'Saving…', saveScore: 'Save score',
+      reportTitle: 'Score Report', scoreFull: 'Score / Full', viewHistory: 'Practice history',
+      msgPendingSelfGrade: '{n} subjective question(s) await self-grading (grade them in the question below)',
       unitPoint: 'pts', sessionModeTip: 'Session-based: answer a set, then submit for unified scoring', allAnsweredTip: 'All answered — you can go back to check, then click Submit (top right) for scoring', multiTip: 'Multiple answers allowed · submitted for scoring at the end', subjTip: 'Type your answer; submitted for scoring at the end, editable anytime',
-      statCorrect: 'Correct / total', statAccuracy: 'Accuracy', statTime: 'Total time', detailTitle: 'Question details (click to expand answers & analysis)',
-      selfGradeLbl: 'Self-grade', earnedScore: 'Earned', correctAnswer: 'Correct answer', answerLbl: 'Answer', analysisLbl: 'Analysis',
-      noAnalysis: 'No extra answer text or analysis for this question',
+      detailTitle: 'Question details',
       msgUnansweredConfirm: '{n} question(s) not answered — after submitting they count as 0 and cannot be answered again. Submit anyway?',
       msgSubmitTitle: 'Confirm submission',
       msgSubmitted: 'Submitted',
-      msgPendingSelfGrade: '{n} subjective question(s) await self-grading — you can grade them on the report page',
-      msgSelfGradeSaved: 'Self-grade saved ({earned} / {total} pts) — score updated',
-      msgAllSelfGraded: 'All subjective questions graded — your score for this session is complete',
       msgFavorited: 'Added to favorites',
       msgUnfavorited: 'Removed from favorites',
       msgReviewSuspended: 'Review paused for this question',
@@ -488,13 +355,13 @@ const { t } = useI18n({
       reviewStat: '{total} questions · {correct} correct · {wrong} wrong',
       reviewBtn: 'Generate review',
       reviewGenerating: 'Writing…',
-      reviewTip: 'Above are the weak points computed from your answers; click “Generate review” to have them explained by topic (based only on this session’s mistakes).',
+      reviewTip: 'Click “Generate review” to see what went wrong in this session.',
       weakNodes: 'Most-missed topics:',
       wrongN: '{n} wrong',
       histRate: '{r}% historical accuracy',
       noHistory: 'no history yet',
       planHide: 'Hide this session’s question mix',
-      kbHint: '{sel} · ←/→ to switch · digits jump to a question number (type quickly for multi-digit) · Enter to submit',
+      kbHint: '{sel} · ←/→ to switch · digits jump to a number · Enter to submit',
       kbJudge: 'A/B for true/false',
       kbMulti: 'option letters to tick (multi-select)',
       kbSingle: 'option letter to answer'
@@ -505,15 +372,14 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getBank } from '../api/banks'
 import { finishSession, getSessionDetail } from '../api/sessions'
-import { selfGradeRecord, setReviewSuspended } from '../api/studyRecords'
+import { setReviewSuspended } from '../api/studyRecords'
 import { setFavorite } from '../api/questions'
 import { getReviewSummary, streamTutor } from '../api/tutor'
 import { getSkillTemplates } from '../api/skills'
 import { formatScore } from '../utils/format'
 import { richTextToHtml } from '../utils/richText'
 import TikuIcon from '../components/TikuIcon.vue'
-import QuestionExplain from '../components/QuestionExplain.vue'
-import QuestionNotes from '../components/QuestionNotes.vue'
+import SessionReview from '../components/SessionReview.vue'
 import TutorPanel from '../components/TutorPanel.vue'
 
 const route = useRoute()
@@ -573,7 +439,7 @@ const tutorSessionIds = ref({})
 
 /** 交卷后：拉公式统计（成绩 + 薄弱知识点），并记住当前技能图 */
 async function loadReviewSummary() {
-  if (!report.value?.sessionId) return
+  if (!report.value?.id) return
   try {
     const templates = await getSkillTemplates().catch(() => [])
     const saved = localStorage.getItem('tiku.skillTemplateId')
@@ -583,7 +449,7 @@ async function loadReviewSummary() {
     /* 技能图拉不到也能用（只是没有知识点维度的统计） */
   }
   try {
-    reviewSummary.value = await getReviewSummary(report.value.sessionId, Number(id), skillTemplateId.value)
+    reviewSummary.value = await getReviewSummary(report.value.id, Number(id), skillTemplateId.value)
   } catch (e) {
     reviewSummary.value = null
   }
@@ -591,13 +457,13 @@ async function loadReviewSummary() {
 
 /** 生成复盘诊断（流式） */
 async function runDiagnose() {
-  if (tutorBusy.value || !report.value?.sessionId) return
+  if (tutorBusy.value || !report.value?.id) return
   tutorBusy.value = true
   tutorError.value = ''
   diagnosis.value = ''
   const result = await streamTutor('/tutor/review', {
     bankId: Number(id),
-    practiceSessionId: report.value.sessionId,
+    practiceSessionId: report.value.id,
     templateId: skillTemplateId.value || null,
     kind: 'POST_REVIEW'
   }, {
@@ -612,9 +478,7 @@ async function runDiagnose() {
   return result
 }
 
-/** 单题讲解统一走 QuestionExplain 组件（含错因三选与追问），此处不再保留"答错即问"的旧实现 */
-
-const isWrongQuestion = (q) => q.correct === false || q.selfGrade === 'WRONG' || q.selfGrade === 'PARTIAL'
+/* 逐题讲解/笔记由 SessionReview 内部渲染（与练习历史同一个组件） */
 
 const questions = ref([])
 const loading = ref(true)
@@ -654,23 +518,8 @@ const modeLabel = computed(() => (sessionMode.value ? MODE_LABELS[sessionMode.va
 const currentIndex = ref(0)
 const finishing = ref(false)
 
-// 交卷成绩报告（渲染成绩视图后隐藏做题 UI）
+// 交卷成绩报告（渲染成绩视图后隐藏做题 UI）；内容就是会话详情，逐题交给 SessionReview 渲染
 const report = ref(null)
-// 交卷后待自评的主观题（题干/作答/参考答案，来自会话详情）
-const pendingSubjective = ref([])
-const gradingQid = ref(null)
-// 报告每题展开（答案与解析）
-const reportOpen = reactive({})
-function toggleReportOpen(qid) {
-  reportOpen[qid] = !reportOpen[qid]
-}
-
-// AI 解析保存成功：本地更新该题解析展示
-function onReportAnalysisSaved(q, text) {
-  if (q && text) {
-    q.analysis = text
-  }
-}
 
 // 无会话直连（旧自由模式已并入会话制）/ 加载失败引导态
 const freeMode = ref(false)
@@ -750,10 +599,7 @@ async function loadAll() {
       currentIndex.value = start
     } else {
       //已交卷会话（重新进入）：直接展示成绩报告（含答案与解析）
-      report.value = reportFromDetail(detail)
-      pendingSubjective.value = (detail.questions || []).filter(
-        (q) => q.questionType === 'SUBJECTIVE' && q.userAnswer && !q.selfGrade
-      )
+      report.value = detail
       // 复盘统计随报告一起准备（公式算的，不耗 token）；AI 诊断由用户点按钮才生成
       await loadReviewSummary()
     }
@@ -762,26 +608,6 @@ async function loadAll() {
     loadError.value = e?.response?.status === 404 ? '会话不存在或已被删除' : '加载失败，请稍后重试'
   } finally {
     loading.value = false
-  }
-}
-
-/** 会话详情 → 报告模型（每题补 earnedScore；主观题按自评：对=满分/部分=一半/错与未评=0） */
-function reportFromDetail(detail) {
-  return {
-    sessionId: detail.id,
-    totalQuestions: detail.questionCount,
-    answeredCount: detail.answeredCount,
-    correctCount: detail.correctCount,
-    totalScore: detail.totalScore,
-    maxScore: detail.maxScore,
-    totalSeconds: detail.totalSeconds,
-    questions: (detail.questions || []).map((q) => {
-      let earned = 0
-      if (q.selfGrade === 'CORRECT') earned = q.score
-      else if (q.selfGrade === 'PARTIAL') earned = q.score / 2
-      else if (q.correct === true) earned = q.score
-      return { ...q, earnedScore: earned }
-    })
   }
 }
 
@@ -895,8 +721,8 @@ async function finish() {
     for (let attempt = 0; attempt < 2 && !report.value; attempt++) {
       await refreshReport()
     }
-    if (pendingSubjective.value.length) {
-      ElMessage.info(t('msgPendingSelfGrade', { n: pendingSubjective.value.length }))
+    if (pendingSelfGradeCount.value) {
+      ElMessage.info(t('msgPendingSelfGrade', { n: pendingSelfGradeCount.value }))
     }
   } catch (e) {
     /* 拦截器已提示 */
@@ -922,15 +748,12 @@ function collectAnswers() {
   return answers
 }
 
-/** 从会话详情重建报告（含答案与解析）与待自评列表 */
+/** 从会话详情重建成绩页（含答案与解析）；自评赋分也走这里刷新分数 */
 async function refreshReport() {
   if (!sessionId) return
   try {
     const detail = await getSessionDetail(sessionId)
-    report.value = reportFromDetail(detail)
-    pendingSubjective.value = (detail.questions || []).filter(
-      (q) => q.questionType === 'SUBJECTIVE' && q.userAnswer && !q.selfGrade
-    )
+    report.value = detail
     // 复盘统计随报告一起准备（公式算的，不耗 token）；AI 诊断由用户点按钮才生成
     await loadReviewSummary()
   } catch (e) {
@@ -938,39 +761,13 @@ async function refreshReport() {
   }
 }
 
-/* 成绩页主观题自评：自由给分（0~满分，0.5 步进）；赋分后刷新总分与待自评列表 */
-const gradeDrafts = reactive({})
-function gradeVal(q) {
-  return gradeDrafts[q.questionId] ?? 0
-}
-function setDraft(q, v) {
-  gradeDrafts[q.questionId] = v
-}
-async function quickGrade(q, earned) {
-  setDraft(q, earned)
-  await gradePending(q)
-}
-async function gradePending(q) {
-  if (!q.recordId || gradingQid.value) return
-  const earned = gradeVal(q)
-  gradingQid.value = q.questionId
-  try {
-    await selfGradeRecord(q.recordId, earned)
-    ElMessage.success(t('msgSelfGradeSaved', { earned, total: q.score }))
-    delete gradeDrafts[q.questionId]
-    await refreshReport()
-    if (!pendingSubjective.value.length) {
-      ElMessage.success(t('msgAllSelfGraded'))
-    }
-  } catch (e) {
-    /* 拦截器已提示 */
-  } finally {
-    gradingQid.value = null
-  }
-}
+/** 待自评的主观题数（交卷后提示用；赋分控件在 SessionReview 的每题卡里） */
+const pendingSelfGradeCount = computed(() =>
+  (report.value?.questions || []).filter((q) => q.questionType === 'SUBJECTIVE' && q.userAnswer && !q.selfGrade).length
+)
 
-function goReview() {
-  router.push({ path: `/banks/${id}/sessions`, query: { view: report.value?.sessionId } })
+function goHistory() {
+  router.push(`/banks/${id}/sessions`)
 }
 
 /* ---------- 收藏 ---------- */
@@ -1160,25 +957,7 @@ onUnmounted(() => {
 })
 
 /* ---------- 报告辅助 ---------- */
-function badgeClass(q) {
-  if (q.correct === true || q.selfGrade === 'CORRECT') return 'badge-ok'
-  if (q.correct === false || q.selfGrade === 'WRONG' || q.selfGrade === 'PARTIAL') return 'badge-no'
-  return 'badge-skip'
-}
-function badgeText(q) {
-  if (q.selfGrade === 'CORRECT') return '正确'
-  if (q.selfGrade === 'PARTIAL') return '部分正确'
-  if (q.selfGrade === 'WRONG') return '错误'
-  if (q.correct === true) return '正确'
-  if (q.correct === false) return '错误'
-  if (q.correct === null && q.userAnswer) return '未自评'
-  //客观题已作答但题目未配置答案 → 待定（不判对错，可到题库编辑补答案）
-  if (q.correct === null && q.selectedKeys?.length && q.questionType !== 'SUBJECTIVE') return '未判'
-  return '未答'
-}
-
-const formatKeys = (keys) => (keys.length ? keys.join('、') : '—')
-
+/* 逐题对错标签与得分口径都在 SessionReview 里（与练习历史共用一份），这里只留计时文案 */
 function formatDuration(seconds) {
   if (seconds == null) return '—'
   const s = Math.max(0, seconds)
@@ -1842,78 +1621,8 @@ loadAll()
 }
 
 /* ============ 成绩报告 ============ */
-/* 待自评主观题 */
-.pending-banner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 11px 14px;
-  border-radius: 10px;
-  background: var(--warning-soft);
-  border: 1px solid var(--warning);
-  color: var(--warning);
-  font-size: 13px;
-  margin-bottom: 14px;
-}
-.pending-banner b {
-  font-weight: 600;
-}
-.pending-grade {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-bottom: 20px;
-}
-.pending-item {
-  padding: 14px 16px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-strong);
-  border-radius: 12px;
-}
-.pending-q {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-.pending-content {
-  font-size: 14px;
-  line-height: 1.7;
-  color: var(--text-primary);
-  white-space: pre-wrap;
-  word-break: break-word;
-  margin-bottom: 10px;
-}
-.pending-content :deep(.rich-img),
-.pending-answer :deep(.rich-img) {
-  max-width: 100%;
-  height: auto;
-  border-radius: 8px;
-  margin: 6px 0;
-  display: block;
-}
-.pending-row {
-  display: flex;
-  gap: 8px;
-  font-size: 13px;
-  margin-bottom: 6px;
-  align-items: baseline;
-}
-.pending-answer {
-  flex: 1;
-  min-width: 0;
-  color: var(--text-primary);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.pending-btns {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 10px;
-  flex-wrap: wrap;
-}
-
+/* 逐题部分（题干/选项/答案/解析/讲解/笔记）全部由 SessionReview 渲染，样式在组件内；
+   这里只保留成绩抬头与本场复盘卡（交卷当屏独有的两块）。 */
 .report-header {
   display: flex;
   align-items: center;
@@ -1957,32 +1666,6 @@ loadAll()
   width: 100%;
   margin: 0 auto;
 }
-.report-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  padding: 18px 22px;
-  margin-bottom: 20px;
-}
-.report-stats {
-  display: flex;
-  gap: 48px;
-  flex-wrap: wrap;
-}
-.stat {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.stat-num {
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--accent-text);
-}
-.stat-label {
-  font-size: 12px;
-  color: var(--text-muted);
-}
 .report-questions {
   display: flex;
   flex-direction: column;
@@ -1992,48 +1675,61 @@ loadAll()
   font-size: 16px;
   margin-bottom: 10px;
 }
-.report-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
+/* 本场复盘诊断卡：公式统计 + 按需生成的 AI 讲解（逐题部分在 SessionReview 里） */
+.diag-card {
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-card);
+  padding: 14px 16px;
+  margin-bottom: 18px;
 }
-.report-badge {
-  flex-shrink: 0;
+.diag-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.diag-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent-text);
+}
+.diag-stat {
   font-size: 12px;
-  padding: 2px 9px;
-  border-radius: 999px;
-  font-weight: 500;
 }
-.badge-ok {
-  background: var(--success-soft);
-  color: var(--success);
-  border: 1px solid var(--success);
+.diag-nodes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 12.5px;
 }
-.badge-no {
-  background: var(--danger-soft);
-  color: var(--danger);
-  border: 1px solid var(--danger);
-}
-.badge-skip {
-  background: var(--bg-elev);
-  color: var(--text-muted);
+.diag-node {
   border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 10px;
+  background: var(--bg-elev);
+  color: var(--text-secondary);
 }
-.report-content {
-  flex: 1;
-  min-width: 0;
+.diag-text {
+  margin-top: 10px;
   font-size: 13px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.85;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
-.report-meta {
-  flex-shrink: 0;
-  font-size: 12px;
+.diag-tip {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+}
+.diag-err {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  color: var(--danger);
 }
 
 /* ============ 其他 ============ */

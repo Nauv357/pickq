@@ -20,6 +20,15 @@
           <span>{{ t('nav.banks') }}</span>
         </RouterLink>
         <RouterLink
+          to="/notes"
+          class="nav-item"
+          :class="{ active: route.name === 'notes' }"
+          :title="sidebarCollapsed ? t('nav.notes') : undefined"
+        >
+          <TikuIcon name="edit" :size="16" />
+          <span>{{ t('nav.notes') }}</span>
+        </RouterLink>
+        <RouterLink
           to="/stats"
           class="nav-item"
           :class="{ active: route.name === 'stats' }"
@@ -149,7 +158,7 @@ const { t } = useI18n({
     'zh-CN': {
       brandSub: '自建题库',
       viewAiTip: '点击查看 AI 导入任务', aiWorkingN: 'AI 整理中（{n}）', recentAi: '最近 AI 导入', viewAllAi: '查看全部 AI 任务', allTasks: '全部任务', backToTask: '回到任务', aiPending: 'AI 导入待确认', aiFailed: 'AI 导入失败', aiWorking: 'AI 整理中', deleteTask: '删除任务', qUnit: '题', aiWorkingView: 'AI 整理中，点击查看',
-      nav: { banks: '题库', stats: '统计', discover: '发现题库', myWorks: '我的作品', settings: '设置', aiJobs: 'AI 任务' },
+      nav: { banks: '题库', notes: '笔记', stats: '统计', discover: '发现题库', myWorks: '我的作品', settings: '设置', aiJobs: 'AI 任务' },
       offlineNote: '离线优先 · 数据在本机',
       theme: { label: '主题', light: '白天', dark: '黑夜' },
       themeToggleTitle: '点击切换主题(当前: {v})',
@@ -163,7 +172,7 @@ const { t } = useI18n({
     'en-US': {
       brandSub: 'Your Question Banks',
       viewAiTip: 'View AI import tasks', aiWorkingN: 'AI working ({n})', recentAi: 'Recent AI imports', viewAllAi: 'View all AI tasks', allTasks: 'All tasks', backToTask: 'Back to task', aiPending: 'AI import pending', aiFailed: 'AI import failed', aiWorking: 'AI working', deleteTask: 'Delete task', qUnit: 'q', aiWorkingView: 'AI working — click to view',
-      nav: { banks: 'Banks', stats: 'Stats', discover: 'Discover', myWorks: 'My works', settings: 'Settings', aiJobs: 'AI Jobs' },
+      nav: { banks: 'Banks', notes: 'Notes', stats: 'Stats', discover: 'Discover', myWorks: 'My works', settings: 'Settings', aiJobs: 'AI Jobs' },
       offlineNote: 'Offline-first · data stays on this device',
       theme: { label: 'Theme', light: 'Light', dark: 'Dark' },
       themeToggleTitle: 'Toggle theme (current: {v})',
@@ -199,10 +208,10 @@ const NARROW_BREAKPOINT = 1100
 watch(
   () => route.path,
   (path) => {
-    // 题库的子页面统一折叠侧栏（题库详情 / 做题 / 练习历史 / 我的笔记）——
+    // 题库的子页面统一折叠侧栏（题库详情 / 做题 / 练习历史）——
     // 这些都是"信息密集、要横向空间"的页面；打印页是独立布局（不在本壳内）。
-    // 2026-09-16 审计发现原先漏了 /banks/:id/notes，于是同是题库子页，笔记页却留着宽侧栏。
-    routeCollapses.value = /^\/banks\/\d+(\/(practice|sessions|notes))?$/.test(path)
+    // 笔记页 2026-09-16 起是顶层页（/notes，可用 ?bankId= 只看某个题库），按普通页面处理。
+    routeCollapses.value = /^\/banks\/\d+(\/(practice|sessions))?$/.test(path)
     sidebarCollapsed.value = routeCollapses.value || isNarrowViewport()
   },
   { immediate: true }

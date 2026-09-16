@@ -7,7 +7,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.tiku.dto.*;
 import com.tiku.mapper.AiImportJobMapper;
 import com.tiku.mapper.MaterialMapper;
-import com.tiku.mapper.NoteMapper;
+import com.tiku.mapper.NoteLinkMapper;
 import com.tiku.mapper.PracticeSessionMapper;
 import com.tiku.mapper.PracticeSessionQuestionMapper;
 import com.tiku.mapper.QuestionBankMapper;
@@ -15,7 +15,7 @@ import com.tiku.mapper.QuestionMapper;
 import com.tiku.mapper.ReviewStateMapper;
 import com.tiku.mapper.StudyRecordMapper;
 import com.tiku.model.Material;
-import com.tiku.model.Note;
+import com.tiku.model.NoteLink;
 import com.tiku.model.PracticeSession;
 import com.tiku.model.Question;
 import com.tiku.model.QuestionBank;
@@ -44,7 +44,7 @@ public class QuestionBankService {
     private final PracticeSessionQuestionMapper sessionQuestionMapper;
     private final MaterialMapper materialMapper;
     private final AiImportJobMapper aiImportJobMapper;
-    private final NoteMapper noteMapper;
+    private final NoteLinkMapper noteLinkMapper;
 
     public QuestionBankService(QuestionBankMapper questionBankMapper,
                                QuestionMapper questionMapper,
@@ -54,7 +54,7 @@ public class QuestionBankService {
                                PracticeSessionQuestionMapper sessionQuestionMapper,
                                MaterialMapper materialMapper,
                                AiImportJobMapper aiImportJobMapper,
-                               NoteMapper noteMapper) {
+                               NoteLinkMapper noteLinkMapper) {
         this.questionBankMapper = questionBankMapper;
         this.questionMapper = questionMapper;
         this.studyRecordMapper = studyRecordMapper;
@@ -63,7 +63,7 @@ public class QuestionBankService {
         this.sessionQuestionMapper = sessionQuestionMapper;
         this.materialMapper = materialMapper;
         this.aiImportJobMapper = aiImportJobMapper;
-        this.noteMapper = noteMapper;
+        this.noteLinkMapper = noteLinkMapper;
     }
 
     public Long createQuestionBank(QuestionBankCreateRequest request) {
@@ -242,8 +242,14 @@ public class QuestionBankService {
         long affectedRecords = studyRecordMapper.delete(new LambdaQueryWrapper<StudyRecord>().eq(StudyRecord::getBankId, id));
         //共享材料随题库级联清理（物理删除）
         materialMapper.delete(new LambdaQueryWrapper<Material>().eq(Material::getBankId, id));
-        //笔记（我的想法）也属于这个题库：一起清掉，不留指向已删题库的孤儿行
-        noteMapper.delete(new LambdaQueryWrapper<Note>().eq(Note::getBankId, id));
+        //笔记：只删"关联"、不删笔记内容（笔记是我的东西，不该因为题库被删就消失；
+        //题目上的关联随题目删除一起清，这里的题关联用子查询一次清掉）
+        noteLinkMapper.delete(new LambdaQueryWrapper<NoteLink>()
+                .eq(NoteLink::getTargetType, NoteLink.TYPE_BANK)
+                .eq(NoteLink::getTargetId, id));
+        noteLinkMapper.delete(new LambdaQueryWrapper<NoteLink>()
+                .eq(NoteLink::getTargetType, NoteLink.TYPE_QUESTION)
+                .inSql(NoteLink::getTargetId, "SELECT id FROM question WHERE bank_id = " + id));
         long deletedQuestions = questionMapper.deletePhysicallyByBankId(id);
         //AI 导入任务的 bank_id 是软引用：解引用而不是删任务（历史记录仍要能查看）
         aiImportJobMapper.clearBankId(id);

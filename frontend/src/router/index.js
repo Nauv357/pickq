@@ -31,11 +31,17 @@ const routes = [
         meta: { title: '练习历史' }
       },
       {
-        // 我的笔记（做题时记的想法 + AI 讲解存进来的）：只存本机，不随题库导出
-        path: 'banks/:id/notes',
-        name: 'bank-notes',
+        // 我的笔记：一条笔记可以挂在多个题库/多道题上，也可以谁都不挂（未归类）
+        // 只存本机，不随题库导出
+        path: 'notes',
+        name: 'notes',
         component: () => import('../views/NotesView.vue'),
         meta: { title: '我的笔记' }
+      },
+      {
+        // 老地址（题库子页）→ 全局笔记页只看这个题库
+        path: 'banks/:id/notes',
+        redirect: (to) => ({ name: 'notes', query: { bankId: to.params.id } })
       },
       {
         path: 'ai-import/jobs',

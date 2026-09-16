@@ -48,6 +48,7 @@
 | `V19__learning_path_plan.sql` | 建 `daily_task`（每日任务，已从界面下线）；`practice_session` 加 `scope_node` | `daily_task`、`practice_session` |
 | `V20__learning_path_mastery_loop.sql` | 建 `card`（闪卡，已从界面下线）、`question_difficulty`（85% 规则用） | `card`、`question_difficulty` |
 | `V21__note.sql` | 建 `note`（我的笔记；只存本机，不进内容包） | `note` |
+| `V22__note_links.sql` | 建 `note_link`（笔记 ↔ 题库/题目 多对多），把旧 `note.bank_id`/`question_id` 平移成关联后删列 | `note`、`note_link` |
 
 > `V15` 的动机：发布侧按契约允许 `description` 2000 / `packageKey` 100 / `version` 40 / `questionKey` 100，
 > 而本地列原本只有 500 / 64 / 20 / 64 —— 会出现「合法内容包能发布成功、下载后导入本地却因列超长落库失败」。
@@ -242,25 +243,42 @@
 
 索引：`KEY idx_export_records_created (created_at)`、`KEY idx_export_records_bank (bank_id, published)`。
 
-### 1.2.10 `note` — 我的笔记（只存本机，不进内容包）
+### 1.2.10 `note` + `note_link` — 我的笔记（只存本机，不进内容包）
 
-来源：`V21__note.sql`；实体 `model/Note.java`；服务 `NoteService` / `NoteController`；
-界面 `NotesView.vue`（题库内列表）+ `QuestionNotes.vue`（每题就地记）。
+来源：`V21__note.sql`（建 `note`）+ `V22__note_links.sql`（建 `note_link`、平移旧 `bank_id`/`question_id` 后删列）；
+实体 `model/Note.java` + `model/NoteLink.java`；服务 `NoteService` / `NoteController`；
+界面 `NotesView.vue`（顶层「笔记」页）+ `QuestionNotes.vue`（每题就地记）。
 
 **与 `question.analysis` 的边界**：`analysis` 属于题库（随 `.zip`/`.tiku` 导出、可发布到广场），
 `note` 属于用户（**不导出、不发布**；备份恢复按整个数据目录走，所以备份里会有）。
 
+**笔记不隶属于任何题库/题目**（2026-09-16 改）：`note` 只存内容，挂在哪里由 `note_link` 表达——
+一条笔记可以同时挂多个题库、多道题，也可以一条都不挂（未归类）。题库/题目被删时**只删关联行、保留笔记内容**。
+
+`note`：
+
 | 字段 | 类型 | 约束 | 含义 | 关联/来源 |
 | --- | --- | --- | --- | --- |
 | `id` | BIGINT | PK，AUTO_INCREMENT | 笔记主键 | — |
-| `bank_id` | BIGINT | NOT NULL（**不建外键**） | 所属题库 | 题库删除时 `QuestionBankService.deleteQuestionBank` 级联清理 |
-| `question_id` | BIGINT | 可空 | 关联题目；**空 = 题库级随手记** | 题删时 `QuestionService.deleteQuestion` 级联清理 |
 | `content` | TEXT | NOT NULL | 正文（纯文本，上限 2000 字，超长截断） | `NoteService.normalize` |
 | `source` | VARCHAR(16) | NOT NULL DEFAULT `user` | `user` 自己写的 / `ai` 从讲解一键存进来的 | `Note.SOURCE_USER/SOURCE_AI` |
 | `created_at` | TIMESTAMP | NOT NULL，DEFAULT `CURRENT_TIMESTAMP` | 创建时间 | — |
 | `updated_at` | TIMESTAMP | NOT NULL，DEFAULT `CURRENT_TIMESTAMP` | 更新时间（应用层写入，不依赖 `ON UPDATE`） | 列表按它倒序 |
 
-索引：`KEY idx_note_bank_time (bank_id, updated_at)`、`KEY idx_note_question (question_id)`。
+`note_link`：
+
+| 字段 | 类型 | 约束 | 含义 | 关联/来源 |
+| --- | --- | --- | --- | --- |
+| `note_id` | BIGINT | 复合 PK 之一 | 笔记 | 删笔记时 `NoteService.delete` 一并删关联 |
+| `target_type` | VARCHAR(16) | 复合 PK 之一 | `bank` 题库 / `question` 题目 | `NoteLink.TYPE_*` |
+| `target_id` | BIGINT | 复合 PK 之一 | 题库 id 或题目 id（无外键） | 题库/题目删除时只删关联行 |
+| `created_at` | TIMESTAMP | NOT NULL，DEFAULT `CURRENT_TIMESTAMP` | 关联时间 | — |
+
+索引：`KEY idx_note_link_target (target_type, target_id)`。
+复合主键 `(note_id, target_type, target_id)` 让"重复挂同一处"天然幂等。
+
+**"这个题库的笔记"口径**（`NoteService.bankNoteIdsSql`，列表与计数同一处实现）：
+挂在库上的 **或** 挂在这个库某道题上的。
 
 ## 1.3 表之间的关系与关系示意
 
@@ -279,6 +297,7 @@
 | `practice_session` → `practice_session_question` | 1—n | `session_id` | 删库：先 `deleteByBankId` 再删会话 |
 | `question` → `practice_session_question` | 1—n | `question_id` | 同上 |
 | `practice_session` → `study_record` | 1—n | `study_record.session_id`（可空） | 交卷统一判分时由 `session_id` 关联聚合成绩 |
+| `note` ↔ `note_link` | 1—n | `note_link.note_id`（无外键） | 删笔记：一并删关联；**笔记不随题库/题目删除**（题库/题目被删只删 `note_link` 行 → 笔记变成"未归类"） |
 
 ```
                        ┌────────────────────────┐

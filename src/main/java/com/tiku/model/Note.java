@@ -15,7 +15,9 @@ import java.time.LocalDateTime;
  * 与"解析"的边界：解析写进 `question.analysis`，**会随题库文件导出、会给别人看**；
  * 笔记只存本机、不进内容包，是"我自己的记忆钩子与体会"（AI 讲解也能一键存进来）。
  *
- * `question_id` 可空：既能挂在某道题上，也能只挂在题库上（没有具体题时的随手记）。
+ * **笔记不隶属于任何题库或题目**：它只是一段内容 + 写作时间；关联到哪里由
+ * {@link NoteLink} 决定（0..N 个题库、0..N 道题，可以一个都不挂）。
+ * 题库/题目被删只会删掉关联，笔记本身留着（列表里显示为"未归类"）。
  */
 @Data
 @NoArgsConstructor
@@ -24,13 +26,6 @@ public class Note {
 
     @TableId(type = IdType.AUTO)
     private Long id;
-
-    @TableField("bank_id")
-    private Long bankId;
-
-    /** 关联题目（可空 = 题库级随手记） */
-    @TableField("question_id")
-    private Long questionId;
 
     private String content;
 

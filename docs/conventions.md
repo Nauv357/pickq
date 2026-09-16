@@ -42,6 +42,11 @@
 `TutorService.isWrongAttempt`、`TutorService.buildQuestionContext` 里各自的 `correct` 判断、
 `AdaptiveService.abilityOnQuestionNodes` 里只看 `correct` 列的统计。
 
+**同一条规矩也管界面**：同一份数据在两个入口渲染，必须**抽成同一个组件**，不许各写一套。
+2026-09-16 的实例：练习成绩页与「练习历史」的逐题回顾原是两套实现，于是"刚做完能看到的题干，
+历史里看不到"（`SessionReview.vue`，两处都用 `GET /sessions/{id}`）；
+"这个题库的笔记"口径也同理，列表与计数共用 `NoteService.bankNoteIdsSql`。
+
 ### 1.1 所有接口返回统一包装 `ApiResponse`
 
 **规则**：controller 的返回值一律是 `ApiResponse<T>`，成功用 `ApiResponse.success(data)`，
